@@ -326,7 +326,7 @@ char** str_split(const Str* str, const char* delimiter, size_t* num_substrings) 
   size_t delimiter_len = strlen(delimiter);
 
   // Create an initial capacity for substrings
-  int capacity      = 10;
+  size_t capacity   = 10;
   char** substrings = (char**)malloc(capacity * sizeof(char*));
 
   const char* start = data;
@@ -378,7 +378,7 @@ char** str_split_max(const Str* str, const char* delimiter, size_t* num_substrin
   size_t delimiter_len = strlen(delimiter);
 
   // Create an initial capacity for substrings
-  int capacity      = 10;
+  size_t capacity   = 10;
   char** substrings = (char**)malloc(capacity * sizeof(char*));
 
   const char* start = data;
@@ -610,7 +610,7 @@ bool str_join(const char** substrings, int count, char delimiter, char* buffer, 
 
   // Check if the joined string fits within the buffer
   if (joined_length >= bufsize) {
-    printf("buffer size(%ld) is too small\n", bufsize);
+    printf("buffer size(%zu) is too small\n", bufsize);
     return false;
   }
 
@@ -638,7 +638,7 @@ bool str_substring(const Str* s, size_t start, size_t end, char* substring, size
   // Check buffer is big enough
   size_t len = end - start;
   if (len >= bufsize) {
-    printf("buffer size(%ld) is too small. Truncating substring\n", bufsize);
+    printf("buffer size(%zu) is too small. Truncating substring\n", bufsize);
     // Adjust length to fit within buffer size
     len = bufsize - 1;
     memcpy(substring, s->data + start, len);
@@ -659,7 +659,7 @@ void str_reverse(Str* s) {
   char* data    = s->data;
   size_t length = s->length;
 
-  for (int i = 0; i < length / 2; i++) {
+  for (size_t i = 0; i < length / 2; i++) {
     char temp            = data[i];
     data[i]              = data[length - i - 1];
     data[length - i - 1] = temp;

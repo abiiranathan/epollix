@@ -1,15 +1,8 @@
-CFLAGS=-Wall -Werror -pedantic -O3 -Wno-unused-function
+CC=gcc
+CFLAGS=-Wall -Werror -Wextra -pedantic -O3 -Wno-unused-function
+LDFLAGS=-lcurl -lmagic
+SRC=http/*.c http/method.h str.c epoll.c tpool/threadpool.c
+TARGET=server
 
-all: select epoll
-
-select:
-	$(CC) $(CFLAGS) main.c -O3 server.c str.c threadpool.c -o select-server -lpthread
-
-epoll:
-	$(CC) $(CFLAGS) epoll.c -ggdb -o epoll-server
-
-test:
-	$(CC) $(CFLAGS) str.c str_test.c && ./a.out && rm -f ./a.out
-
-clean:
-	rm -f select-server epoll-server a.out
+server: $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
