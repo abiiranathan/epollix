@@ -137,8 +137,6 @@ Route* matchBestRoute(HttpMethod method, const char* path) {
       return NULL;
     }
   }
-
-  printf("Best match: %s\n", bestMatch->pattern);
   return bestMatch;
 }
 
@@ -319,7 +317,7 @@ static void staticFileHandler(Context* ctx) {
       }
     }
 
-    printf("[STATIC]: sending file %s\n", decodedPath);
+    // printf("[STATIC]: sending file %s\n", decodedPath);
     send_file(ctx, decodedPath);
     return;
   }
