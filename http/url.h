@@ -5,19 +5,26 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+// Represent a URL object.
 typedef struct URL {
-  char* scheme;
-  char* host;
-  char* path;
-  char* query;
-  char* fragment;
-  char* port;
+  const char* original_url;  // Original URL from client.
+  char* scheme;              // Protocol
+  char* host;                // Host
+  char* path;                // PathName for url.
+  char* query;               // Query string if present or NULL.
+  char* fragment;            // Fragment is not forwarded by http clients and browsers.
+  char* port;                // port.
 } URL;
 
-// Parse a url using libcurl.
-bool url_parse(const char* url, URL* parsedUrl);
+// Parse a url into it's components.
+// uses libcurl's curl_url_set API. The URL * and its components are allocated
+// on the heap. call url_free to free this memory.
+URL* url_parse(const char* url);
 
-// Free pointers to URL parts.
+// Free URL* and it's components.
 void url_free(URL* url);
+
+// Return allocated string representation for URL.
+char* url_tostring(const URL* url);
 
 #endif /* URL_H */

@@ -1,6 +1,7 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -11,8 +12,16 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "context.h"
-#include "router.h"
+#include "http.h"
+#include "threadpool.h"
+
+#ifndef MAX_EVENTS
+#define MAX_EVENTS 100
+#endif
+
+#ifndef POOL_SIZE
+#define POOL_SIZE 5
+#endif
 
 typedef struct TCPServer {
   int server_fd;

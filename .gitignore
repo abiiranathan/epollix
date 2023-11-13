@@ -6,7 +6,7 @@
 *.ko
 *.obj
 *.elf
-
+obj
 # Linker output
 *.ilk
 *.map
@@ -58,3 +58,4 @@ a.out
 build
 epoll-server
 select-server
+map_test

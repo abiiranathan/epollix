@@ -1,8 +1,4 @@
 #include "server.h"
-#include "../tpool/threadpool.h"
-
-#define MAX_EVENTS 100
-#define POOL_SIZE  5
 
 volatile sig_atomic_t should_exit = 0;
 
@@ -15,6 +11,7 @@ typedef struct RWTask {
 static void handle_sigint(int signal) {
   if (signal == SIGINT || signal == SIGKILL) {
     should_exit = 1;
+    printf("Detected %s (%d). Shutting down!\n", strsignal(signal), signal);
   }
 }
 
@@ -24,6 +21,10 @@ static void install_sigint_handler() {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;
   sigaction(SIGINT, &sa, NULL);
+
+  // Ignore SIGPIPE
+  // Otherwise it will crash the program.
+  signal(SIGPIPE, SIG_IGN);
 }
 
 TCPServer* new_tcpserver(int port) {
@@ -73,7 +74,6 @@ int set_nonblocking(int sockfd) {
     perror("fcntl");
     exit(EXIT_FAILURE);
   }
-
   return 0;
 }
 
@@ -211,7 +211,7 @@ void handleReadAndWrite(void* args) {
 
   Context context = {.request = request, .response = response};
 
-  Route* matching_route = serve_mux(request->method, request->url.path);
+  Route* matching_route = serve_mux(request->method, request->url->path);
   if (!matching_route) {
     status = StatusNotFound;
     strncpy(error, "Page Not Found", sizeof(error));
@@ -219,61 +219,76 @@ void handleReadAndWrite(void* args) {
   }
 
   // Call the matching handler
+  context.route = matching_route;
   matching_route->handler(&context);
-  printf("%s - %s\n", method_tostring(request->method), request->url.path);
 
 request_cleanup:
+  // Log request path
+  printf("%s - %s\n", method_tostring(request->method), request->url->original_url);
+
+  // Free thread args
   free(args);
 
+  // Free request data if any.
   if (requestData) {
     free(requestData);
   }
 
   request_destroy(request);
   response_destroy(response);
-  if (status > StatusOK) {
+
+  // If request failed, send an error.
+  // Assume 100 - 308 are good requests.
+  if (status > StatusPermanentRedirect) {
     send_error(client_fd, status, error);
-    printf("[ERR]: %s\n", error);
   }
 
+  // Close client connection and remove from monitored fds.
+  // TODO: Implement Keep-Alive
   close_client(client_fd, epoll_fd);
 }
 
+// Initialize a thread pool.
 void listen_and_serve(TCPServer* server, ServeMux mux) {
-  // Initialize a thread pool
-  ThreadPool* pool = threadpool_create(POOL_SIZE);
-  if (!pool) {
-    fprintf(stderr, "Unable to allocate memory for a threadpool\n");
-    exit(EXIT_FAILURE);
-  }
+  curl_global_init(CURL_GLOBAL_DEFAULT);
 
-
+  int exitCode = EXIT_SUCCESS;
   install_sigint_handler();
+
   int server_fd = server->server_fd;
   set_nonblocking(server_fd);
 
+  ThreadPool* pool = threadpool_create(POOL_SIZE);
+  if (!pool) {
+    fprintf(stderr, "Unable to allocate memory for a threadpool\n");
+    exitCode = EXIT_FAILURE;
+    goto cleanup;
+  }
+
   if (listen(server_fd, SOMAXCONN) == -1) {
     perror("listen");
-    exit(EXIT_FAILURE);
+    exitCode = EXIT_FAILURE;
+    goto cleanup;
   }
 
   int epoll_fd = epoll_create1(0);
   if (epoll_fd == -1) {
     perror("epoll_create1");
-    exit(EXIT_FAILURE);
+    exitCode = EXIT_FAILURE;
+    goto cleanup;
   }
 
   server->epoll_fd = epoll_fd;
   struct epoll_event event, events[MAX_EVENTS];
   epoll_ctl_add(epoll_fd, server_fd, &event, EPOLLIN);
-
   printf("Server listening on port %d\n", server->port);
 
   while (!should_exit) {
     int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
     if (nfds == -1) {
       perror("epoll_wait");
-      exit(EXIT_FAILURE);
+      exitCode = EXIT_FAILURE;
+      goto cleanup;
     }
 
     for (int i = 0; i < nfds; i++) {
@@ -299,8 +314,17 @@ void listen_and_serve(TCPServer* server, ServeMux mux) {
     }
   }
 
-  threadpool_wait(pool);
-  threadpool_destroy(pool);
+cleanup:
+  curl_global_cleanup();
+
+  if (pool) {
+    threadpool_wait(pool);
+    threadpool_destroy(pool);
+  }
+
   shutdown(server_fd, SHUT_RDWR);
   close(server_fd);
+  router_cleanup();
+  free(server);
+  exit(exitCode);
 }

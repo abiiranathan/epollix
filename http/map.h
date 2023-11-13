@@ -1,57 +1,101 @@
-#ifndef __MAP_H__
-#define __MAP_H__
+#ifndef MAP_H
+#define MAP_H
 
-#include <stddef.h>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-// Allow user to customize initial map size and load factor threshold
-#ifndef INITIAL_MAP_SIZE
-#define INITIAL_MAP_SIZE 16
-#endif
+// Hash function (djb2)
+// See. https://theartincode.stanis.me/008-djb2/
+__attribute__((always_inline)) inline unsigned long djb2_hash(const char* str) {
+  unsigned long hash = 5381;
+  int c;
+  while ((c = *str++)) {
+    hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+  }
+  return hash;
+}
 
-#ifndef LOAD_FACTOR_THRESHOLD
-#define LOAD_FACTOR_THRESHOLD 0.75
-#endif
+// Define a macro for creating a hashmap with a specific key and value type
+#define DECLARE_HASHMAP(key_type, value_type)                                                      \
+  typedef struct {                                                                                 \
+    key_type key;                                                                                  \
+    value_type value;                                                                              \
+  } KeyValuePair_##key_type##_##value_type;                                                        \
+                                                                                                   \
+  typedef struct {                                                                                 \
+    size_t capacity;                                                                               \
+    size_t size;                                                                                   \
+    KeyValuePair_##key_type##_##value_type* data;                                                  \
+  } HashMap_##key_type##_##value_type;                                                             \
+                                                                                                   \
+  HashMap_##key_type##_##value_type* create_##key_type##_##value_type##_map(size_t capacity) {     \
+    HashMap_##key_type##_##value_type* map = malloc(sizeof(HashMap_##key_type##_##value_type));    \
+    if (map) {                                                                                     \
+      map->capacity = capacity;                                                                    \
+      map->size     = 0;                                                                           \
+      map->data     = malloc(sizeof(KeyValuePair_##key_type##_##value_type) * capacity);           \
+      if (!map->data) {                                                                            \
+        free(map);                                                                                 \
+        return NULL;                                                                               \
+      }                                                                                            \
+    }                                                                                              \
+    return map;                                                                                    \
+  }                                                                                                \
+                                                                                                   \
+  void destroy_##key_type##_##value_type##_map(HashMap_##key_type##_##value_type* map) {           \
+    free(map->data);                                                                               \
+    free(map);                                                                                     \
+  }                                                                                                \
+                                                                                                   \
+  void insert_##key_type##_##value_type(HashMap_##key_type##_##value_type* map, key_type key,      \
+                                        value_type value) {                                        \
+    if (map->size < map->capacity) {                                                               \
+      KeyValuePair_##key_type##_##value_type* entry = &map->data[map->size++];                     \
+      entry->key                                    = key;                                         \
+      entry->value                                  = value;                                       \
+    }                                                                                              \
+  }                                                                                                \
+  value_type* get_##key_type##_##value_type(HashMap_##key_type##_##value_type* map,                \
+                                            key_type key) {                                        \
+    for (size_t i = 0; i < map->size; ++i) {                                                       \
+      if (map->data[i].key == key) {                                                               \
+        return &map->data[i].value;                                                                \
+      }                                                                                            \
+    }                                                                                              \
+    return NULL;                                                                                   \
+  }                                                                                                \
+  void delete_##key_type##_##value_type(HashMap_##key_type##_##value_type* map, key_type key) {    \
+    for (size_t i = 0; i < map->size; ++i) {                                                       \
+      if (map->data[i].key == key) {                                                               \
+        map->data[i] = map->data[map->size - 1];                                                   \
+        --map->size;                                                                               \
+        return;                                                                                    \
+      }                                                                                            \
+    }                                                                                              \
+  }                                                                                                \
+  void clear_##key_type##_##value_type##_map(HashMap_##key_type##_##value_type* map) {             \
+    map->size = 0;                                                                                 \
+  }                                                                                                \
+  key_type* keys_##key_type##_##value_type##_map(HashMap_##key_type##_##value_type* map) {         \
+    key_type* keys = malloc(sizeof(key_type) * map->size);                                         \
+    if (keys) {                                                                                    \
+      for (size_t i = 0; i < map->size; ++i) {                                                     \
+        keys[i] = map->data[i].key;                                                                \
+      }                                                                                            \
+    }                                                                                              \
+    return keys;                                                                                   \
+  }                                                                                                \
+  value_type* values_##key_type##_##value_type##_map(HashMap_##key_type##_##value_type* map) {     \
+    value_type* values = malloc(sizeof(value_type) * map->size);                                   \
+    if (values) {                                                                                  \
+      for (size_t i = 0; i < map->size; ++i) {                                                     \
+        values[i] = map->data[i].value;                                                            \
+      }                                                                                            \
+    }                                                                                              \
+    return values;                                                                                 \
+  }
 
-typedef struct {
-    void* key;
-    void* value;
-} entry;
 
-typedef struct {
-    entry* entries;
-    size_t size;
-    size_t capacity;
-    unsigned long (*hash)(void*);
-} map;
-
-// Function Declarations
-map* map_create();
-void map_destroy(map* m);
-void map_resize(map* m, size_t new_capacity);
-void map_set(map* m, void* key, void* value);
-void* map_get(map* m, void* key);
-void map_remove(map* m, void* key);
-void map_set_hash(map* m, unsigned long (*hash)(void*));
-char** map_keys(map* m);
-size_t map_length(map* m);
-size_t map_capacity(map* m);
-
-//  Created by Daniel J. Bernstein .
-// It generates hash values by multiplying the current hash by 33
-// and adding the next character in the key.
-// This process continues for each character in the key,
-// resulting in a final hash value
-unsigned long djb2_hash(void* key);
-
-typedef struct {
-    map* m;
-    size_t bucket;
-    size_t index;
-} map_iterator;
-
-map_iterator* map_iterator_create(map* m);
-void map_iterator_destroy(map_iterator* iter);
-int map_iterator_has_next(map_iterator* iter);
-entry map_iterator_next(map_iterator* iter);
-
-#endif /* __MAP_H__ */
+#endif /* MAP_H */

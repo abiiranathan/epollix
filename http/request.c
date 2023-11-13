@@ -2,7 +2,7 @@
 #include "method.h"
 
 #include <assert.h>
-#include "../str.h"
+#include "str.h"
 #include "url.h"
 
 
@@ -81,7 +81,6 @@ Request* request_parse_http(const char* req_data) {
   char path[256]      = {0};
 
   size_t header_end_idx = 0, content_length = 0, num_headers = 0;
-
   // Parse the request line
   if (sscanf(req_data, "%9s %255s", method_str, path) != 2) {
     fprintf(stderr, "error parsing request line\n");
@@ -106,6 +105,7 @@ Request* request_parse_http(const char* req_data) {
   request->header_length = num_headers;
   request->body          = NULL;
   request->body_length   = content_length;
+  request->url           = NULL;
 
   // Get the Host header and compose the full url
   char* host = headers_loopup(request->headers, num_headers, "Host");
@@ -117,13 +117,11 @@ Request* request_parse_http(const char* req_data) {
   char url_string[1024];
   snprintf(url_string, 1024, "%s://%s%s", SCHEME, host, path);
 
-  URL url;
-  if (!url_parse(url_string, &url)) {
+  request->url = url_parse(url_string);
+  if (!request->url) {
     fprintf(stderr, "Unable to parse request URL\n");
     return NULL;
   }
-
-  request->url = url;
 
   // Allocate the body of the request if any and possible.
   // POST, PUT, PATCH, DELETE
@@ -138,6 +136,7 @@ Request* request_parse_http(const char* req_data) {
     size_t body_offset = header_end_idx + 4;  // Skip DOBLE LF
     memcpy((char*)request->body, req_data + body_offset, content_length);
   }
+
   return request;
 }
 
@@ -145,12 +144,37 @@ void request_destroy(Request* request) {
   if (!request)
     return;
 
+  // Free request URL parts
+  url_free(request->url);
+
+  // free request body if any
   if (request->body) {
     free((void*)request->body);
     request->body = NULL;
   }
+
+  // free request
   free(request);
   request = NULL;
+}
+
+const char* find_req_header(Request* req, const char* name, int* index) {
+  if (index) {
+    *index = -1;
+  }
+
+  if (!req)
+    return NULL;
+
+  for (size_t i = 0; i < req->header_length; i++) {
+    if (strcasecmp(name, req->headers[i].name) == 0) {
+      if (index) {
+        *index = i;
+      }
+      return req->headers[i].value;
+    }
+  }
+  return NULL;
 }
 
 
@@ -168,21 +192,21 @@ int main(void) {
     "Content-Length: 25\r\n\r\n"      // Specify the content length
     "{\"data\": \"Hello, World!\"}";  // Request body
 
-  Request* req = request_parse_http(http_request, strlen(http_request));
+  Request* req = request_parse_http(http_request);
   assert(req != NULL);
   assert(req->method == M_POST);
-  assert_string_equal(req->url.path, "/submit-data");
+  assert_string_equal(req->url->path, "/submit-data");
   assert(req->header_length == 4);
 
   // Print the components
-  printf("Scheme: %s\n", req->url.scheme);
-  printf("Host: %s\n", req->url.host);
-  printf("Port: %s\n", req->url.port);
-  printf("Path: %s\n", req->url.path);
-  printf("Query: %s\n", req->url.query);
-  printf("Fragment: %s\n", req->url.fragment);
+  printf("Scheme: %s\n", req->url->scheme);
+  printf("Host: %s\n", req->url->host);
+  printf("Port: %s\n", req->url->port);
+  printf("Path: %s\n", req->url->path);
+  printf("Query: %s\n", req->url->query);
+  printf("Fragment: %s\n", req->url->fragment);
 
-  for (int i = 0; i < req->header_length; i++) {
+  for (size_t i = 0; i < req->header_length; i++) {
     char buf[1024];
     header_tostring(&req->headers[i], buf, 1024);
     printf("%s\n", buf);
@@ -193,17 +217,16 @@ int main(void) {
   request_destroy(req);
 
   const char* url = "http://www.example.com/path/to/page?query=123#section";
-  URL parsedUrl   = {0};
-  url_parse(url, &parsedUrl);
+  URL* parsedUrl  = url_parse(url);
 
   // Print the components
-  printf("Scheme: %s\n", parsedUrl.scheme);
-  printf("Host: %s\n", parsedUrl.host);
-  printf("Port: %s\n", parsedUrl.port);
-  printf("Path: %s\n", parsedUrl.path);
-  printf("Query: %s\n", parsedUrl.query);
-  printf("Fragment: %s\n", parsedUrl.fragment);
+  printf("Scheme: %s\n", parsedUrl->scheme);
+  printf("Host: %s\n", parsedUrl->host);
+  printf("Port: %s\n", parsedUrl->port);
+  printf("Path: %s\n", parsedUrl->path);
+  printf("Query: %s\n", parsedUrl->query);
+  printf("Fragment: %s\n", parsedUrl->fragment);
 
-  url_free(&parsedUrl);
+  url_free(parsedUrl);
 }
 #endif

@@ -10,7 +10,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "../str.h"
+#include "../http/str.h"
 
 typedef unsigned int uint;
 

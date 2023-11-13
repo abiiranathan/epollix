@@ -98,7 +98,6 @@ ThreadPool* threadpool_create(int num_threads) {
     pthread_create(&thread, NULL, worker_thread, (void*)pool);
     pthread_detach(thread);
   }
-
   return pool;
 }
 
@@ -123,7 +122,6 @@ void threadpool_destroy(ThreadPool* pool) {
   pthread_mutex_destroy(&pool->lock);
   pthread_cond_destroy(&pool->task_available);
   pthread_cond_destroy(&pool->all_tasks_completed);
-
   free(pool);
 }
 
@@ -156,9 +154,7 @@ int threadpool_add_task(ThreadPool* pool, void (*task)(void*), void* arg) {
 
   // Signal that a new task is available
   pthread_cond_signal(&pool->task_available);
-
   pthread_mutex_unlock(&pool->lock);
-
   return 0;
 }
 
