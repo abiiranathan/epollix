@@ -1,0 +1,9 @@
+CompileFlags:
+  Add: ["-xc", "-Wall", "-Werror", "-Wextra", "-std=c2x"]
+
+Index:
+  Background: Build
+  StandardLibrary: No
+
+Diagnostics:
+  Suppress: ["init_conversion_failed", "unused-includes"]

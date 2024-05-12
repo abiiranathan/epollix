@@ -1,6 +1,6 @@
 CC=gcc
-CFLAGS=-Wall -Werror -Wextra -pedantic -O3 -Wno-unused-function -DMAX_DIRNAME=255
-LDFLAGS=-lcurl -lmagic -lpcre2-8
+CFLAGS=-Wall -Werror -Wextra -pedantic -O3 -DMAX_DIRNAME=255
+LDFLAGS=-lcurl -lmagic -lpcre2-8 -lm
 SRC_DIR=http
 OBJ_DIR=obj
 SRCS=$(wildcard $(SRC_DIR)/*.c) main.c

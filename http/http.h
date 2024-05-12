@@ -1,8 +1,10 @@
 #ifndef HTTP_H
 #define HTTP_H
 
+#ifndef _LARGEFILE64_SOURCE
 #define _LARGEFILE64_SOURCE
 #define _FILE_OFFSET_BITS 64
+#endif
 
 #ifndef MAX_RESP_HEADERS
 #define MAX_RESP_HEADERS 10
@@ -21,20 +23,19 @@
 #endif
 
 #define PCRE2_CODE_UNIT_WIDTH 8
-
 #include <errno.h>
 #include <magic.h>
 #include <pcre2.h>
 #include <regex.h>
+#include <solidc/str.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include "headers.h"
 #include "method.h"
 #include "request.h"
-#include "str.h"
-#include "threadpool.h"
 
 // =================================
 // Http Routing
@@ -53,7 +54,8 @@ typedef struct Route {
   HttpMethod method;  // HTTP Method.
   char* pattern;      // Pattern as a string
 
-  // PCRE - compiled extended regex pattern See https://www.pcre.org/current/doc/html/
+  // PCRE - compiled extended regex pattern See
+  // https://www.pcre.org/current/doc/html/
   pcre2_code* compiledPattern;
   RouteHandler handler;       // Handler for the route
   RouteType type;             // Type of Route
@@ -87,7 +89,7 @@ void OPTIONS_ROUTE(const char* pattern, RouteHandler handler);
 void STATIC_DIR(const char* pattern, char* dirname);
 
 // Match the best regex pattern.
-Route* matchBestRoute(HttpMethod method, const char* path);
+Route* matchRoute(HttpMethod method, const char* path);
 
 // Called by server be4 shutdown to cleanup compiled
 // regex patterns.
@@ -107,77 +109,76 @@ typedef struct Response Response;
 
 // Define an enum for HTTP status codes
 typedef enum {
-  StatusContinue           = 100,
+  StatusContinue = 100,
   StatusSwitchingProtocols = 101,
-  StatusProcessing         = 102,
-  StatusEarlyHints         = 103,
+  StatusProcessing = 102,
+  StatusEarlyHints = 103,
 
-  StatusOK                   = 200,
-  StatusCreated              = 201,
-  StatusAccepted             = 202,
+  StatusOK = 200,
+  StatusCreated = 201,
+  StatusAccepted = 202,
   StatusNonAuthoritativeInfo = 203,
-  StatusNoContent            = 204,
-  StatusResetContent         = 205,
-  StatusPartialContent       = 206,
-  StatusMultiStatus          = 207,
-  StatusAlreadyReported      = 208,
-  StatusIMUsed               = 226,
+  StatusNoContent = 204,
+  StatusResetContent = 205,
+  StatusPartialContent = 206,
+  StatusMultiStatus = 207,
+  StatusAlreadyReported = 208,
+  StatusIMUsed = 226,
 
-  StatusMultipleChoices   = 300,
-  StatusMovedPermanently  = 301,
-  StatusFound             = 302,
-  StatusSeeOther          = 303,
-  StatusNotModified       = 304,
-  StatusUseProxy          = 305,
-  StatusUnused            = 306,
+  StatusMultipleChoices = 300,
+  StatusMovedPermanently = 301,
+  StatusFound = 302,
+  StatusSeeOther = 303,
+  StatusNotModified = 304,
+  StatusUseProxy = 305,
+  StatusUnused = 306,
   StatusTemporaryRedirect = 307,
   StatusPermanentRedirect = 308,
 
-  StatusBadRequest                   = 400,
-  StatusUnauthorized                 = 401,
-  StatusPaymentRequired              = 402,
-  StatusForbidden                    = 403,
-  StatusNotFound                     = 404,
-  StatusMethodNotAllowed             = 405,
-  StatusNotAcceptable                = 406,
-  StatusProxyAuthRequired            = 407,
-  StatusRequestTimeout               = 408,
-  StatusConflict                     = 409,
-  StatusGone                         = 410,
-  StatusLengthRequired               = 411,
-  StatusPreconditionFailed           = 412,
-  StatusRequestEntityTooLarge        = 413,
-  StatusRequestURITooLong            = 414,
-  StatusUnsupportedMediaType         = 415,
+  StatusBadRequest = 400,
+  StatusUnauthorized = 401,
+  StatusPaymentRequired = 402,
+  StatusForbidden = 403,
+  StatusNotFound = 404,
+  StatusMethodNotAllowed = 405,
+  StatusNotAcceptable = 406,
+  StatusProxyAuthRequired = 407,
+  StatusRequestTimeout = 408,
+  StatusConflict = 409,
+  StatusGone = 410,
+  StatusLengthRequired = 411,
+  StatusPreconditionFailed = 412,
+  StatusRequestEntityTooLarge = 413,
+  StatusRequestURITooLong = 414,
+  StatusUnsupportedMediaType = 415,
   StatusRequestedRangeNotSatisfiable = 416,
-  StatusExpectationFailed            = 417,
-  StatusTeapot                       = 418,
-  StatusMisdirectedRequest           = 421,
-  StatusUnprocessableEntity          = 422,
-  StatusLocked                       = 423,
-  StatusFailedDependency             = 424,
-  StatusTooEarly                     = 425,
-  StatusUpgradeRequired              = 426,
-  StatusPreconditionRequired         = 428,
-  StatusTooManyRequests              = 429,
-  StatusRequestHeaderFieldsTooLarge  = 431,
-  StatusUnavailableForLegalReasons   = 451,
+  StatusExpectationFailed = 417,
+  StatusTeapot = 418,
+  StatusMisdirectedRequest = 421,
+  StatusUnprocessableEntity = 422,
+  StatusLocked = 423,
+  StatusFailedDependency = 424,
+  StatusTooEarly = 425,
+  StatusUpgradeRequired = 426,
+  StatusPreconditionRequired = 428,
+  StatusTooManyRequests = 429,
+  StatusRequestHeaderFieldsTooLarge = 431,
+  StatusUnavailableForLegalReasons = 451,
 
-  StatusInternalServerError           = 500,
-  StatusNotImplemented                = 501,
-  StatusBadGateway                    = 502,
-  StatusServiceUnavailable            = 503,
-  StatusGatewayTimeout                = 504,
-  StatusHTTPVersionNotSupported       = 505,
-  StatusVariantAlsoNegotiates         = 506,
-  StatusInsufficientStorage           = 507,
-  StatusLoopDetected                  = 508,
-  StatusNotExtended                   = 510,
+  StatusInternalServerError = 500,
+  StatusNotImplemented = 501,
+  StatusBadGateway = 502,
+  StatusServiceUnavailable = 503,
+  StatusGatewayTimeout = 504,
+  StatusHTTPVersionNotSupported = 505,
+  StatusVariantAlsoNegotiates = 506,
+  StatusInsufficientStorage = 507,
+  StatusLoopDetected = 508,
+  StatusNotExtended = 510,
   StatusNetworkAuthenticationRequired = 511
 } HttpStatus;
 
-Response* alloc_response(int client_fd);
-void response_destroy(Response* res);
+Response* alloc_response(Arena* arena, int client_fd);
 
 // StatusText returns a text for the HTTP status code. It returns the empty
 // string if the code is unknown.

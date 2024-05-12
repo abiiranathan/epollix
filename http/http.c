@@ -1,4 +1,6 @@
 #include "http.h"
+#include <ctype.h>
+#include <solidc/os.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -10,13 +12,13 @@ static int numRoutes = 0;
 Route* registerRoute(HttpMethod method, const char* pattern, RouteHandler handler, RouteType type) {
   if (numRoutes == MAX_ROUTES) {
     fprintf(stderr, "Number of routes %d exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
-  Route* route   = &routeTable[numRoutes];
-  route->method  = method;
+  Route* route = &routeTable[numRoutes];
+  route->method = method;
   route->handler = handler;
-  route->type    = type;
+  route->type = type;
   memset(route->dirname, 0, sizeof(route->dirname));
 
   char anchoredPattern[MAX_PATTERN_LENGTH] = {0};
@@ -42,6 +44,14 @@ Route* registerRoute(HttpMethod method, const char* pattern, RouteHandler handle
   PCRE2_SIZE error_offset;
   route->compiledPattern = pcre2_compile((PCRE2_SPTR)route->pattern, PCRE2_ZERO_TERMINATED, 0,
                                          &error_code, &error_offset, NULL);
+
+  // Check for compilation errors
+  if (route->compiledPattern == NULL) {
+    PCRE2_UCHAR8 buffer[256];
+    pcre2_get_error_message(error_code, buffer, sizeof(buffer));
+    fprintf(stderr, "PCRE2 compilation failed at offset %d: %s\n", (int)error_offset, buffer);
+    exit(EXIT_FAILURE);
+  }
 
   numRoutes++;
   return route;
@@ -71,59 +81,37 @@ void DELETE_ROUTE(const char* pattern, RouteHandler handler) {
   registerRoute(M_DELETE, pattern, handler, NormalRoute);
 }
 
-Route* matchExactRoute(HttpMethod method, const char* path) {
-  for (int i = 0; i < numRoutes; i++) {
-    if (method == routeTable[i].method && strcmp(path, routeTable[i].pattern) == 0 &&
-        routeTable[i].type == NormalRoute) {
-      return &routeTable[i];
-    }
-
-    // Match static routes
-    if (strncmp(path, routeTable[i].pattern, strlen(routeTable[i].pattern)) == 0 &&
-        routeTable[i].type == StaticRoute) {
-      return &routeTable[i];
-    }
-  }
-  return NULL;
-}
-
-Route* matchBestRoute(HttpMethod method, const char* path) {
-  Route* bestMatch       = NULL;
+Route* matchRoute(HttpMethod method, const char* path) {
+  Route* bestMatch = NULL;
   size_t bestMatchLength = 0;
-  size_t subject_length  = strlen(path);
+  size_t subject_length = strlen(path);
 
   for (int i = 0; i < numRoutes; i++) {
     if (routeTable[i].type == NormalRoute) {
-
       // Use pre-compiled PCRE2 pattern
-      int rc;
-      pcre2_match_data* match_data = NULL;
-      if (routeTable[i].compiledPattern == NULL) {
-        fprintf(stderr, "Error: Compiled pattern is NULL for %s\n", routeTable[i].pattern);
-        continue;
-      }
-
+      pcre2_match_data* match_data = NULL;  // Match data
       match_data = pcre2_match_data_create_from_pattern(routeTable[i].compiledPattern, NULL);
       if (match_data == NULL) {
-        printf("Failed to create match data for pattern: %s\n", routeTable[i].pattern);
+        fprintf(stderr, "Failed to create match data for pattern: %s\n", routeTable[i].pattern);
         return NULL;
       }
 
+      int rc;  // Return code
       rc = pcre2_match(routeTable[i].compiledPattern, (PCRE2_SPTR)path, subject_length, 0, 0,
                        match_data, NULL);
 
+      // Check if the pattern matches the path and the method is correct
       if (rc >= 0 && routeTable[i].method == method) {
         size_t matchLength =
           pcre2_get_ovector_pointer(match_data)[1] - pcre2_get_ovector_pointer(match_data)[0];
 
         if (matchLength == subject_length) {  // Ensure the match covers the entire string
           if (matchLength > bestMatchLength) {
-            bestMatch       = &routeTable[i];
+            bestMatch = &routeTable[i];
             bestMatchLength = matchLength;
           }
         }
       }
-
       pcre2_match_data_free(match_data);
     } else if (routeTable[i].type == StaticRoute) {
       // Match static route
@@ -185,9 +173,9 @@ void urldecode(char* dst, size_t dst_size, const char* src) {
 // Function to encode a string for use in a URL
 char* url_encode(const char* str) {
   // Since each character can be encoded as "%XX" (3 characters),
-  // we multiply the length of the input string by 3 and add 1 for the null terminator.
+  // we multiply the length of the input string by 3 and add 1 for the null
+  // terminator.
   char* encoded_str = malloc((strlen(str) * 3) + 1);
-
   if (encoded_str == NULL) {
     perror("url_encode(): Memory allocation failed");
     return NULL;
@@ -225,40 +213,36 @@ char* url_encode(const char* str) {
   return encoded_str;
 }
 
-// Function to expand the tilde (~) character in a path to
-// the user's home directory
+// Function to expand the tilde (~) character in a path to the user's home directory
+// The function takes a path as input and returns a new path with the tilde character expanded
+// The char * returned by the function is a pointer to a static buffer, so it should be used
+// before calling the function again and should not be freed.
 char* expandVar(const char* path) {
-  const char *homeDir, *tildePosition;
-  char* expandedPath;
+  const char *homeDir = NULL, *tildePosition = NULL;
+  static char expandedPath[MAX_PATH_SIZE] = {0};
 
   if ((homeDir = getenv("HOME")) != NULL && ((tildePosition = strchr(path, '~')) != NULL)) {
     size_t expandedLength = strlen(homeDir) + strlen(tildePosition + 1);
-    if ((expandedPath = (char*)malloc(expandedLength + 1))) {
-      strcpy(expandedPath, homeDir);
-      strcat(expandedPath, tildePosition + 1);
-      return expandedPath;
-    } else {
-      perror("malloc");
-    };
+    if (expandedLength >= MAX_PATH_SIZE) {
+      fprintf(stderr, "Expanded path exceeds buffer size\n");
+      return NULL;
+    }
+
+    strcpy(expandedPath, homeDir);
+    strcat(expandedPath, tildePosition + 1);
+    expandedPath[expandedLength] = '\0';
+    return expandedPath;
+  } else if (tildePosition == NULL) {
+    strncpy(expandedPath, path, MAX_PATH_SIZE - 1);
+    expandedPath[MAX_PATH_SIZE - 1] = '\0';
+    return expandedPath;
   }
   return NULL;
 }
 
-static int is_directory(const char* path) {
-  struct stat path_stat;
-  stat(path, &path_stat);
-  return S_ISDIR(path_stat.st_mode);
-}
-
-static int is_file(const char* path) {
-  struct stat path_stat;
-  stat(path, &path_stat);
-  return S_ISREG(path_stat.st_mode);
-}
-
 // Define a handler function for serving static files
 static void staticFileHandler(Context* ctx) {
-  const char* dirname       = ctx->route->dirname;
+  const char* dirname = ctx->route->dirname;
   const char* requestedPath = ctx->request->url->path;
 
   // trim prefix(context.route.pattern) from requested path
@@ -266,17 +250,16 @@ static void staticFileHandler(Context* ctx) {
   // Trim the prefix from the requested path
   const char* trimmedPath = requestedPath + strlen(ctx->route->pattern);
 
-  // Build the full file path by concatenating the requested path with the directory path
+  // Build the full file path by concatenating the requested path with the
+  // directory path
   char fullFilePath[MAX_PATH_SIZE];
   snprintf(fullFilePath, MAX_PATH_SIZE, "%s%s", dirname, trimmedPath);
 
   char decodedPath[MAX_PATH_SIZE];
   urldecode(decodedPath, sizeof(decodedPath), fullFilePath);
 
-  printf("[STATIC]: %s\n", decodedPath);
-
   // If it's a directory, append /index.html to decoded path
-  if (is_directory(decodedPath)) {
+  if (is_dir(decodedPath)) {
     // temporary buffer to hold the concatenated path
     char tempPath[MAX_PATH_SIZE + 16];
 
@@ -354,14 +337,13 @@ void STATIC_DIR(const char* pattern, char* dir) {
   }
 
   Route* route = registerRoute(M_GET, pattern, staticFileHandler, StaticRoute);
-  route->type  = StaticRoute;
+  route->type = StaticRoute;
   strncpy(route->dirname, dirname, MAX_DIRNAME - 1);
   route->dirname[strlen(dirname)] = '\0';
   free(dirname);
 }
 
 // ======================== HTTP RESPONSE ================
-
 typedef struct Response {
   bool chunked;                      // Chunked transfer encoding
   bool stream_complete;              // Chunked transfer completed
@@ -381,32 +363,23 @@ typedef struct Response {
   int client_fd;
 } Response;
 
-Response* alloc_response(int client_fd) {
-  Response* res = malloc(sizeof(Response));
+Response* alloc_response(Arena* arena, int client_fd) {
+  Response* res = arena_alloc(arena, sizeof(Response));
   if (res) {
-    res->status          = 200;
-    res->body_sent       = false;
-    res->chunked         = false;
-    res->header_count    = 0;
+    res->status = 200;
+    res->body_sent = false;
+    res->chunked = false;
+    res->header_count = 0;
     res->stream_complete = false;
-    res->body_sent       = false;
-    res->data            = NULL;
-    res->content_length  = 0;
-    res->client_fd       = client_fd;
+    res->body_sent = false;
+    res->data = NULL;
+    res->content_length = 0;
+    res->client_fd = client_fd;
     set_header(res, "Content-Type", "text/plain");
   }
 
   // Set default headers
   return res;
-}
-
-void response_destroy(Response* res) {
-  if (res == NULL)
-    return;
-
-  res->data = NULL;
-  free(res);
-  res = NULL;
 }
 
 // StatusText returns a text for the HTTP status code. It returns the empty
@@ -549,19 +522,11 @@ void set_status(Response* res, int statusCode) {
 
 static void write_headers(Response* res) {
   // don't send headers more than once.
-  char status_line[128];    // HTTP/1.1 StatusCode StatusText \r\n
-  size_t response_len = 0;  // Keep track of size of headers.
-
-  // Calculate the total response length
-  for (int i = 0; i < res->header_count; i++) {
-    // 4 accounts for ": " and "\r\n"
-    response_len += strlen(res->headers[i].name) + strlen(res->headers[i].value) + 4;
-  }
-  response_len += 4;  // Account for an additional "\r\n" before the body
+  char status_line[128];  // HTTP/1.1 StatusCode StatusText \r\n
 
   // Allocate memory for header response and http status
   char headerResponse[MAX_RESP_HEADERS * sizeof(Header)] = {0};
-  headerResponse[0]                                      = '\0';
+  headerResponse[0] = '\0';
 
   // Set default status code
   if (res->status == 0) {
@@ -586,11 +551,8 @@ static void write_headers(Response* res) {
   // Send the response headers
   int bytes_sent = send(res->client_fd, headerResponse, strlen(headerResponse), 0);
   if (bytes_sent == -1) {
-    perror("send");
-    return;
+    perror("write_headers() failed");
   }
-
-  res->headers_sent = true;
 }
 
 // returns number of bytes sent.
@@ -615,10 +577,10 @@ static bool send_end_of_chunk(Response* res) {
 
   // Send end of chunk: Send the chunk's CRLF (carriage return and line feed)
   if (send(res->client_fd, "\r\n", 2, 0) == -1) {
-    perror("send");
-    fprintf(stderr, "error send end of chunk sentinel\n");
+    perror("error send end of chunk sentinel");
     return false;
   };
+
   res->stream_complete = true;
   return true;
 }
@@ -630,8 +592,7 @@ static bool send_end_of_request(Response* res) {
 
   // Signal the end of the response with a zero-size chunk
   if (send(res->client_fd, "0\r\n\r\n", 5, 0) == -1) {
-    perror("send");
-    fprintf(stderr, "error send end of end of the response sentinel\n");
+    perror("error send end of end of the response sentinel");
     return false;
   };
 
@@ -693,8 +654,8 @@ void set_header(Response* res, const char* name, const char* value) {
 int send_response(Context* ctx, void* data, ssize_t content_length) {
   Response* res = ctx->response;
 
-  res->data            = data;
-  res->content_length  = content_length;
+  res->data = data;
+  res->content_length = content_length;
   int total_bytes_sent = 0;
 
   char content_len_str[20];
@@ -708,12 +669,17 @@ int send_response(Context* ctx, void* data, ssize_t content_length) {
 
   total_bytes_sent = send(res->client_fd, res->data, res->content_length, 0);
   if (total_bytes_sent == -1) {
-    perror("send");
-    return -1;
+    if (errno == EPIPE) {
+      return total_bytes_sent;
+    }
+
+    perror("send_response failed");
+    return total_bytes_sent;
   }
 
   if (!send_end_of_request(res)) {
     perror("send_end_of_request failed\n");
+    return -1;
   }
   return total_bytes_sent;
 }
@@ -724,7 +690,6 @@ bool send_chunk(Response* res, void* data, ssize_t chunk_size) {
     return false;
   }
 
-  // send headers if not already sent
   write_headers(res);
 
   // send chunk size
@@ -771,17 +736,17 @@ int send_file(Context* ctx, const char* filename) {
 
   ssize_t start, end;
   const char* range_header = NULL;
-  bool valid_range         = false;
-  bool has_end_range       = false;
+  bool valid_range = false;
+  bool has_end_range = false;
 
   range_header = find_req_header(ctx->request, "Range", NULL);
   if (range_header) {
     if (strstr(range_header, "bytes=") != NULL) {
       if (sscanf(range_header, "bytes=%ld-%ld", &start, &end) == 2) {
-        valid_range   = true;
+        valid_range = true;
         has_end_range = true;
       } else if (sscanf(range_header, "bytes=%ld-", &start) == 1) {
-        valid_range   = true;
+        valid_range = true;
         has_end_range = false;
       };
     }
@@ -823,7 +788,7 @@ int send_file(Context* ctx, const char* filename) {
       }
     } else if (start < 0) {
       start = file_size + start;  // filesize - start(from end of file)
-      end   = start + range_chunk_size;
+      end = start + range_chunk_size;
       if (end >= file_size) {
         end = file_size - 1;  // End of range
       }
@@ -872,7 +837,8 @@ int send_file(Context* ctx, const char* filename) {
 
   // If it's a valid range request, adjust the buffer size
   if (valid_range) {
-    // Ensure the buffer size doesn't exceed the remaining bytes in the requested range
+    // Ensure the buffer size doesn't exceed the remaining bytes in the
+    // requested range
     off64_t remaining_bytes = (end - start + 1);
     buffer_size =
       remaining_bytes < (off64_t)sizeof(buffer) ? remaining_bytes : (off64_t)sizeof(buffer);
@@ -904,7 +870,8 @@ int send_file(Context* ctx, const char* filename) {
       }
     }
 
-    // If it's a range request, and we've sent the requested range, break out of the loop
+    // If it's a range request, and we've sent the requested range, break out of
+    // the loop
     if (valid_range && total_bytes_sent >= (end - start + 1)) {
       break;
     }

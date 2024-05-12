@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define HEADER_KEY_LENGTH   64
+#define HEADER_KEY_LENGTH 64
 #define HEADER_VALUE_LENGTH 256
 
 typedef struct Header {

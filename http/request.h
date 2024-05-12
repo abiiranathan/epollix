@@ -1,6 +1,7 @@
 #ifndef REQUEST_H
 #define REQUEST_H
 
+#include <solidc/arena.h>
 #include "headers.h"
 #include "method.h"
 #include "url.h"
@@ -25,7 +26,7 @@ typedef struct Request {
 // parse Request from the received data from the socket.
 // The http method, path, headers and request body will be populated.
 // Query strings are not yet implemented.
-Request* request_parse_http(const char* req_data);
+Request* request_parse_http(Arena* arena, const char* req_data);
 
 // Free memory used by the request, headers and body. Passing NULL does nothing.
 void request_destroy(Request* request);
