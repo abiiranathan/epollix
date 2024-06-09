@@ -1,11 +1,11 @@
 #define _XOPEN_SOURCE 700  // For sigaction
 #define TCP_ENABLE_KEEPALIVE 1
+#define RWTASK_POOL_SIZE 1024
 
 #include "server.h"
-#include <signal.h>
-#include <solidc/arena.h>
-#include <solidc/os.h>
 #include <netinet/tcp.h>
+#include <signal.h>
+#include <solidc/threadpool.h>
 
 volatile sig_atomic_t should_exit = 0;
 
@@ -14,6 +14,8 @@ typedef struct RWTask {
   int epoll_fd;
   ServeMux serve_mux;
 } RWTask;
+
+RWTask rwtasks[RWTASK_POOL_SIZE] = {0};
 
 static void handle_sigint(int signal) {
   if (signal == SIGINT || signal == SIGKILL) {
@@ -58,6 +60,7 @@ TCPServer* new_tcpserver(int port) {
     perror("setsockopt(): new_tcpserver failed");
     exit(EXIT_FAILURE);
   }
+
 
 // Enable TCP Keepalive
 #ifdef TCP_ENABLE_KEEPALIVE
@@ -130,65 +133,35 @@ void epoll_ctl_add(int epoll_fd, int sock_fd, struct epoll_event* event, uint32_
   }
 }
 
-static int accept_new_connection(int epoll_fd, int server_fd, struct sockaddr_in server_addr,
-                                 struct epoll_event* event) {
-
-  socklen_t client_len = sizeof(server_addr);
-  int client_fd = accept(server_fd, (struct sockaddr*)&server_addr, &client_len);
-
-  if (client_fd != -1) {
-    set_nonblocking(client_fd);
-    epoll_ctl_add(epoll_fd, client_fd, event, EPOLLIN | EPOLLET | EPOLLONESHOT);
-  }
-  return client_fd;
-}
-
-static int read_from_client(int client_fd, char** buffer, ssize_t* buffer_len) {
-  int total_bytes_read = 0;
-  int success = 1;
+cstr* read_from_client(Arena* arena, int client_fd) {
+  bool success = 1;
+  cstr* buffer = cstr_new(arena, 1024 * 1024);
+  assert(buffer);
 
   while (1) {
-    char inner_buf[BUFSIZ];
+    char inner_buf[1024];
     int bytes_read = read(client_fd, inner_buf, sizeof(inner_buf));
-
     if (bytes_read <= 0) {
-      if (bytes_read < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          // No more data to read for now, try again later
-          success = 1;
-        } else {
-          perror("read(): read_from_client failed");
-          success = 0;
-        }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // No more data to read for now, try again later
+        success = true;
+      } else {
+        success = false;
       }
       break;
     } else {
-      if (total_bytes_read + bytes_read <= *buffer_len) {
-        // Copy the received data to the output buffer.
-        memcpy(*buffer + total_bytes_read, inner_buf, bytes_read);
-        total_bytes_read += bytes_read;
-      } else {
-        // Reallocate the buffer if it's too small.
-        *buffer_len *= 2;
-        *buffer = (char*)realloc(*buffer, *buffer_len);
-        if (*buffer == NULL) {
-          perror("realloc(): read_from_client failed");
-          success = 0;
-          break;
-        }
-
-        // Copy the received data to the expanded buffer.
-        memcpy(*buffer + total_bytes_read, inner_buf, bytes_read);
-        total_bytes_read += bytes_read;
+      inner_buf[bytes_read] = '\0';
+      if (!cstr_append(arena, buffer, inner_buf)) {
+        success = 0;
+        break;
       }
     }
   }
 
-  if (total_bytes_read > 0) {
-    // Ensure that the received data is null-terminated.
-    (*buffer)[total_bytes_read] = '\0';
+  if (!success) {
+    return NULL;
   }
-  return success ? total_bytes_read : -1;
+  return buffer;
 }
 
 static void send_error(int client_fd, int status, const char* message) {
@@ -197,7 +170,9 @@ static void send_error(int client_fd, int status, const char* message) {
   snprintf(reply, sizeof(reply),
            "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n", status,
            StatusText(status), strlen(message), message);
-  send(client_fd, reply, sizeof(reply), 0);
+
+  //  Send without issues of SIGPIPE segfaults
+  send(client_fd, reply, sizeof(reply), MSG_NOSIGNAL);
 }
 
 // close client connection
@@ -207,81 +182,60 @@ void close_client(int client_fd, int epoll_fd) {
   close(client_fd);
 }
 
-void* handleReadAndWrite(void* args) {
+void handleReadAndWrite(void* args) {
   RWTask* task = (RWTask*)args;
   int client_fd = task->client_fd;
   int epoll_fd = task->epoll_fd;
   ServeMux serve_mux = task->serve_mux;
 
   int status = StatusOK;
-  char error[100] = {0};
-  Arena arena;
+  char error[1024] = {0};
 
-  arena_init(&arena, BUFSIZ * 10);
-
+  Arena* arena = NULL;
   Request* request = NULL;
   Response* response = NULL;
-  char* requestData = NULL;
 
-  // Allocate a buffer for the request data.
-  // Do not allocate this in Arena as it may be reallocated.
-  ssize_t buffer_len = BUFSIZ;
-  requestData = (char*)malloc(buffer_len);
-  if (!requestData) {
-    status = StatusInternalServerError;
-    strncpy(error, "handleReadAndWrite(): unable to allocated requestData", sizeof(error));
-    goto request_cleanup;
+  arena = arena_create(ARENA_DEFAULT_CHUNKSIZE, SYSTEM_MAX_ALIGNMENT);
+  assert(arena);
+
+  // Read the request data from the client
+  cstr* data = read_from_client(arena, client_fd);
+  if (!data) {
+    // client closed connection or error occurred
+    close(client_fd);
+    arena_destroy(arena);
+
+    // mark the task as unused
+    task->client_fd = -1;
+    return;
   }
 
-  int bytes_read = read_from_client(client_fd, &requestData, &buffer_len);
-  if (bytes_read <= 0) {
-    status = StatusInternalServerError;
-    strncpy(error, "handleReadAndWrite(): read_from_client returned negative bytes", sizeof(error));
-    goto request_cleanup;
-  }
+  request = request_parse_http(arena, data);
+  assert(request);
 
-  request = request_parse_http(&arena, requestData);
-  if (!request) {
-    status = StatusInternalServerError;
-    strncpy(error, "handleReadAndWrite(): request_parse_http failed", sizeof(error));
-    goto request_cleanup;
-  }
-
-  response = alloc_response(&arena, client_fd);
-  if (!response) {
-    status = StatusInternalServerError;
-    strncpy(error, "handleReadAndWrite(): alloc_response failed", sizeof(error));
-    goto request_cleanup;
-  }
+  response = alloc_response(arena, client_fd);
+  assert(response);
 
   Context context = {.request = request, .response = response};
 
+  // Find the matching route
   Route* matching_route = serve_mux(request->method, request->url->path);
   if (!matching_route) {
     status = StatusNotFound;
-    strncpy(error, "handleReadAndWrite(): Page Not Found", sizeof(error));
-    goto request_cleanup;
+    snprintf(error, sizeof(error), "404 Not Found: %s", request->url->path);
+    send_error(client_fd, status, error);
+    arena_destroy(arena);
+
+    // mark the task as unused
+    task->client_fd = -1;
+    return;
   }
 
   // Call the matching handler
   context.route = matching_route;
+
+  // printf("Request path: %s\n", request->url->path);
   matching_route->handler(&context);
-
-request_cleanup:
-  // Log request path
-  if (request != NULL && request->url != NULL)
-    printf("%s - %s\n", method_tostring(request->method), request->url->original_url);
-
-  // Free thread args
-  free(args);
-
-  // Free request data if any.
-  if (requestData != NULL) {
-    free(requestData);
-  }
-
-  if (request != NULL)
-    request_destroy(request);
 
   // If request failed, send an error.
   // Assume 100 - 308 are good requests.
@@ -293,20 +247,28 @@ request_cleanup:
   close_client(client_fd, epoll_fd);
 
   // Free memory used by the arena.
-  arena_destroy(&arena);
-  return NULL;
+  arena_destroy(arena);
+
+  // mark the task as unused
+  task->client_fd = -1;
 }
 
 // Initialize a thread pool.
 void listen_and_serve(TCPServer* server, ServeMux mux) {
+  // initialize curl
   curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  // initialize the tasks
+  for (int i = 0; i < RWTASK_POOL_SIZE; i++) {
+    rwtasks[i].client_fd = -1;  // Initialize as unused
+  }
 
   int exitCode = EXIT_SUCCESS;
   install_sigint_handler();
   set_nonblocking(server->server_fd);
 
   int server_fd = server->server_fd;
-  ThreadPool* pool = threadpool_create(POOL_SIZE);
+  ThreadPool pool = threadpool_create(8);
   if (!pool) {
     fprintf(stderr, "listen_and_serve(): Unable to allocate memory for a threadpool\n");
     exitCode = EXIT_FAILURE;
@@ -346,23 +308,43 @@ void listen_and_serve(TCPServer* server, ServeMux mux) {
 
     for (int i = 0; i < nfds; i++) {
       if (events[i].data.fd == server_fd) {
-        int client_fd = accept_new_connection(epoll_fd, server_fd, server->server_addr, &event);
-        if (client_fd == -1) {
+        socklen_t client_len = sizeof(server->server_addr);
+        int client_fd = accept(server_fd, (struct sockaddr*)&server->server_addr, &client_len);
+        if (client_fd != -1) {
+          set_nonblocking(client_fd);
+          epoll_ctl_add(epoll_fd, client_fd, &event, EPOLLIN | EPOLLET | EPOLLONESHOT);
+          printf("Accepted connection from %s\n", inet_ntoa(server->server_addr.sin_addr));
+
+          // Set the client socket to close after 60 seconds of inactivity.
+          struct timeval tv;
+          tv.tv_sec = 60;
+          tv.tv_usec = 0;
+          setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+        } else {
           perror("listen_and_serve(): accept");
-          break;
+          // If accept failed, continue to the next iteration.
+          continue;
         }
       } else {
-        int client_fd = events[i].data.fd;
-        RWTask* args = malloc(sizeof(RWTask));
-        if (!args) {
-          fprintf(stderr, "RWTask: malloc failed\n");
-          close_client(client_fd, epoll_fd);
-        } else {
-          args->client_fd = client_fd;
-          args->serve_mux = mux;
-          args->epoll_fd = epoll_fd;
-          threadpool_add_task(pool, handleReadAndWrite, args);
+        // Find an available task slot.
+        int task_index = -1;
+        for (int j = 0; j < RWTASK_POOL_SIZE; j++) {
+          if (rwtasks[j].client_fd == -1) {
+            task_index = j;
+            break;
+          }
         }
+
+        if (task_index == -1) {
+          fprintf(stderr, "No available task slots\n");
+          continue;
+        }
+
+        RWTask* task = &rwtasks[task_index];
+        task->client_fd = events[i].data.fd;
+        task->serve_mux = mux;
+        task->epoll_fd = epoll_fd;
+        threadpool_add_task(pool, handleReadAndWrite, task);
       }
     }
   }
@@ -377,7 +359,9 @@ cleanup:
 
   shutdown(server_fd, SHUT_RDWR);
   close(server_fd);
+
   router_cleanup();
+
   free(server);
   exit(exitCode);
 }

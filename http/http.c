@@ -1,6 +1,7 @@
 #include "http.h"
 #include <ctype.h>
-#include <solidc/os.h>
+#include <solidc/file.h>
+#include <solidc/filepath.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -171,13 +172,13 @@ void urldecode(char* dst, size_t dst_size, const char* src) {
 }
 
 // Function to encode a string for use in a URL
-char* url_encode(const char* str) {
+cstr* url_encode(Arena* arena, const cstr* str) {
   // Since each character can be encoded as "%XX" (3 characters),
   // we multiply the length of the input string by 3 and add 1 for the null
   // terminator.
-  char* encoded_str = malloc((strlen(str) * 3) + 1);
+  cstr* encoded_str = cstr_new(arena, str->length * 3 + 1);
   if (encoded_str == NULL) {
-    perror("url_encode(): Memory allocation failed");
+    perror("url_encode(): cstr_new(): memory allocation failed");
     return NULL;
   }
 
@@ -188,56 +189,25 @@ char* url_encode(const char* str) {
   size_t index = 0;
 
   // Iterate through each character in the input string
-  for (size_t i = 0; i < strlen(str); i++) {
-    unsigned char c = str[i];
+  for (size_t i = 0; i < str->length; i++) {
+    unsigned char c = str->data[i];
 
     // Check if the character is safe and doesn't need encoding
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
         c == '_' || c == '.' || c == '~') {
-      encoded_str[index++] = c;
+      encoded_str->data[index++] = c;
     } else {
       // If the character needs encoding, add '%' to the encoded string
-      encoded_str[index++] = '%';
+      encoded_str->data[index++] = '%';
 
       // Convert the character to its hexadecimal
-      // representation and append it to the encoded string
-      encoded_str[index++] = hex[(c >> 4) & 0xF];  // High nibble
-      encoded_str[index++] = hex[c & 0xF];         // Low nibble
+      encoded_str->data[index++] = hex[(c >> 4) & 0xF];  // High nibble
+      encoded_str->data[index++] = hex[c & 0xF];         // Low nibble
     }
   }
 
-  // Null-terminate the encoded string
-  encoded_str[index] = '\0';
-
-  // Return the URL-encoded string
+  encoded_str->data[index] = '\0';
   return encoded_str;
-}
-
-// Function to expand the tilde (~) character in a path to the user's home directory
-// The function takes a path as input and returns a new path with the tilde character expanded
-// The char * returned by the function is a pointer to a static buffer, so it should be used
-// before calling the function again and should not be freed.
-char* expandVar(const char* path) {
-  const char *homeDir = NULL, *tildePosition = NULL;
-  static char expandedPath[MAX_PATH_SIZE] = {0};
-
-  if ((homeDir = getenv("HOME")) != NULL && ((tildePosition = strchr(path, '~')) != NULL)) {
-    size_t expandedLength = strlen(homeDir) + strlen(tildePosition + 1);
-    if (expandedLength >= MAX_PATH_SIZE) {
-      fprintf(stderr, "Expanded path exceeds buffer size\n");
-      return NULL;
-    }
-
-    strcpy(expandedPath, homeDir);
-    strcat(expandedPath, tildePosition + 1);
-    expandedPath[expandedLength] = '\0';
-    return expandedPath;
-  } else if (tildePosition == NULL) {
-    strncpy(expandedPath, path, MAX_PATH_SIZE - 1);
-    expandedPath[MAX_PATH_SIZE - 1] = '\0';
-    return expandedPath;
-  }
-  return NULL;
 }
 
 // Define a handler function for serving static files
@@ -249,29 +219,23 @@ static void staticFileHandler(Context* ctx) {
   // e.g /static -> /
   // Trim the prefix from the requested path
   const char* trimmedPath = requestedPath + strlen(ctx->route->pattern);
+  char fullpath[MAX_PATH_SIZE];
+  snprintf(fullpath, MAX_PATH_SIZE, "%s%s", dirname, trimmedPath);
 
-  // Build the full file path by concatenating the requested path with the
-  // directory path
-  char fullFilePath[MAX_PATH_SIZE];
-  snprintf(fullFilePath, MAX_PATH_SIZE, "%s%s", dirname, trimmedPath);
+  char decoded_path[MAX_PATH_SIZE];
+  urldecode(decoded_path, sizeof(decoded_path), fullpath);
 
-  char decodedPath[MAX_PATH_SIZE];
-  urldecode(decodedPath, sizeof(decodedPath), fullFilePath);
-
-  // If it's a directory, append /index.html to decoded path
-  if (is_dir(decodedPath)) {
-    // temporary buffer to hold the concatenated path
-    char tempPath[MAX_PATH_SIZE + 16];
-
-    if (decodedPath[strlen(decodedPath) - 1] == '/') {
-      snprintf(tempPath, sizeof(tempPath), "%sindex.html", decodedPath);
+  if (is_dir(decoded_path)) {
+    char path_with_index[MAX_PATH_SIZE + 16];
+    if (decoded_path[strlen(decoded_path) - 1] == '/') {
+      snprintf(path_with_index, sizeof(path_with_index), "%sindex.html", decoded_path);
     } else {
-      snprintf(tempPath, sizeof(tempPath), "%s/index.html", decodedPath);
+      snprintf(path_with_index, sizeof(path_with_index), "%s/index.html", decoded_path);
     }
 
     // Check if the resulting path is within bounds
-    if (strlen(tempPath) < MAX_PATH_SIZE) {
-      strcpy(decodedPath, tempPath);
+    if (strlen(path_with_index) < MAX_PATH_SIZE) {
+      strcpy(decoded_path, path_with_index);
     } else {
       // Handle the case where the concatenated path exceeds the buffer size
       fprintf(stderr, "Error: Concatenated path exceeds buffer size\n");
@@ -283,27 +247,19 @@ static void staticFileHandler(Context* ctx) {
     }
   }
 
-  // Get the file extension
-  char *ptr, *start = decodedPath, *last = NULL;
-  while ((ptr = strstr(start, "."))) {
-    last = ptr;
-    start++;
-  }
+  if (path_exists(decoded_path)) {
+    const char* contentType = getWebContentType(decoded_path);
 
-  // Use the stat function to check if the file exists
-  struct stat fileStat;
-  if (stat(decodedPath, &fileStat) == 0) {
-    if (last) {
-      const char* contentType = getWebContentType(decodedPath);
-      if (contentType) {
-        set_header(ctx->response, "Content-Type", contentType);
-      }
+    // If the content type has been determined, set the header
+    if (contentType) {
+      set_header(ctx->response, "Content-Type", contentType);
     }
 
-    // printf("[STATIC]: sending file %s\n", decodedPath);
-    send_file(ctx, decodedPath);
+    // Send the file
+    send_file(ctx, decoded_path);
     return;
   }
+
 
   // Send 404
   char* response = "File Not Found\n";
@@ -318,7 +274,7 @@ void STATIC_DIR(const char* pattern, char* dir) {
     exit(1);
   }
 
-  char* dirname = expandVar(dir);
+  char* dirname = filepath_expanduser(dir);
   if (dirname == NULL) {
     fprintf(stderr, "unable to find HOME environment variable\n");
     exit(1);
@@ -340,43 +296,46 @@ void STATIC_DIR(const char* pattern, char* dir) {
   route->type = StaticRoute;
   strncpy(route->dirname, dirname, MAX_DIRNAME - 1);
   route->dirname[strlen(dirname)] = '\0';
+
   free(dirname);
 }
 
 // ======================== HTTP RESPONSE ================
 typedef struct Response {
-  bool chunked;                      // Chunked transfer encoding
-  bool stream_complete;              // Chunked transfer completed
-  int status;                        // Status code
-  char statusText[64];               // Http StatusText
-  void* data;                        // Response data
-  ssize_t content_length;            // Content-Length
-  ssize_t header_count;              // Number of headers
-  Header headers[MAX_RESP_HEADERS];  // Headers array
-
-  // track if headers are already sent.
-  bool headers_sent;
-  // track if headers are already sent
-  bool body_sent;
-
-  //   Client file descriptor.
-  int client_fd;
+  bool chunked;            // Chunked transfer encoding
+  bool stream_complete;    // Chunked transfer completed
+  int client_fd;           // Client file descriptor.
+  int status;              // Status code
+  void* data;              // Response data
+  ssize_t content_length;  // Content-Length
+  ssize_t header_count;    // Number of headers
+  Header** headers;        // Headers array
+  Arena* arena;            // Arena for response(ptr to request arena)
 } Response;
 
 Response* alloc_response(Arena* arena, int client_fd) {
   Response* res = arena_alloc(arena, sizeof(Response));
-  if (res) {
-    res->status = 200;
-    res->body_sent = false;
-    res->chunked = false;
-    res->header_count = 0;
-    res->stream_complete = false;
-    res->body_sent = false;
-    res->data = NULL;
-    res->content_length = 0;
-    res->client_fd = client_fd;
-    set_header(res, "Content-Type", "text/plain");
+  if (!res) {
+    return NULL;
   }
+
+  res->status = 200;
+  res->chunked = false;
+  res->header_count = 0;
+  res->stream_complete = false;
+  res->data = NULL;
+  res->content_length = 0;
+  res->client_fd = client_fd;
+  res->headers = (Header**)arena_alloc(arena, sizeof(Header*) * MAX_RESP_HEADERS);
+  if (!res->headers) {
+    return NULL;
+  }
+
+  memset(res->headers, 0, sizeof(Header*) * MAX_RESP_HEADERS);
+  res->arena = arena;
+
+  // Set default headers
+  set_header(res, "Content-Type", "text/plain");
 
   // Set default headers
   return res;
@@ -521,38 +480,44 @@ void set_status(Response* res, int statusCode) {
 }
 
 static void write_headers(Response* res) {
-  // don't send headers more than once.
-  char status_line[128];  // HTTP/1.1 StatusCode StatusText \r\n
+  if (!res)
+    return;
 
-  // Allocate memory for header response and http status
-  char headerResponse[MAX_RESP_HEADERS * sizeof(Header)] = {0};
-  headerResponse[0] = '\0';
+  char status_line[128];  // HTTP/1.1 code StatusText \r\n
+
+  Arena* arena = arena_create(2048, 8);
+  assert(arena);
+
+  cstr* headerResponse = cstr_new(arena, 2048);
+  assert(headerResponse);
 
   // Set default status code
   if (res->status == 0) {
     res->status = 200;
   }
 
-  strcpy(res->statusText, StatusText(res->status));
-  snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", res->status, res->statusText);
-  strcat(headerResponse, status_line);
+  snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", res->status,
+           StatusText(res->status));
+  cstr_append(arena, headerResponse, status_line);
 
   // Add headers
   for (int i = 0; i < res->header_count; i++) {
-    strcat(headerResponse, res->headers[i].name);
-    strcat(headerResponse, ": ");
-    strcat(headerResponse, res->headers[i].value);
-    strcat(headerResponse, "\r\n");
+    cstr_append(arena, headerResponse, res->headers[i]->name->data);
+    cstr_append(arena, headerResponse, ": ");
+    cstr_append(arena, headerResponse, res->headers[i]->value->data);
+    cstr_append(arena, headerResponse, "\r\n");
   }
 
   // Add an additional line break before the body
-  strcat(headerResponse, "\r\n");
+  cstr_append(arena, headerResponse, "\r\n");
 
   // Send the response headers
-  int bytes_sent = send(res->client_fd, headerResponse, strlen(headerResponse), 0);
+  int bytes_sent = send(res->client_fd, headerResponse->data, headerResponse->length, MSG_NOSIGNAL);
   if (bytes_sent == -1) {
     perror("write_headers() failed");
   }
+
+  arena_destroy(arena);
 }
 
 // returns number of bytes sent.
@@ -562,7 +527,7 @@ static ssize_t send_chunk_size(Response* res, ssize_t size) {
   if (res->chunked) {
     char chunkSize[128];
     sprintf(chunkSize, "%zx\r\n", size);
-    int sent = send(res->client_fd, chunkSize, strlen(chunkSize), 0);
+    int sent = send(res->client_fd, chunkSize, strlen(chunkSize), MSG_NOSIGNAL);
     if (sent == -1) {
       perror("send");
     }
@@ -576,7 +541,7 @@ static bool send_end_of_chunk(Response* res) {
     return true;  // nothing to do.
 
   // Send end of chunk: Send the chunk's CRLF (carriage return and line feed)
-  if (send(res->client_fd, "\r\n", 2, 0) == -1) {
+  if (send(res->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
     perror("error send end of chunk sentinel");
     return false;
   };
@@ -591,7 +556,7 @@ static bool send_end_of_request(Response* res) {
   }
 
   // Signal the end of the response with a zero-size chunk
-  if (send(res->client_fd, "0\r\n\r\n", 5, 0) == -1) {
+  if (send(res->client_fd, "0\r\n\r\n", 5, MSG_NOSIGNAL) == -1) {
     perror("error send end of end of the response sentinel");
     return false;
   };
@@ -609,14 +574,13 @@ const char* find_resp_header(Response* res, const char* name, int* index) {
     return NULL;
 
   for (int i = 0; i < res->header_count; i++) {
-    if (strcasecmp(name, res->headers[i].name) == 0) {
+    if (strcasecmp(name, res->headers[i]->name->data) == 0) {
       if (index) {
         *index = i;
       }
-      return res->headers[i].value;
+      return res->headers[i]->value->data;
     }
   }
-
   return NULL;
 }
 
@@ -628,24 +592,27 @@ void enable_chunked_transfer(Response* res) {
 }
 
 void set_header(Response* res, const char* name, const char* value) {
+  if (!res)
+    return;
+
   if (res->header_count >= MAX_RESP_HEADERS) {
     fprintf(stderr, "Exceeded max response headers: %d\n", MAX_RESP_HEADERS);
     return;
   }
 
   // check if this header already exists
-  int index;
-  Header h;
+  int index = 0;
   find_resp_header(res, name, &index);
 
   if (index == -1) {
-    // Header does not exist, append it
-    if (new_header(name, value, &h)) {
+    Header* h = new_header(res->arena, name, value);
+    if (h) {
       res->headers[res->header_count++] = h;
     }
   } else {
-    // Replace existine header
-    if (new_header(name, value, &h)) {
+    // Replace header value
+    Header* h = new_header(res->arena, name, value);
+    if (h) {
       res->headers[index] = h;
     }
   }
@@ -667,7 +634,7 @@ int send_response(Context* ctx, void* data, ssize_t content_length) {
   set_header(res, "Content-Length", content_len_str);
   write_headers(res);
 
-  total_bytes_sent = send(res->client_fd, res->data, res->content_length, 0);
+  total_bytes_sent = send(res->client_fd, res->data, res->content_length, MSG_NOSIGNAL);
   if (total_bytes_sent == -1) {
     if (errno == EPIPE) {
       return total_bytes_sent;
@@ -699,7 +666,7 @@ bool send_chunk(Response* res, void* data, ssize_t chunk_size) {
   };
 
   // send chunk
-  ssize_t chunk_size_sent = send(res->client_fd, data, chunk_size, 0);
+  ssize_t chunk_size_sent = send(res->client_fd, data, chunk_size, MSG_NOSIGNAL);
   if (chunk_size_sent != -1) {
     return send_end_of_chunk(res);
   }
@@ -725,6 +692,7 @@ static void write_range_headers(Response* res, ssize_t start, ssize_t end, off64
 
 int send_file(Context* ctx, const char* filename) {
   Response* res = ctx->response;
+  assert(res);
 
   // Guess content-type if not already set
   if (!find_resp_header(res, "Content-Type", NULL)) {
@@ -751,6 +719,7 @@ int send_file(Context* ctx, const char* filename) {
       };
     }
   }
+
 
   // Open the file with ftello64 for large file support
   FILE* file = fopen64(filename, "rb");
@@ -826,7 +795,7 @@ int send_file(Context* ctx, const char* filename) {
     set_header(res, "Content-Length", content_len_str);
   }
 
-  set_header(res, "Connection", "close");
+  // set_header(res, "Connection", "close");
   write_headers(res);
 
   // Read and send the file in chunks
@@ -849,7 +818,7 @@ int send_file(Context* ctx, const char* filename) {
     ssize_t sent = 0;         // total_bytes for this chunk
 
     while (sent < chunk_size) {
-      body_bytes_sent = send(res->client_fd, buffer + sent, chunk_size - sent, 0);
+      body_bytes_sent = send(res->client_fd, buffer + sent, chunk_size - sent, MSG_NOSIGNAL);
 
       if (body_bytes_sent == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -888,10 +857,9 @@ int send_file(Context* ctx, const char* filename) {
   return total_bytes_sent;
 }
 
-bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[buffer_len]) {
+bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[static buffer_len]) {
   // Create a magic object
   magic_t magic_cookie = magic_open(MAGIC_MIME_TYPE);
-
   if (magic_cookie == NULL) {
     fprintf(stderr, "Unable to initialize libmagic\n");
     return false;
@@ -906,8 +874,13 @@ bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[buf
 
   // Determine the MIME type. Possibly NULL
   const char* mime_type = magic_file(magic_cookie, filename);
-  // Close the magic object
+  if (mime_type == NULL) {
+    fprintf(stderr, "Cannot determine MIME type - %s\n", magic_error(magic_cookie));
+    magic_close(magic_cookie);
+    return false;
+  }
 
+  // Close the magic object
   size_t mimelen = strlen(mime_type);
   if (mimelen + 1 >= buffer_len) {
     magic_close(magic_cookie);

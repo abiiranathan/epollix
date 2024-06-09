@@ -2,6 +2,7 @@
 #define URL_H
 
 #include <curl/curl.h>
+#include <solidc/cstr.h>
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -19,12 +20,12 @@ typedef struct URL {
 // Parse a url into it's components.
 // uses libcurl's curl_url_set API. The URL * and its components are allocated
 // on the heap. call url_free to free this memory.
-URL* url_parse(const char* url);
+URL* url_parse(Arena* arena, const char* url);
 
 // Free URL* and it's components.
 void url_free(URL* url);
 
 // Return allocated string representation for URL.
-char* url_tostring(const URL* url);
+cstr* url_tostring(Arena* arena, const URL* url);
 
 #endif /* URL_H */

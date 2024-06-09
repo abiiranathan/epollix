@@ -7,7 +7,7 @@
 #endif
 
 #ifndef MAX_RESP_HEADERS
-#define MAX_RESP_HEADERS 10
+#define MAX_RESP_HEADERS 24
 #endif
 
 #ifndef MAX_ROUTES
@@ -27,7 +27,6 @@
 #include <magic.h>
 #include <pcre2.h>
 #include <regex.h>
-#include <solidc/str.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -37,15 +36,12 @@
 #include "method.h"
 #include "request.h"
 
-// =================================
-// Http Routing
-// =================================
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
 typedef struct Context {
-  Request* request;
-  struct Response* response;
-  struct Route* route;
+  Request* request;           // Request object
+  struct Response* response;  // Response object
+  struct Route* route;        // Matched route
 } Context;
 
 typedef void (*RouteHandler)(Context* ctx);
@@ -98,16 +94,8 @@ void router_cleanup();
 // decode encoded URI in src into dst.
 void urldecode(char* dst, size_t dst_size, const char* src);
 
-// Function to expand the tilde (~) character in a path to
-// the user's home directory
-char* expandVar(const char* path);
-
-// =============================
-// Http response
-// =============================
 typedef struct Response Response;
 
-// Define an enum for HTTP status codes
 typedef enum {
   StatusContinue = 100,
   StatusSwitchingProtocols = 101,

@@ -2,12 +2,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-URL* url_parse(const char* url) {
-  URL* parsedUrl = malloc(sizeof(URL));
+URL* url_parse(Arena* arena, const char* url) {
+  if (!url) {
+    return NULL;
+  }
+
+  cstr* urlstr = cstr_from(arena, url);
+  if (!urlstr) {
+    fprintf(stderr, "cstr_from(): Memory allocation error in url_parse\n");
+    return NULL;
+  }
+
+  URL* parsedUrl = arena_alloc(arena, sizeof(URL));
   if (!parsedUrl) {
     return NULL;
   }
-  parsedUrl->original_url = strdup(url);
+  parsedUrl->original_url = urlstr->data;
 
   CURLU* urlhandle = curl_url();
   CURLUcode ucode;
@@ -44,7 +54,6 @@ void url_free(URL* url) {
     return;
   }
 
-  free((void*)url->original_url);
   curl_free(url->scheme);
   curl_free(url->host);
   curl_free(url->path);
@@ -61,30 +70,21 @@ void url_free(URL* url) {
     curl_free(url->port);
   }
 
-  free(url);
-  url = NULL;
+  url = NULL;  // allocated in the arena.
 }
 
-char* url_tostring(const URL* url) {
-  // total buffer size incl. separators & null-terminators
-  size_t buffer_size = strlen(url->scheme) + strlen(url->host) + strlen(url->path) +
-                       (url->query ? strlen(url->query) : 0) +
-                       (url->fragment ? strlen(url->fragment) : 0) +
-                       (url->port ? strlen(url->port) : 0) + 8;
-
-  // Allocate memory for the buffer
-  char* result = malloc(buffer_size);
+cstr* url_tostring(Arena* arena, const URL* url) {
+  // limit url to 1024 bytes
+  cstr* result = cstr_new(arena, 1024);
   if (!result) {
-    fprintf(stderr, "Memory allocation error in url_tostring\n");
+    fprintf(stderr, "cstr_new(): Memory allocation error in url_tostring\n");
     return NULL;
   }
 
-
-  // Create the string representation
-  snprintf(result, buffer_size, "%s://%s:%s%s%s%s%s%s", url->scheme, url->host,
-           url->port ? url->port : "", url->path, url->query ? "?" : "",
-           url->query ? url->query : "", url->fragment ? "#" : "",
-           url->fragment ? url->fragment : "");
+  cstr_append_fmt(arena, result, "%s://%s:%s%s%s%s%s%s", url->scheme, url->host,
+                  url->port ? url->port : "", url->path, url->query ? "?" : "",
+                  url->query ? url->query : "", url->fragment ? "#" : "",
+                  url->fragment ? url->fragment : "");
 
   return result;
 }

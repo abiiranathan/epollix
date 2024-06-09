@@ -1,24 +1,23 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#ifndef MAX_EVENTS
+#define MAX_EVENTS 1024
+#endif
+
+#include "http.h"
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <solidc/cstr.h>
+#include <solidc/filepath.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "http.h"
-
-#ifndef MAX_EVENTS
-#define MAX_EVENTS 100
-#endif
-
-#ifndef POOL_SIZE
-#define POOL_SIZE 8
-#endif
 
 typedef struct TCPServer {
   int server_fd;

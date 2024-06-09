@@ -1,6 +1,7 @@
 
 #include <assert.h>
-#include <solidc/str.h>
+#include <solidc/cstr.h>
+#include <stdlib.h>
 #include <strings.h>
 
 #include "method.h"
@@ -11,109 +12,110 @@ static const char* LF = "\r\n";
 static const char* DOUBLE_LF = "\r\n\r\n";
 char* SCHEME = "http";
 
-bool parse_headers(const char* req_data, Header* headers, size_t* num_headers,
-                   size_t* header_end_idx, HttpMethod method, size_t* content_length) {
+static size_t parse_int(const char* str) {
+  char* endptr;
+  size_t value = strtoul(str, &endptr, 10);
+  if (*endptr != '\0' || value == ULONG_MAX) {
+    return 0;
+  }
+  return value;
+}
+
+Header** parse_headers(Arena* arena, cstr* data, size_t* num_headers, size_t* header_end_idx,
+                       HttpMethod method, size_t* content_length) {
   char* header_start = NULL;
   char* header_end = NULL;
-  char** header_lines = NULL;
-  char* header_substring = NULL;
   size_t start_pos, end_pos;
+
+  const char* req_data = data->data;
 
   // Parse headers from the request
   if ((header_start = strstr(req_data, LF)) == NULL) {
     fprintf(stderr, "cannot parse header start: Invalid HTTP format\n");
-    return false;
+    return NULL;
   }
 
   if ((header_end = strstr(req_data, DOUBLE_LF)) == NULL) {
     fprintf(stderr, "cannot parse header end: Invalid HTTP format\n");
-    return false;
+    return NULL;
   }
 
   // Get the position in request data for start of headers
   start_pos = (header_start - req_data) + 2;  // skip LF
   end_pos = header_end - req_data;
-  header_substring = string_substr(req_data, start_pos, end_pos);
+  size_t header_length = end_pos - start_pos;
+
+  cstr* header_substring = cstr_substr(arena, data, start_pos, header_length);
   if (header_substring == NULL) {
-    fprintf(stderr, "unable to extract header substr from request data\n");
+    fprintf(stderr, "cstr_substr(): error parsing header substring\n");
     return NULL;
   }
 
   size_t n;
-  header_lines = string_split(header_substring, LF, &n);
-  // Split the header lines by LF
+  cstr** header_lines = cstr_split_at(arena, header_substring, LF, 32, &n);
   if (header_lines == NULL) {
-    fprintf(stderr, "cannot split header lines\n");
-    free(header_substring);
-    return false;
+    fprintf(stderr, "cstr_split_at(): error parsing header lines\n");
+    return NULL;
   }
-  free(header_substring);
 
   bool is_safe = is_safe_method(method);
-  size_t valid_headers = 0;
+  Header** headers = arena_alloc(arena, sizeof(Header*) * MAX_REQ_HEADERS);
+  if (headers == NULL) {
+    fprintf(stderr, "arena_alloc(): error allocating headers\n");
+    return NULL;
+  }
 
+  size_t header_index = 0;
   if (n > 0) {
     for (size_t i = 0; (i < n && i < MAX_REQ_HEADERS); i++) {
-      Header header;
-      if (header_fromstring(header_lines[i], &header)) {
-        headers[valid_headers++] = header;
+      Header* header = header_fromstring(arena, header_lines[i]);
+      if (header == NULL) {
+        fprintf(stderr, "header_fromstring(): error parsing header: %s\n", header_lines[i]->data);
+        continue;
+      }
 
-        // No point getting content-length on GET, OPTIONS methods...
-        if (!is_safe && strcasecmp(header.name, "Content-Length") == 0) {
-          *content_length = atoi(header.value);
+      headers[header_index++] = header;
+
+      // No point getting content-length on GET, OPTIONS methods...
+      if (!is_safe && strcasecmp(header->name->data, "Content-Length") == 0) {
+        size_t value = parse_int(header->value->data);
+        if (value == 0) {
+          fprintf(stderr, "Invalid Content-Length header\n");
+          return NULL;
         }
+        *content_length = value;
       }
     }
   }
 
-  string_split_free(header_lines, n);
+
   *header_end_idx = end_pos;
-  *num_headers = valid_headers;
-  return true;
+  *num_headers = header_index;
+  return headers;
 }
 
-Request* request_parse_http(Arena* arena, const char* req_data) {
+Request* request_parse_http(Arena* arena, cstr* data) {
   char method_str[10] = {0};
   char path[256] = {0};
+  size_t header_end_idx = 0;
+  size_t content_length = 0;
+  size_t num_headers = 0;
 
-  // Parse the request line
-  size_t header_end_idx = 0, content_length = 0, num_headers = 0;
-  if (sscanf(req_data, "%9s %255s", method_str, path) != 2) {
-    fprintf(stderr, "error parsing request line\n");
-    return NULL;
-  }
+  int n = sscanf(data->data, "%9s %255s", method_str, path);
+  assert(n == 2);
 
   // If the method is not valid, this will return M_INVALID;
   HttpMethod method = method_fromstring(method_str);
-  if (method == M_INVALID) {
-    fprintf(stderr, "Unknown HTTP method\n");
-    return NULL;
-  }
+  assert(method != M_INVALID);
 
   Request* request = arena_alloc(arena, sizeof(Request));
-  if (!request) {
-    fprintf(stderr, "unable to allocate Request struct\n");
-    return NULL;
-  }
-
+  assert(request);
 
   // Parse the headers
-  memset(request->headers, 0, sizeof(Header) * MAX_REQ_HEADERS);
-  if (!parse_headers(req_data, request->headers, &num_headers, &header_end_idx, method,
-                     &content_length)) {
-    fprintf(stderr, "unable to parse headers\n");
-    return NULL;
-  }
-
-  if (num_headers == 0) {
-    fprintf(stderr, "no headers found\n");
-    return NULL;
-  }
-
-  // // log the request headers
-  // for (size_t i = 0; i < num_headers; i++) {
-  //   printf("Header: %s: %s\n", request->headers[i].name, request->headers[i].value);
-  // }
+  request->headers =
+    parse_headers(arena, data, &num_headers, &header_end_idx, method, &content_length);
+  assert(request->headers);
+  assert(num_headers > 0);
 
   request->method = method;
   request->header_length = num_headers;
@@ -122,32 +124,24 @@ Request* request_parse_http(Arena* arena, const char* req_data) {
   request->url = NULL;
 
   // Get the Host header and compose the full url
-  char* host = headers_loopup(request->headers, num_headers, "host");
-  if (!host) {
-    fprintf(stderr, "Host header must be set for proper URL parsing\n");
-    return NULL;
-  }
+  cstr* host = headers_loopup(request->headers, num_headers, "host");
+  assert(host);
 
   char url_string[1024];
-  snprintf(url_string, 1024, "%s://%s%s", SCHEME, host, path);
+  snprintf(url_string, 1024, "%s://%s%s", SCHEME, host->data, path);
 
-  request->url = url_parse(url_string);
-  if (!request->url) {
-    fprintf(stderr, "Unable to parse request URL\n");
-    return NULL;
-  }
+  request->url = url_parse(arena, url_string);
+  assert(request->url);
 
   // Allocate the body of the request if any and possible.
   // POST, PUT, PATCH, DELETE
   if (!is_safe_method(method) && content_length > 0) {
     request->body = (char*)arena_alloc(arena, content_length + 1);
-    if (!request->body) {
-      perror("unable to allocate request->body");
-      return NULL;
-    }
+    assert(request->body);
 
+    // Skip the headers and get the body, copy the body to the request
     size_t body_offset = header_end_idx + 4;  // Skip DOBLE LF
-    memcpy((char*)request->body, req_data + body_offset, content_length);
+    memcpy((char*)request->body, data->data + body_offset, content_length);
   }
 
   return request;
@@ -155,26 +149,23 @@ Request* request_parse_http(Arena* arena, const char* req_data) {
 
 void request_destroy(Request* request) {
   url_free(request->url);
+
   if (request->body) {
     free((void*)request->body);
   }
-  // Do not free request as it is allocated in the arena.
 }
 
 const char* find_req_header(Request* req, const char* name, int* index) {
-  if (index) {
-    *index = -1;
+  if (!req || !name || !index) {
+    return NULL;
   }
 
-  if (!req)
-    return NULL;
-
   for (size_t i = 0; i < req->header_length; i++) {
-    if (strcasecmp(name, req->headers[i].name) == 0) {
+    if (strcasecmp(name, req->headers[i]->name->data) == 0) {
       if (index) {
         *index = i;
       }
-      return req->headers[i].value;
+      return req->headers[i]->value->data;
     }
   }
   return NULL;

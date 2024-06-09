@@ -1,18 +1,11 @@
 #define _GNU_SOURCE 1  // for secure_getenv
-#define STR_IMPL
-#define ARENA_IMPL
-#define OS_IMPL
-
-#include <solidc/arena.h>
-#include <solidc/os.h>
-#include <solidc/str.h>
 
 #include "http/http.h"
 #include "http/server.h"
 
 void homeHandler(Context* ctx) {
-  char* reply = "Hello world from home page\n";
-  set_header(ctx->response, "Content-Type", "text/plain");
+  char* reply = "<h1>Hello world from home page</h1>\n";
+  set_header(ctx->response, "Content-Type", "text/html");
   send_response(ctx, reply, strlen(reply));
 }
 
@@ -23,7 +16,7 @@ void aboutHandler(Context* ctx) {
 }
 
 void download(Context* ctx) {
-  send_file(ctx, "/home/nabiizy/server/build/expendables.mp4");
+  send_file(ctx, "./README.md");
 }
 
 void setupRoutes() {
@@ -32,7 +25,6 @@ void setupRoutes() {
   GET_ROUTE("/download", download);
   // STATIC_DIR("/web", "~/server/build");
 }
-
 
 int main(int argc, char* argv[]) {
   if (argc < 2) {

@@ -1,69 +1,58 @@
 #include "headers.h"
 #include <strings.h>
 
-bool header_tostring(const Header* h, char* buffer, size_t buffer_len) {
-  if (buffer_len < strlen(h->name) + strlen(h->value) + 3) {  // ": " && null byte
-    fprintf(stderr, "buffer_len is too small\n");
-    return false;
+Header* new_header(Arena* arena, const char* name, const char* value) {
+  Header* header = arena_alloc(arena, sizeof(Header));
+  if (header == NULL) {
+    return NULL;
   }
-  snprintf(buffer, buffer_len, "%s: %s", h->name, h->value);
-  return true;
+
+  header->name = cstr_from(arena, name);
+  if (header->name == NULL) {
+    return NULL;
+  }
+
+  header->value = cstr_from(arena, value);
+  if (header->value == NULL) {
+    return NULL;
+  }
+  return header;
 }
 
-bool header_fromstring(const char* str, Header* header) {
-  size_t max_length = HEADER_KEY_LENGTH + HEADER_VALUE_LENGTH;
-  size_t len = strlen(str);
-
-  if (len > max_length) {
-    fprintf(stderr, "Header string is too long.\n");
-    return false;
+cstr* header_tostring(Arena* arena, const Header* h) {
+  cstr* str = cstr_new(arena, 1024);
+  if (str == NULL) {
+    return NULL;
   }
 
-  const char* colon_space = strstr(str, ": ");
-
-  if (!colon_space) {
-    fprintf(stderr, "Invalid header string format.\n");
-    return false;
+  if (!cstr_append_fmt(arena, str, "%s: %s", h->name->data, h->value->data)) {
+    return NULL;
   }
-
-  size_t name_len = colon_space - str;
-  size_t value_len = len - (name_len + 2);
-
-  if (name_len >= HEADER_KEY_LENGTH || value_len >= HEADER_VALUE_LENGTH) {
-    fprintf(stderr, "Header name or value is too long to fit in the designated buffer.\n");
-    return false;
-  }
-
-  strncpy(header->name, str, sizeof(header->name));
-  header->name[name_len] = '\0';
-
-  strncpy(header->value, colon_space + 2, sizeof(header->value));
-  header->value[value_len] = '\0';
-  return true;
+  return str;
 }
 
-char* headers_loopup(Header* headers, size_t num_headers, const char* name) {
+Header* header_fromstring(Arena* arena, const cstr* str) {
+  size_t n = 0;
+  cstr** parts = cstr_split_at(arena, str, ": ", 2, &n);
+  assert(n == 2);
+  assert(parts);
+
+  Header* header = arena_alloc(arena, sizeof(Header));
+  if (header == NULL) {
+    return NULL;
+  }
+
+  header->name = parts[0];
+  header->value = parts[1];
+  return header;
+}
+
+cstr* headers_loopup(Header** headers, size_t num_headers, const char* name) {
   for (size_t i = 0; i < num_headers; i++) {
-    if (strcasecmp(headers[i].name, name) == 0) {
-      return (char*)headers[i].value;
+    // Case-insensitive comparison
+    if (strcasecmp(headers[i]->name->data, name) == 0) {
+      return headers[i]->value;
     }
   }
   return NULL;
-}
-
-bool new_header(const char* name, const char* value, Header* header) {
-  size_t name_len = strlen(name);
-  size_t value_len = strlen(value);
-
-  if (name_len >= HEADER_KEY_LENGTH || value_len >= HEADER_VALUE_LENGTH) {
-    fprintf(stderr, "Header name or value is too long to fit in the designated buffer.\n");
-    return false;
-  }
-
-  strncpy(header->name, name, sizeof(header->name));
-  header->name[name_len] = '\0';
-
-  strncpy(header->value, value, sizeof(header->value));
-  header->value[value_len] = '\0';
-  return true;
 }
