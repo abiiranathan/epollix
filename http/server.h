@@ -1,10 +1,6 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#ifndef MAX_EVENTS
-#define MAX_EVENTS 1024
-#endif
-
 #include "http.h"
 
 #include <arpa/inet.h>
@@ -19,11 +15,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define MAX_EVENTS 1024
+
 typedef struct TCPServer {
-  int server_fd;
-  struct sockaddr_in server_addr;
-  int port;
-  int epoll_fd;
+    int server_fd;
+    struct sockaddr_in server_addr;
+    int port;
+    int epoll_fd;
 } TCPServer;
 
 // Takes in method and path and returns the matching handler.
@@ -44,7 +42,6 @@ void listen_and_serve(TCPServer* server, ServeMux mux);
 
 // Start the event loop and run server on specified port.
 // Serve TLS.
-void listen_and_serve_tls(TCPServer* server, ServeMux mux, const char* cerffile,
-                          const char* keyfile);
+void listen_and_serve_tls(TCPServer* server, ServeMux mux, const char* cerffile, const char* keyfile);
 
 #endif /* SERVER_H */

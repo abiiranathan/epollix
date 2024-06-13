@@ -2,8 +2,8 @@
 #define MIME_H
 
 typedef struct {
-  const char* extension;
-  const char* contentType;
+    const char* extension;
+    const char* contentType;
 } ContentTypeMapping;
 
 const char* getWebContentType(char* filename);

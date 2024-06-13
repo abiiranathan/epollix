@@ -4,6 +4,9 @@
 #ifndef _LARGEFILE64_SOURCE
 #define _LARGEFILE64_SOURCE
 #define _FILE_OFFSET_BITS 64
+#define _POSIX_C_SOURCE 200809L
+// for usleep
+#define _GNU_SOURCE 1
 #endif
 
 #ifndef MAX_RESP_HEADERS
@@ -39,24 +42,27 @@
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
 typedef struct Context {
-  Request* request;           // Request object
-  struct Response* response;  // Response object
-  struct Route* route;        // Matched route
+    Request* request;           // Request object
+    struct Response* response;  // Response object
+    struct Route* route;        // Matched route
 } Context;
 
 typedef void (*RouteHandler)(Context* ctx);
 
 typedef struct Route {
-  HttpMethod method;  // HTTP Method.
-  char* pattern;      // Pattern as a string
+    HttpMethod method;  // HTTP Method.
+    RouteType type;     // Type of Route (Normal or Static)
+    union pattern {
+        char* static_pattern;       // For Static Routes
+        pcre2_code* regex_pattern;  // https://www.pcre.org/current/doc/html/
+    } pattern;
 
-  // PCRE - compiled extended regex pattern See
-  // https://www.pcre.org/current/doc/html/
-  pcre2_code* compiledPattern;
-  RouteHandler handler;       // Handler for the route
-  RouteType type;             // Type of Route
-  char dirname[MAX_DIRNAME];  // Dirname for static route.
+    RouteHandler handler;       // Handler for the route
+    char dirname[MAX_DIRNAME];  // Dirname for static route.
 } Route;
+
+void initialize_libmagic(void);
+void cleanup_libmagic(void);
 
 // If regex are not included in pattern, they are added.
 // Only ^ & $ are added to avoid partial matches.
@@ -97,73 +103,73 @@ void urldecode(char* dst, size_t dst_size, const char* src);
 typedef struct Response Response;
 
 typedef enum {
-  StatusContinue = 100,
-  StatusSwitchingProtocols = 101,
-  StatusProcessing = 102,
-  StatusEarlyHints = 103,
+    StatusContinue = 100,
+    StatusSwitchingProtocols = 101,
+    StatusProcessing = 102,
+    StatusEarlyHints = 103,
 
-  StatusOK = 200,
-  StatusCreated = 201,
-  StatusAccepted = 202,
-  StatusNonAuthoritativeInfo = 203,
-  StatusNoContent = 204,
-  StatusResetContent = 205,
-  StatusPartialContent = 206,
-  StatusMultiStatus = 207,
-  StatusAlreadyReported = 208,
-  StatusIMUsed = 226,
+    StatusOK = 200,
+    StatusCreated = 201,
+    StatusAccepted = 202,
+    StatusNonAuthoritativeInfo = 203,
+    StatusNoContent = 204,
+    StatusResetContent = 205,
+    StatusPartialContent = 206,
+    StatusMultiStatus = 207,
+    StatusAlreadyReported = 208,
+    StatusIMUsed = 226,
 
-  StatusMultipleChoices = 300,
-  StatusMovedPermanently = 301,
-  StatusFound = 302,
-  StatusSeeOther = 303,
-  StatusNotModified = 304,
-  StatusUseProxy = 305,
-  StatusUnused = 306,
-  StatusTemporaryRedirect = 307,
-  StatusPermanentRedirect = 308,
+    StatusMultipleChoices = 300,
+    StatusMovedPermanently = 301,
+    StatusFound = 302,
+    StatusSeeOther = 303,
+    StatusNotModified = 304,
+    StatusUseProxy = 305,
+    StatusUnused = 306,
+    StatusTemporaryRedirect = 307,
+    StatusPermanentRedirect = 308,
 
-  StatusBadRequest = 400,
-  StatusUnauthorized = 401,
-  StatusPaymentRequired = 402,
-  StatusForbidden = 403,
-  StatusNotFound = 404,
-  StatusMethodNotAllowed = 405,
-  StatusNotAcceptable = 406,
-  StatusProxyAuthRequired = 407,
-  StatusRequestTimeout = 408,
-  StatusConflict = 409,
-  StatusGone = 410,
-  StatusLengthRequired = 411,
-  StatusPreconditionFailed = 412,
-  StatusRequestEntityTooLarge = 413,
-  StatusRequestURITooLong = 414,
-  StatusUnsupportedMediaType = 415,
-  StatusRequestedRangeNotSatisfiable = 416,
-  StatusExpectationFailed = 417,
-  StatusTeapot = 418,
-  StatusMisdirectedRequest = 421,
-  StatusUnprocessableEntity = 422,
-  StatusLocked = 423,
-  StatusFailedDependency = 424,
-  StatusTooEarly = 425,
-  StatusUpgradeRequired = 426,
-  StatusPreconditionRequired = 428,
-  StatusTooManyRequests = 429,
-  StatusRequestHeaderFieldsTooLarge = 431,
-  StatusUnavailableForLegalReasons = 451,
+    StatusBadRequest = 400,
+    StatusUnauthorized = 401,
+    StatusPaymentRequired = 402,
+    StatusForbidden = 403,
+    StatusNotFound = 404,
+    StatusMethodNotAllowed = 405,
+    StatusNotAcceptable = 406,
+    StatusProxyAuthRequired = 407,
+    StatusRequestTimeout = 408,
+    StatusConflict = 409,
+    StatusGone = 410,
+    StatusLengthRequired = 411,
+    StatusPreconditionFailed = 412,
+    StatusRequestEntityTooLarge = 413,
+    StatusRequestURITooLong = 414,
+    StatusUnsupportedMediaType = 415,
+    StatusRequestedRangeNotSatisfiable = 416,
+    StatusExpectationFailed = 417,
+    StatusTeapot = 418,
+    StatusMisdirectedRequest = 421,
+    StatusUnprocessableEntity = 422,
+    StatusLocked = 423,
+    StatusFailedDependency = 424,
+    StatusTooEarly = 425,
+    StatusUpgradeRequired = 426,
+    StatusPreconditionRequired = 428,
+    StatusTooManyRequests = 429,
+    StatusRequestHeaderFieldsTooLarge = 431,
+    StatusUnavailableForLegalReasons = 451,
 
-  StatusInternalServerError = 500,
-  StatusNotImplemented = 501,
-  StatusBadGateway = 502,
-  StatusServiceUnavailable = 503,
-  StatusGatewayTimeout = 504,
-  StatusHTTPVersionNotSupported = 505,
-  StatusVariantAlsoNegotiates = 506,
-  StatusInsufficientStorage = 507,
-  StatusLoopDetected = 508,
-  StatusNotExtended = 510,
-  StatusNetworkAuthenticationRequired = 511
+    StatusInternalServerError = 500,
+    StatusNotImplemented = 501,
+    StatusBadGateway = 502,
+    StatusServiceUnavailable = 503,
+    StatusGatewayTimeout = 504,
+    StatusHTTPVersionNotSupported = 505,
+    StatusVariantAlsoNegotiates = 506,
+    StatusInsufficientStorage = 507,
+    StatusLoopDetected = 508,
+    StatusNotExtended = 510,
+    StatusNetworkAuthenticationRequired = 511
 } HttpStatus;
 
 Response* alloc_response(Arena* arena, int client_fd);
@@ -171,7 +177,7 @@ Response* alloc_response(Arena* arena, int client_fd);
 // StatusText returns a text for the HTTP status code. It returns the empty
 // string if the code is unknown.
 // https://go.dev/src/net/http/status.go
-const char* StatusText(int statusCode);
+const char* StatusText(HttpStatus statusCode);
 
 // Returns the value of the response header if exists or NULL.
 const char* find_resp_header(Response* res, const char* name, int* index);
@@ -181,7 +187,7 @@ const char* find_resp_header(Response* res, const char* name, int* index);
 void enable_chunked_transfer(Response* res);
 
 // Set response status code and status text.
-void set_status(Response* res, int statusCode);
+void set_status(Response* res, HttpStatus statusCode);
 
 // Add new header to response headers.
 void set_header(Response* res, const char* name, const char* value);

@@ -59,3 +59,6 @@ build
 epoll-server
 select-server
 map_test
+uploads
+*.mp4
+web

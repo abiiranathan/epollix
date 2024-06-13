@@ -3,13 +3,13 @@
 #include <stdbool.h>
 
 typedef enum {
-  M_INVALID = -1,
-  M_OPTIONS,
-  M_GET,
-  M_POST,
-  M_PUT,
-  M_PATCH,
-  M_DELETE,
+    M_INVALID = -1,
+    M_OPTIONS,
+    M_GET,
+    M_POST,
+    M_PUT,
+    M_PATCH,
+    M_DELETE,
 } HttpMethod;
 
 const char* method_tostring(HttpMethod method);

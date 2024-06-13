@@ -8,8 +8,8 @@
 #include <string.h>
 
 typedef struct Header {
-  cstr* name;
-  cstr* value;
+    cstr* name;
+    cstr* value;
 } Header;
 
 Header* new_header(Arena* arena, const char* name, const char* value);

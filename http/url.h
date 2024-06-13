@@ -8,13 +8,13 @@
 
 // Represent a URL object.
 typedef struct URL {
-  const char* original_url;  // Original URL from client.
-  char* scheme;              // Protocol
-  char* host;                // Host
-  char* path;                // PathName for url.
-  char* query;               // Query string if present or NULL.
-  char* fragment;            // Fragment is not forwarded by http clients and browsers.
-  char* port;                // port.
+    const char* original_url;  // Original URL from client.
+    char* scheme;              // Protocol
+    char* host;                // Host
+    char* path;                // PathName for url.
+    char* query;               // Query string if present or NULL.
+    char* fragment;            // Fragment is not forwarded by http clients and browsers.
+    char* port;                // port.
 } URL;
 
 // Parse a url into it's components.
