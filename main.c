@@ -5,15 +5,13 @@
 #include "http/server.h"
 
 void homeHandler(Context* ctx) {
-    char* reply = "<h1>Hello world from home page</h1>\n";
     set_header(ctx->response, "Content-Type", "text/html");
-    send_response(ctx, reply, strlen(reply));
+    send_string(ctx, "<h1>Hello world from home page</h1>\n");
 }
 
 void aboutHandler(Context* ctx) {
-    char* reply = "<h1>Hello world from about page</h1>";
     set_header(ctx->response, "Content-Type", "text/html");
-    send_response(ctx, reply, strlen(reply));
+    send_string(ctx, "<h1>Hello world from about page</h1>");
 }
 
 void download(Context* ctx) {
@@ -21,13 +19,15 @@ void download(Context* ctx) {
 }
 
 void loginUser(Context* ctx) {
+    // TODO: parse_form currently works well with application/x-www-form-urlencoded
+    // TODO: and multipart/form-data with text fields. It supports file uploads
+    // TODO: for plain text files. It does not support binary files yet.
     parse_form(ctx->request);
 
     MultipartForm* multipart = ctx->request->multipart;
     if (multipart->form == NULL) {
         set_status(ctx->response, StatusBadRequest);
-        char* msg = (char*)get_form_error(multipart->error);
-        send_response(ctx, msg, strlen(msg));
+        send_string(ctx, get_form_error(multipart->error));
         return;
     }
 
@@ -36,7 +36,7 @@ void loginUser(Context* ctx) {
 
     if (username == NULL || password == NULL) {
         set_status(ctx->response, StatusBadRequest);
-        send_response(ctx, "Username and password are required", 34);
+        send_string(ctx, "Username and password are required\n");
         return;
     }
 
@@ -46,7 +46,7 @@ void loginUser(Context* ctx) {
     fileHeaders = get_form_files("file", ctx->request, &num_files);
     if (!fileHeaders) {
         set_status(ctx->response, StatusBadRequest);
-        send_response(ctx, "Expected file, not found", 24);
+        send_string(ctx, "Expected file, not found\n");
         return;
     }
 
@@ -55,21 +55,21 @@ void loginUser(Context* ctx) {
 
     if (!save_file_to_disk(path, fileHeaders[0], ctx->request)) {
         set_status(ctx->response, StatusInternalServerError);
-        send_response(ctx, "Error saving file to disk", 25);
+        send_string(ctx, "Error saving file to disk\n");
         return;
     }
 
-    printf("File %s saved successfully\n", path);
+    // printf("File %s saved successfully\n", path);
     const char* json = "{\"username\": \"%s\", \"password\": \"%s\"}";
 
     // send back json
     char* reply = NULL;
     asprintf(&reply, json, username, password);
-    set_header(ctx->response, "Content-Type", "application/json");
-    send_response(ctx, reply, strlen(reply));
-
-    map_destroy(multipart->form, true);
+    printf("JSON: %s\n", reply);
     free(reply);
+    map_destroy(multipart->form, true);
+
+    redirect(ctx, "/about");
 }
 
 void setupRoutes() {

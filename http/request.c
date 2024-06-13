@@ -271,7 +271,6 @@ static void parse_multipart_form_data_helper(Request* request, char* data, char*
 
     // Current file in State transitions
     FileHeader header = {.filesize = 0, .start_pos = 0};
-    size_t endpos = 0;
 
     size_t boundary_length = strlen(boundary);
     while (*ptr != '\0') {
@@ -452,7 +451,8 @@ static void parse_multipart_form_data_helper(Request* request, char* data, char*
                 }
 
                 // If it's an empty filename or the file is empty
-                if (mimetype[0] == '\0' || mimetype[1] == ' ' || strncmp(ptr, boundary, boundary_length) == 0) {
+                // We use memcmp to handle bytes properly.
+                if (mimetype[0] == '\0' || mimetype[1] == ' ' || memcmp(ptr, boundary, boundary_length) == 0) {
                     free(filename);
                     free(mimetype);
                     state = STATE_BOUNDARY;
@@ -463,36 +463,66 @@ static void parse_multipart_form_data_helper(Request* request, char* data, char*
             } break;
             case STATE_FILE_BODY:
                 header.start_pos = ptr - data;
-                while (*ptr != '\0') {
-                    // Look at next character
-                    if (*ptr == '-') {
-                        // Check for end of file content
-                        if (strncmp(ptr, boundary, boundary_length) == 0) {
-                            break;
-                        }
+                size_t endpos = 0;
+
+                // endoffset for the file data
+                // we can't do pointer arithmentic with binary data :)
+                // Apparently strstr is binary safe!
+                char* endptr = strstr(ptr, boundary);
+                if (endptr == NULL) {
+                    // Likely this is a binary file.
+                    FILE* fp = fopen("temp.png", "wb");
+
+                    while (*ptr) {
+                        fputc(*ptr, fp);
+                        ptr++;
                     }
-                    ptr++;
+                    fclose(fp);
+                    return;
+                } else {
+                    endpos = endptr - data;
                 }
 
-                endpos = ptr - data - 2;  // -2 for \n\r
+                printf("==== START POS: %zu\n", header.start_pos);
+                printf("====   END POS: %zu\n", endpos);
+                printf("==== FILE SIZE: %zu\n", endpos - header.start_pos);
 
-                if (request->multipart->num_files >= file_capacity) {
-                    file_capacity *= 2;
-                    request->multipart->files = realloc(request->multipart->files, file_capacity);
-                    if (request->multipart->files == NULL) {
-                        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-                        // !! We can't free already allocated filenames??
-                        return;
-                    }
-                }
-
-                header.filesize = endpos - header.start_pos;
-                if (header.filesize > MAX_FILE_SIZE) {
+                // Compute the file size
+                size_t file_size = endpos - header.start_pos;
+                header.filesize = file_size;
+                if (file_size > MAX_FILE_SIZE) {
                     fprintf(stderr, "File %s exeeds maximum file size of %d\n", header.filename, MAX_FILE_SIZE);
                     set_form_error(&request->multipart->error, FE_FILE_TOO_BIG);
                 }
 
+                //  ========= Ensure enough memory for files
+                if (request->multipart->num_files >= file_capacity) {
+                    file_capacity *= 2;
+                    FileHeader* new_headers = realloc(request->multipart->files, file_capacity);
+
+                    if (new_headers == NULL) {
+                        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
+
+                        // Free already allocated files memory
+                        fprintf(stderr, "unable to realloc memory for files\n");
+                        for (size_t i = 0; i < request->multipart->num_files; i++) {
+                            free(request->multipart->files[i].filename);
+                            free(request->multipart->files[i].field_name);
+                        }
+                        free(request->multipart->files);
+                        return;
+                    }
+
+                    // Memory reallocation was successful
+                    request->multipart->files = new_headers;
+                }
+
                 request->multipart->files[request->multipart->num_files++] = header;
+
+                // consume the trailing CRLF before the next boundary
+                while (((*ptr == '\r' && *(ptr + 1) == '\n'))) {
+                    ptr += 2;
+                }
                 state = STATE_BOUNDARY;
                 break;
             case STATE_END:
@@ -619,6 +649,7 @@ char* get_file_contents(FileHeader header, Request* req) {
     }
 
     memcpy(bytes, req->body + header.start_pos, header.filesize);
+    bytes[header.filesize] = '\0';
     return bytes;
 }
 

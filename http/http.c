@@ -10,6 +10,10 @@
 #define MAX_PATTERN_LENGTH 256
 #define MAX_HEADER_SIZE 4096
 
+#ifndef DEFAULT_CONTENT_TYPE
+#define DEFAULT_CONTENT_TYPE "text/html"
+#endif
+
 static Route routeTable[MAX_ROUTES] = {0};
 static int numRoutes = 0;
 
@@ -338,7 +342,7 @@ Response* alloc_response(Arena* arena, int client_fd) {
     res->arena = arena;
 
     // Set default headers
-    set_header(res, "Content-Type", "text/plain");
+    set_header(res, "Content-Type", DEFAULT_CONTENT_TYPE);
 
     // Set default headers
     return res;
@@ -461,10 +465,11 @@ static void write_headers(Response* res) {
         }
 
         // Append the header to the header buffer
-        strncat(header_res, header, strlen(header_res));
+        strncat(header_res, header, sizeof(header_res) - written);
         written += strlen(header);
     }
 
+    // null terminate the header
     header_res[written] = '\0';
 
     // Send the response headers
@@ -873,4 +878,53 @@ bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[sta
     strncpy(mime_buffer, mime_type, buffer_len);
     mime_buffer[mimelen] = '\0';
     return true;
+}
+
+// Send string
+int send_string(Context* ctx, const char* data) {
+    return send_response(ctx, (void*)data, strlen(data));
+}
+
+int send_json(Context* ctx, const char* data) {
+    set_header(ctx->response, "Content-Type", "application/json");
+    return send_response(ctx, (void*)data, strlen(data));
+}
+
+// Send error
+void send_error(Context* ctx, HttpStatus status) {
+    if (status < StatusBadRequest || status > StatusNetworkAuthenticationRequired) {
+        status = StatusInternalServerError;
+    }
+
+    Response* res = ctx->response;
+    set_status(res, status);
+    write_headers(res);
+    send_string(ctx, StatusText(status));
+}
+
+void send_html_error(Context* ctx, HttpStatus status, const char* message) {
+    if (status < StatusBadRequest || status > StatusNetworkAuthenticationRequired) {
+        status = StatusInternalServerError;
+    }
+
+    Response* res = ctx->response;
+    set_status(res, status);
+    write_headers(res);
+    send_string(ctx, message);
+}
+
+// redirect to the given url with a 302 status code
+void redirect(Context* ctx, const char* url) {
+    Response* res = ctx->response;
+    set_status(res, StatusFound);
+    set_header(res, "Location", url);
+    write_headers(res);
+}
+
+// redirect to the given url with a custom status code
+void redirect_with_status(Context* ctx, const char* url, HttpStatus status) {
+    Response* res = ctx->response;
+    set_status(res, status);
+    set_header(res, "Location", url);
+    write_headers(res);
 }

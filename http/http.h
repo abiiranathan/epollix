@@ -192,8 +192,29 @@ void set_status(Response* res, HttpStatus statusCode);
 // Add new header to response headers.
 void set_header(Response* res, const char* name, const char* value);
 
-// Sends the response at once.
+// Sends the response at once with the given data and content-length.
+// Uses the DEFAULT_CONTENT_TYPE if none is set.
+// by deafult, this is text/html
+// Default status code is 200
 int send_response(Context* ctx, void* data, ssize_t content_length);
+
+// Send string with content-type text/html
+int send_string(Context* ctx, const char* data);
+
+// Send json with content-type application/json.
+int send_json(Context* ctx, const char* data);
+
+// Send error
+void send_error(Context* ctx, HttpStatus status);
+
+// Send error with message
+void send_html_error(Context* ctx, HttpStatus status, const char* message);
+
+// redirect to the given url.
+void redirect(Context* ctx, const char* url);
+
+// redirect to the given url with a custom status code
+void redirect_with_status(Context* ctx, const char* url, HttpStatus status);
 
 // Sends response in chunks. Intended to be called multiple times.
 // You must call enable_chunked_transfer() before streaming large responses
