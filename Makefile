@@ -1,11 +1,12 @@
 CC=gcc
-CFLAGS=-Wall -Werror -Wextra -pedantic -ggdb -DMAX_DIRNAME=255
-LDFLAGS=-lcurl -lmagic -lpcre2-8 -lm -lsolidc
-SRC_DIR=http
+CFLAGS=-Wall -Werror -Wextra -pedantic -O3 -DMAX_DIRNAME=255
+LDFLAGS=-lcurl -lmagic -lm -lsolidc
+SRC_DIR=src
 OBJ_DIR=obj
 SRCS=$(wildcard $(SRC_DIR)/*.c) main.c
 OBJS=$(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
-TARGET=server
+BIN_DIR=bin
+TARGET=$(BIN_DIR)/server
 
 all: $(TARGET)
 
@@ -14,6 +15,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
+	mkdir -p $(BIN_DIR)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
@@ -23,7 +25,7 @@ check: all
 
 # Install dependencies
 dep:
-	sudo apt-get install libcurl4-openssl-dev libmagic-dev libpcre3 libpcre3-dev
+	sudo apt-get install libcurl4-openssl-dev libmagic-dev
 
 clean:
 	rm -f $(OBJ_DIR)/*.o $(TARGET)

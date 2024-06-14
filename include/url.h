@@ -1,8 +1,12 @@
 #ifndef URL_H
 #define URL_H
 
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <curl/curl.h>
 #include <solidc/cstr.h>
+#include <solidc/map.h>
 #include <stdbool.h>
 #include <stdio.h>
 
@@ -15,6 +19,9 @@ typedef struct URL {
     char* query;               // Query string if present or NULL.
     char* fragment;            // Fragment is not forwarded by http clients and browsers.
     char* port;                // port.
+
+    // Query parameters
+    map* queryParams;
 } URL;
 
 // Parse a url into it's components.

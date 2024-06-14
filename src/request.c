@@ -1,13 +1,12 @@
-#include "request.h"
+#include "../include/request.h"
+#include "../include/method.h"
+#include "../include/url.h"
 
 #include <assert.h>
 #include <solidc/cstr.h>
 #include <solidc/file.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "method.h"
-#include "url.h"
 
 static const char* LF = "\r\n";
 static const char* DOUBLE_LF = "\r\n\r\n";
@@ -23,6 +22,62 @@ static size_t parse_int(const char* str) {
         return 0;
     }
     return value;
+}
+
+static void parse_url_query_params(URL* url) {
+    if (url->query == NULL)
+        return;
+
+    char* query = strdup(url->query);
+    if (!query) {
+        return;
+    }
+
+    map* queryParams = map_create(0, key_compare_char_ptr);
+    if (!queryParams) {
+        fprintf(stderr, "Unable to allocate queryParams\n");
+        return;
+    }
+
+    char* key = NULL;
+    char* value = NULL;
+    char *save_ptr, *save_ptr2;
+    bool success = true;
+
+    char* token = strtok_r(query, "&", &save_ptr);
+    while (token != NULL) {
+        key = strtok_r(token, "=", &save_ptr2);
+        value = strtok_r(NULL, "=", &save_ptr2);
+
+        if (key != NULL && value != NULL) {
+            char* queryName = strdup(key);
+            if (queryName == NULL) {
+                perror("strdup");
+                success = false;
+                break;
+            }
+
+            char* queryValue = strdup(value);
+            if (queryValue == NULL) {
+                free(queryName);
+                perror("strdup");
+                success = false;
+                break;
+            }
+
+            map_set(queryParams, queryName, queryValue);
+        }
+        token = strtok_r(NULL, "&", &save_ptr);
+    }
+
+    free(query);
+
+    if (success) {
+        url->queryParams = queryParams;
+    } else {
+        map_destroy(queryParams, true);
+        url->queryParams = NULL;
+    }
 }
 
 Header** parse_headers(Arena* arena, cstr* data, size_t* num_headers, size_t* header_end_idx, HttpMethod method,
@@ -168,6 +223,9 @@ Request* request_parse_http(Arena* arena, cstr* data, HttpInfo* info) {
         fprintf(stderr, "url_parse(): error parsing url\n");
         return NULL;
     }
+
+    // Parse query and path params
+    parse_url_query_params(request->url);
 
     // Allocate the body of the request if any and possible.
     // POST, PUT, PATCH, DELETE
@@ -688,9 +746,13 @@ bool save_file_to_disk(const char* filename, FileHeader header, Request* req) {
 // Free elements allocated in multipart.
 // multipart itself is allocated in the arena and should not be freed.
 static void multipart_free(MultipartForm* multipart) {
+    if (multipart == NULL)
+        return;
+
     if (multipart->form) {
         // Free the map and all keys and values representing fields
         map_destroy(multipart->form, true);
+        multipart->form = NULL;
     }
 
     if (multipart->files) {
@@ -699,6 +761,7 @@ static void multipart_free(MultipartForm* multipart) {
             free(multipart->files[i].field_name);
         }
         free(multipart->files);
+        multipart->files = NULL;
     }
 }
 
@@ -748,8 +811,13 @@ FileHeader* get_form_files(const char* field_name, Request* request, size_t num_
 // multipart itself is allocated in the arena and should not be freed.
 // Free request URL elements and multipart form if any.
 void request_destroy(Request* request) {
+    if (!request)
+        return;
     url_free(request->url);
-    multipart_free(request->multipart);
+
+    if (request->multipart)
+        multipart_free(request->multipart);
 
     // No need to free req body as it's allocated in the arena.
+    request = NULL;
 }

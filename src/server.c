@@ -1,7 +1,7 @@
 #define _XOPEN_SOURCE 700  // For sigaction
 #define RWTASK_POOL_SIZE 1024
 
-#include "server.h"
+#include "../include/server.h"
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <signal.h>
@@ -192,7 +192,7 @@ cstr* read_client_socket(Arena* arena, int client_fd, HttpInfo* info) {
     return request_data;
 }
 
-static void send_error(int client_fd, int status, const char* message) {
+static void http_error(int client_fd, int status, const char* message) {
     char reply[2048] = {0};
 
     snprintf(reply, sizeof(reply), "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n",
@@ -217,82 +217,59 @@ void handleReadAndWrite(void* args) {
     ServeMux serve_mux = task->serve_mux;
 
     int status = StatusOK;
-    char error[1024] = {0};
-
     Arena* arena = NULL;
     Request* request = NULL;
     Response* response = NULL;
+    HttpInfo httpInfo = {0};
 
     arena = arena_create(ARENA_DEFAULT_CHUNKSIZE, SYSTEM_MAX_ALIGNMENT);
-    assert(arena);
-
-    HttpInfo httpInfo = {0};
+    if (!arena) {
+        http_error(client_fd, StatusInternalServerError, "Unable to allocate memory");
+        goto cleanup;
+    }
 
     // Read the request data from the client
     cstr* data = read_client_socket(arena, client_fd, &httpInfo);
     if (!data || data->length == 0 || httpInfo.httpMethod == M_INVALID) {
-        // client closed connection or it was an invalid http request
-        close_client(client_fd, epoll_fd);
-        arena_destroy(arena);
-
-        // mark the task as unused
-        task->client_fd = -1;
-        return;
+        http_error(client_fd, StatusBadRequest, "Invalid request");
+        goto cleanup;
     }
 
     request = request_parse_http(arena, data, &httpInfo);
     response = alloc_response(arena, client_fd);
     if (request == NULL || response == NULL) {
         // Likely broken pipe
-        // client closed connection or it was an invalid http request
-        close_client(client_fd, epoll_fd);
-        arena_destroy(arena);
-
-        // mark the task as unused
-        task->client_fd = -1;
-        return;
+        goto cleanup;
     }
 
     Context context = {.request = request, .response = response};
-
-    // Find the matching route
-    Route* matching_route = serve_mux(request->method, request->url->path);
+    Route* matching_route = serve_mux(request->method, request->url);
     if (!matching_route) {
-        status = StatusNotFound;
-        snprintf(error, sizeof(error), "404 Not Found: %s", request->url->path);
-        send_error(client_fd, status, error);
-        close_client(client_fd, epoll_fd);
-        arena_destroy(arena);
-
-        // mark the task as unused
-        task->client_fd = -1;
-        return;
+        http_error(client_fd, StatusNotFound, StatusText(status));
+        goto cleanup;
     }
-
-    // Call the matching handler
     context.route = matching_route;
-
-    // printf("Request path: %s\n", request->url->path);
     matching_route->handler(&context);
 
-    // If request failed, send an error.
-    // Assume 100 - 308 are good requests.
-    if (status > StatusPermanentRedirect) {
-        send_error(client_fd, status, error);
-    }
-
-    // Close client connection and remove from monitored fds.
+cleanup:
     close_client(client_fd, epoll_fd);
+    if (request)
+        request_destroy(request);
 
-    // Free memory used by the arena.
-    arena_destroy(arena);
+    if (arena)
+        arena_destroy(arena);
 
     // mark the task as unused
     task->client_fd = -1;
 }
 
 // Initialize a thread pool.
-void listen_and_serve(TCPServer* server, ServeMux mux) {
+void listen_and_serve(TCPServer* server, ServeMux mux, int num_threads) {
+    if (num_threads < 1) {
+        fprintf(stderr, "listen_and_serve(): Invalid number of threads\n");
+        exit(EXIT_FAILURE);
+    }
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
     initialize_libmagic();
     init_rwtaks();
@@ -314,7 +291,7 @@ void listen_and_serve(TCPServer* server, ServeMux mux) {
         exit(EXIT_FAILURE);
     }
 
-    ThreadPool pool = threadpool_create(2);
+    ThreadPool pool = threadpool_create(num_threads);
     if (!pool) {
         fprintf(stderr, "listen_and_serve(): Unable to allocate memory for a threadpool\n");
         exit(EXIT_FAILURE);
@@ -348,9 +325,11 @@ void listen_and_serve(TCPServer* server, ServeMux mux) {
                     set_nonblocking(client_fd);
                     epoll_ctl_add(epoll_fd, client_fd, &event, EPOLLIN | EPOLLET | EPOLLONESHOT);
                     // printf("Accepted connection from %s\n", inet_ntoa(server->server_addr.sin_addr));
+                    // Here EPOLLONESHOT is used to ensure that when the read event is triggered,
+                    // We read all the data at once. This is because we are using edge-triggered mode.
                 } else {
                     perror("listen_and_serve(): accept");
-                    // If accept failed, continue to the next iteration.
+                    // we don't want to exit the server on accept() error.
                     continue;
                 }
             } else {

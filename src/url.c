@@ -1,4 +1,4 @@
-#include "url.h"
+#include "../include/url.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,6 +46,7 @@ URL* url_parse(Arena* arena, const char* url) {
             parsedUrl->port = strdup("80");
         }
     }
+
     return parsedUrl;
 }
 
@@ -60,6 +61,7 @@ void url_free(URL* url) {
 
     if (url->query) {
         curl_free(url->query);
+        map_destroy(url->queryParams, true);
     }
 
     if (url->fragment) {

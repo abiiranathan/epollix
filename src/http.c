@@ -1,4 +1,4 @@
-#include "http.h"
+#include "../include/http.h"
 #include <ctype.h>
 #include <solidc/file.h>
 #include <solidc/filepath.h>
@@ -32,7 +32,7 @@ typedef struct Response {
 
 // Helper function to register a new route
 Route* registerRoute(HttpMethod method, const char* pattern, RouteHandler handler, RouteType type) {
-    if (numRoutes == MAX_ROUTES) {
+    if (numRoutes >= MAX_ROUTES) {
         fprintf(stderr, "Number of routes %d exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
         exit(EXIT_FAILURE);
     }
@@ -42,44 +42,41 @@ Route* registerRoute(HttpMethod method, const char* pattern, RouteHandler handle
     route->handler = handler;
     route->type = type;
     memset(route->dirname, 0, sizeof(route->dirname));
-
-    // Replace the pattern with an a regex pattern if it's a normal route
-    char regex_pat[MAX_PATTERN_LENGTH] = {0};
-
-    if (type == NormalRoute) {
-        if (strchr(pattern, '^') == NULL && strchr(pattern, '$') == NULL) {
-            snprintf(regex_pat, sizeof(regex_pat), "^%s$", pattern);
-        } else if (strchr(pattern, '^') == NULL) {
-            snprintf(regex_pat, sizeof(regex_pat), "^%s", pattern);
-        } else if (strchr(pattern, '$') == NULL) {
-            snprintf(regex_pat, sizeof(regex_pat), "%s$", pattern);
-        } else {
-            strncpy(regex_pat, pattern, sizeof(regex_pat) - 1);
-            regex_pat[strlen(pattern) - 1] = '\0';
-        }
-
-        // Compile the pattern into a PCRE2 pattern
-        int error_code;
-        PCRE2_SIZE error_offset;
-        route->pattern.regex_pattern =
-            pcre2_compile((PCRE2_SPTR)regex_pat, PCRE2_ZERO_TERMINATED, 0, &error_code, &error_offset, NULL);
-
-        // Check for compilation errors and exit if any
-        if (route->pattern.regex_pattern == NULL) {
-            PCRE2_UCHAR8 buffer[256];
-            pcre2_get_error_message(error_code, buffer, sizeof(buffer));
-            fprintf(stderr, "PCRE2 compilation failed at offset %d: %s\n", (int)error_offset, buffer);
-            exit(EXIT_FAILURE);
-        }
-    } else if (type == StaticRoute) {
-        route->pattern.static_pattern = strdup(pattern);
-    } else {
-        fprintf(stderr, "Unknown route type\n");
-        exit(EXIT_FAILURE);
+    route->pattern = strdup(pattern);
+    if (route->pattern == NULL) {
+        perror("registerRoute(): strdup(): memory allocation failed");
+        return NULL;
     }
+
+    route->params = malloc(sizeof(PathParams));
+    if (route->params == NULL) {
+        perror("registerRoute(): malloc(): memory allocation failed");
+        return NULL;
+    }
+
+    route->params->match_count = 0;
+    memset(route->params->params, 0, sizeof(route->params->params));
 
     numRoutes++;
     return route;
+}
+
+// url_query_param returns the value associated with a query parameter.
+// Returns NULL if the parameter is not found.
+const char* url_query_param(Context* ctx, const char* name) {
+    URL* url = ctx->request->url;
+    if (!url || !url->queryParams || !name)
+        return NULL;
+    return map_get(url->queryParams, name);
+}
+
+// url_path_param returns the value associated with a path parameter.
+// Returns NULL if the parameter is not found.
+const char* url_path_param(Context* ctx, const char* name) {
+    if (!ctx || !ctx->route || !name) {
+        return NULL;
+    }
+    return get_path_param(ctx->route->params, name);
 }
 
 void OPTIONS_ROUTE(const char* pattern, RouteHandler handler) {
@@ -106,47 +103,27 @@ void DELETE_ROUTE(const char* pattern, RouteHandler handler) {
     registerRoute(M_DELETE, pattern, handler, NormalRoute);
 }
 
-Route* matchRoute(HttpMethod method, const char* path) {
+Route* matchRoute(HttpMethod method, URL* url) {
     Route* bestMatch = NULL;
-    size_t bestMatchLength = 0;
-    size_t subject_length = strlen(path);
-    size_t match_len = 0;
+    bool matches = false;
 
     for (int i = 0; i < numRoutes; i++) {
-        if (routeTable[i].type == NormalRoute) {
-            pcre2_code_8* re = routeTable[i].pattern.regex_pattern;
-            pcre2_match_data* match_data = NULL;
+        if (method != routeTable[i].method) {
+            continue;
+        }
 
-            match_data = pcre2_match_data_create_from_pattern(re, NULL);
-            if (match_data == NULL) {
-                fprintf(stderr, "Failed to create match data for pattern\n");
-                return NULL;
-            }
-
-            int code = pcre2_match(re, (PCRE2_SPTR)path, subject_length, 0, 0, match_data, NULL);
-
-            // Match both the path(code > 0) and the method
-            if (code >= 0 && routeTable[i].method == method) {
-                match_len = pcre2_get_ovector_pointer(match_data)[1] - pcre2_get_ovector_pointer(match_data)[0];
-
-                // Ensure the match covers the entire string and is longer than the previous match
-                if (match_len == subject_length && match_len > bestMatchLength) {
-                    bestMatch = &routeTable[i];
-                    bestMatchLength = match_len;
-                }
-            }
-
-            // Free the match data
-            pcre2_match_data_free(match_data);
-        } else if (routeTable[i].type == StaticRoute) {
-            const char* pattern = routeTable[i].pattern.static_pattern;
-            if (strncmp(path, pattern, strlen(pattern)) == 0 && routeTable[i].method == method) {
+        if (routeTable[i].type == StaticRoute) {
+            // For static routes, we match only the prefix as an exact match.
+            if (strncmp(routeTable[i].pattern, url->path, strlen(routeTable[i].pattern)) == 0) {
                 bestMatch = &routeTable[i];
                 break;
             }
         } else {
-            fprintf(stderr, "Unknown route type. Expected NormalRoute or StaticRoute\n");
-            return NULL;
+            matches = match_path_parameters(routeTable[i].pattern, url->path, routeTable[i].params);
+            if (matches) {
+                bestMatch = &routeTable[i];
+                break;
+            }
         }
     }
     return bestMatch;
@@ -155,12 +132,8 @@ Route* matchRoute(HttpMethod method, const char* path) {
 void router_cleanup() {
     // Cleanup compiled patterns
     for (int i = 0; i < numRoutes; i++) {
-        RouteType type = routeTable[i].type;
-        if (type == NormalRoute) {
-            pcre2_code_free(routeTable[i].pattern.regex_pattern);
-        } else if (type == StaticRoute) {
-            free(routeTable[i].pattern.static_pattern);
-        }
+        free(routeTable[i].pattern);
+        free(routeTable[i].params);
     }
 }
 
@@ -240,7 +213,7 @@ static void staticFileHandler(Context* ctx) {
     const char* dirname = ctx->route->dirname;
 
     // Trim the static pattern from the path
-    const char* static_path = ctx->request->url->path + strlen(ctx->route->pattern.static_pattern);
+    const char* static_path = ctx->request->url->path + strlen(ctx->route->pattern);
 
     // Concatenate the dirname and the static path
     char fullpath[MAX_PATH_SIZE] = {0};
@@ -809,7 +782,11 @@ int send_file(Context* ctx, const char* filename) {
                 // Continue the loop and retry sending the current buffer
                 continue;
             } else {
-                perror("sendfile");
+                if (errno == EPIPE) {
+                    // client disconnected. Nothing to report
+                } else {
+                    perror("sendfile");
+                }
                 fclose(file);
                 return -1;
             }
@@ -817,7 +794,12 @@ int send_file(Context* ctx, const char* filename) {
     }
 
     if (sent_bytes == -1) {
-        perror("sendfile");
+        if (errno == EPIPE) {
+            // client disconnected. Nothing to report
+        } else {
+            perror("sendfile");
+        }
+
         fclose(file);
         return -1;
     }

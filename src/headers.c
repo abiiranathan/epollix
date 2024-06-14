@@ -1,4 +1,4 @@
-#include "headers.h"
+#include "../include/headers.h"
 #include <strings.h>
 
 Header* new_header(Arena* arena, const char* name, const char* value) {

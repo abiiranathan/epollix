@@ -1,4 +1,4 @@
-#include "method.h"
+#include "../include/method.h"
 
 #include <stdio.h>
 #include <stdlib.h>

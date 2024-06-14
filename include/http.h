@@ -25,11 +25,8 @@
 #define MAX_PATH_SIZE 256
 #endif
 
-#define PCRE2_CODE_UNIT_WIDTH 8
 #include <errno.h>
 #include <magic.h>
-#include <pcre2.h>
-#include <regex.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -37,6 +34,7 @@
 #include <strings.h>
 #include "headers.h"
 #include "method.h"
+#include "params.h"
 #include "request.h"
 
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
@@ -50,15 +48,12 @@ typedef struct Context {
 typedef void (*RouteHandler)(Context* ctx);
 
 typedef struct Route {
-    HttpMethod method;  // HTTP Method.
-    RouteType type;     // Type of Route (Normal or Static)
-    union pattern {
-        char* static_pattern;       // For Static Routes
-        pcre2_code* regex_pattern;  // https://www.pcre.org/current/doc/html/
-    } pattern;
-
+    HttpMethod method;          // HTTP Method.
+    RouteType type;             // Type of Route (Normal or Static)
+    char* pattern;              // Pattern to match
     RouteHandler handler;       // Handler for the route
     char dirname[MAX_DIRNAME];  // Dirname for static route.
+    PathParams* params;         // Parameters extracted from the URL
 } Route;
 
 void initialize_libmagic(void);
@@ -91,7 +86,7 @@ void OPTIONS_ROUTE(const char* pattern, RouteHandler handler);
 void STATIC_DIR(const char* pattern, char* dirname);
 
 // Match the best regex pattern.
-Route* matchRoute(HttpMethod method, const char* path);
+Route* matchRoute(HttpMethod method, URL* url);
 
 // Called by server be4 shutdown to cleanup compiled
 // regex patterns.
@@ -222,12 +217,18 @@ void redirect_with_status(Context* ctx, const char* url, HttpStatus status);
 bool send_chunk(Response* res, void* data, ssize_t chunk_size);
 
 // Read contents and filename and send them to the remote server.
-// We try to guess the Mime-type but you should set it your-self to
-// wrongly guessed mime-type.
+// Uses libmagic to guess the Mime-type. If your profile shows this as slow,
+// consider setting the Content-Type yourself.
 // Returns number of bytes sent or -1 for errors.
 int send_file(Context* ctx, const char* filename);
 
 // get the mime-type of the file using libmagic.
-bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[buffer_len]);
+bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[static buffer_len]);
+
+// url_query_param returns the value associated with a query parameter.
+const char* url_query_param(Context* ctx, const char* name);
+
+// url_path_param returns the value associated with a path parameter.
+const char* url_path_param(Context* ctx, const char* name);
 
 #endif /* HTTP_H */

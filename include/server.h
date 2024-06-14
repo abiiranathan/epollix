@@ -25,7 +25,7 @@ typedef struct TCPServer {
 } TCPServer;
 
 // Takes in method and path and returns the matching handler.
-typedef Route* (*ServeMux)(HttpMethod method, const char* path);
+typedef Route* (*ServeMux)(HttpMethod method, URL* url);
 
 // Create a IPV4 TCP server and bind to port.
 TCPServer* new_tcpserver(int port);
@@ -38,7 +38,7 @@ int set_nonblocking(int sockfd);
 void epoll_ctl_add(int epoll_fd, int sock_fd, struct epoll_event* event, uint32_t events);
 
 // Start the event loop and run server on specified port.
-void listen_and_serve(TCPServer* server, ServeMux mux);
+void listen_and_serve(TCPServer* server, ServeMux mux, int num_threads);
 
 // Start the event loop and run server on specified port.
 // Serve TLS.

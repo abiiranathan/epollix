@@ -1,8 +1,8 @@
 #define _GNU_SOURCE 1  // for secure_getenv
 
 #include <solidc/map.h>
-#include "http/http.h"
-#include "http/server.h"
+#include "include/http.h"
+#include "include/server.h"
 
 void homeHandler(Context* ctx) {
     set_header(ctx->response, "Content-Type", "text/html");
@@ -18,10 +18,10 @@ void download(Context* ctx) {
     send_file(ctx, "./README.md");
 }
 
+// TODO: parse_form currently works well with application/x-www-form-urlencoded
+// TODO: and multipart/form-data with text fields. It supports file uploads
+// TODO: for plain text files. It does not support binary files yet.
 void loginUser(Context* ctx) {
-    // TODO: parse_form currently works well with application/x-www-form-urlencoded
-    // TODO: and multipart/form-data with text fields. It supports file uploads
-    // TODO: for plain text files. It does not support binary files yet.
     parse_form(ctx->request);
 
     MultipartForm* multipart = ctx->request->multipart;
@@ -67,9 +67,16 @@ void loginUser(Context* ctx) {
     asprintf(&reply, json, username, password);
     printf("JSON: %s\n", reply);
     free(reply);
-    map_destroy(multipart->form, true);
-
     redirect(ctx, "/about");
+}
+
+// GET /users/{username}/profile
+void profileHandler(Context* ctx) {
+    const char* username = url_path_param(ctx, "username");
+    char* reply = NULL;
+    asprintf(&reply, "<h1>Hello %s</h1>\n", username);
+    send_string(ctx, reply);
+    free(reply);
 }
 
 void setupRoutes() {
@@ -77,6 +84,7 @@ void setupRoutes() {
     GET_ROUTE("/about", aboutHandler);
     GET_ROUTE("/download", download);
     POST_ROUTE("/login", loginUser);
+    GET_ROUTE("/users/{username}/profile", profileHandler);
     STATIC_DIR("/web", "./web");
 }
 
@@ -91,6 +99,6 @@ int main(int argc, char* argv[]) {
     int port = atoi(argv[1]);
 
     TCPServer* server = new_tcpserver(port);
-    listen_and_serve(server, matchRoute);
+    listen_and_serve(server, matchRoute, 2);
     return EXIT_SUCCESS;
 }
