@@ -1,4 +1,4 @@
-# epoll-web-server
+# epollix
 
 An ambitious project to create a web server using epoll in C.
 
