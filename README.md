@@ -87,14 +87,14 @@ sudo cmake --install .
 
 ### Benchmarks with ab( Apache Benchmark)
 ```bash
-ab -n 1000000 -c 1000 http://localhost:8080/
+ab -n 1000000 -c 100 http://localhost:8080/
 ```
-Running the above command will send 1000000 requests with 1000 concurrent connections to the server running on localhost:8080. The server should be able to handle this load without any issues.
+Running the above command will send 1000000 requests with 100 concurrent connections to the server running on localhost:8080. The server should be able to handle this load without any issues.
 
 Results when compiled with -O3 flag:
 
 ```bash
-ab -n 1000000 -c 100 http://localhost:8080/ 
+ab -n 1000000 -c 100 http://localhost:8080/
 This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
 Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
 Licensed to The Apache Software Foundation, http://www.apache.org/
@@ -121,22 +121,22 @@ Document Path:          /
 Document Length:        36 bytes
 
 Concurrency Level:      100
-Time taken for tests:   31.480 seconds
+Time taken for tests:   29.257 seconds
 Complete requests:      1000000
 Failed requests:        0
 Total transferred:      100000000 bytes
 HTML transferred:       36000000 bytes
-Requests per second:    31766.53 [#/sec] (mean)
-Time per request:       3.148 [ms] (mean)
-Time per request:       0.031 [ms] (mean, across all concurrent requests)
-Transfer rate:          3102.20 [Kbytes/sec] received
+Requests per second:    34179.52 [#/sec] (mean)
+Time per request:       2.926 [ms] (mean)
+Time per request:       0.029 [ms] (mean, across all concurrent requests)
+Transfer rate:          3337.84 [Kbytes/sec] received
 
 Connection Times (ms)
               min  mean[+/-sd] median   max
-Connect:        0    1   0.3      1       5
-Processing:     0    2   0.3      2       6
-Waiting:        0    1   0.3      2       5
-Total:          2    3   0.4      3       7
+Connect:        0    1   0.3      1       6
+Processing:     1    2   0.6      2      53
+Waiting:        0    1   0.6      1      52
+Total:          2    3   0.7      3      53
 
 Percentage of the requests served within a certain time (ms)
   50%      3
@@ -147,8 +147,7 @@ Percentage of the requests served within a certain time (ms)
   95%      4
   98%      4
   99%      4
- 100%      7 (longest request)
-
+ 100%     53 (longest request)
 
 ```
 

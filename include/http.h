@@ -174,9 +174,6 @@ Response* alloc_response(Arena* arena, int client_fd);
 // https://go.dev/src/net/http/status.go
 const char* StatusText(HttpStatus statusCode);
 
-// Returns the value of the response header if exists or NULL.
-const char* find_resp_header(Response* res, const char* name, int* index);
-
 // Sents Transfer-Encoding to "chunked" and prepares internal state
 // for multiple send calls.
 void enable_chunked_transfer(Response* res);

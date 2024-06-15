@@ -122,6 +122,7 @@ const char* get_path_param(const PathParams* pathParams, const char* name) {
     return NULL;
 }
 
+// #define TEST_PARAMS
 #ifdef TEST_PARAMS
 int main() {
     const char* pattern = "/about/{name}/profile/{id}/";

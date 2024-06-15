@@ -33,20 +33,19 @@ void loginUser(Context* ctx) {
 
     const char* username = map_get(multipart->form, "username");
     const char* password = map_get(multipart->form, "password");
+    printf("Username: %s\n", username);
+    printf("Password: %s\n", password);
+
+    // Extract file from request
+    // TODO: pass MAX_UPLOAD_FILES as a parameter
+    FileHeader fileHeaders[MAX_UPLOAD_FILES];
+    size_t num_files = 0;
+    get_form_files("file", ctx->request, fileHeaders, &num_files);
+    printf("Number of files: %zu\n", num_files);
 
     if (username == NULL || password == NULL) {
         set_status(ctx->response, StatusBadRequest);
         send_string(ctx, "Username and password are required\n");
-        return;
-    }
-
-    // Extract file from request
-    FileHeader* fileHeaders;
-    size_t num_files;
-    fileHeaders = get_form_files("file", ctx->request, &num_files);
-    if (!fileHeaders) {
-        set_status(ctx->response, StatusBadRequest);
-        send_string(ctx, "Expected file, not found\n");
         return;
     }
 

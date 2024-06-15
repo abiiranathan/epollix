@@ -1,0 +1,11 @@
+[package]
+name = "rcore"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+multipart = "0.18.0"
+mime = "0.3.17"
+
+[lib]
+crate-type = ["staticlib"]

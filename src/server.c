@@ -36,6 +36,10 @@ static void handle_sigint(int signal) {
     if (signal == SIGINT || signal == SIGKILL) {
         exit_server = 1;
         printf("Detected %s signal(%d)\n", strsignal(signal), signal);
+
+        // Bug: sometimes the server does not exit immediately.
+        // and hangs for a few seconds. This is because the epoll_wait()
+        // system call is blocking. The culprit is the sendfile() system call.
     }
 }
 

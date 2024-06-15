@@ -62,3 +62,6 @@ map_test
 uploads
 *.mp4
 web
+
+rust/rcore/target
+rust/rcore/main

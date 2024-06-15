@@ -25,9 +25,9 @@ typedef struct Response {
     HttpStatus status;      // Status code
     void* data;             // Response data
     size_t content_length;  // Content-Length
-    size_t header_count;    // Number of headers
-    Header** headers;       // Headers array
-    Arena* arena;           // Arena for response(ptr to request arena)
+
+    size_t header_count;               // Number of headers
+    Header headers[MAX_RESP_HEADERS];  // Response headers
 } Response;
 
 // Helper function to register a new route
@@ -67,7 +67,7 @@ const char* url_query_param(Context* ctx, const char* name) {
     URL* url = ctx->request->url;
     if (!url || !url->queryParams || !name)
         return NULL;
-    return map_get(url->queryParams, name);
+    return map_get(url->queryParams, (char*)name);
 }
 
 // url_path_param returns the value associated with a path parameter.
@@ -237,7 +237,7 @@ static void staticFileHandler(Context* ctx) {
     if (is_dir(filepath)) {
         size_t filepath_len = strlen(filepath);
         // remove the trailing slash
-        if (filepath[filepath_len - 1] == '/') {
+        if (filepath_len > 1 && filepath[filepath_len - 1] == '/') {
             filepath[filepath_len - 1] = '\0';
         }
 
@@ -287,9 +287,10 @@ void STATIC_DIR(const char* pattern, char* dir) {
     }
 
     Route* route = registerRoute(M_GET, pattern, staticFileHandler, StaticRoute);
+    assert(route != NULL);
+
     route->type = StaticRoute;
-    strncpy(route->dirname, dirname, MAX_DIRNAME - 1);
-    route->dirname[strlen(dirname)] = '\0';
+    snprintf(route->dirname, MAX_DIRNAME, "%s", dirname);
     free(dirname);
 }
 
@@ -301,23 +302,17 @@ Response* alloc_response(Arena* arena, int client_fd) {
 
     res->status = 200;
     res->chunked = false;
-    res->header_count = 0;
     res->stream_complete = false;
     res->data = NULL;
     res->content_length = 0;
     res->client_fd = client_fd;
-    res->headers = (Header**)arena_alloc(arena, sizeof(Header*) * MAX_RESP_HEADERS);
-    if (!res->headers) {
-        return NULL;
-    }
 
+    // initialize the headers array
+    res->header_count = 0;
     memset(res->headers, 0, sizeof(Header*) * MAX_RESP_HEADERS);
-    res->arena = arena;
 
     // Set default headers
     set_header(res, "Content-Type", DEFAULT_CONTENT_TYPE);
-
-    // Set default headers
     return res;
 }
 
@@ -410,7 +405,6 @@ void set_status(Response* res, HttpStatus statusCode) {
 }
 
 static void write_headers(Response* res) {
-
     // Set default status code
     if (res->status == 0) {
         res->status = StatusOK;
@@ -423,26 +417,31 @@ static void write_headers(Response* res) {
     snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", res->status, StatusText(res->status));
 
     // Write the status line to the header
-    strncpy(header_res, status_line, sizeof(header_res));
+    snprintf(header_res, sizeof(header_res), "%s", status_line);
     written += strlen(status_line);
 
     // Add headers
     for (size_t i = 0; i < res->header_count; i++) {
-        char header[512] = {0};
-        snprintf(header, sizeof(header), "%s: %s\r\n", res->headers[i]->name->data, res->headers[i]->value->data);
+        char header[MAX_HEADER_NAME + MAX_HEADER_VALUE + 4] = {0};
+        header_tostring(&res->headers[i], header, sizeof(header));
 
-        // Check if the header fits in the buffer
-        if (written + strlen(header) >= MAX_HEADER_SIZE) {
-            fprintf(stderr, "Header size exceeds MAX_HEADER_SIZE: %d\n", MAX_HEADER_SIZE);
-            continue;
+        // append \r\n to the end of header
+        strncat(header, "\r\n", sizeof(header) - strlen(header) - 1);
+
+        size_t header_len = strlen(header);
+        if (written + header_len >= MAX_HEADER_SIZE - 4) {  // 4 is for the \r\n\r\n
+            fprintf(stderr, "Exceeded max header size: %d\n", MAX_HEADER_SIZE);
+            return;
         }
 
-        // Append the header to the header buffer
+        // Append the header to the response headers
         strncat(header_res, header, sizeof(header_res) - written);
-        written += strlen(header);
+        written += header_len;
     }
 
-    // null terminate the header
+    // Append the end of the headers
+    strncat(header_res, "\r\n", sizeof(header_res) - written);
+    written += 2;
     header_res[written] = '\0';
 
     // Send the response headers
@@ -450,11 +449,6 @@ static void write_headers(Response* res) {
     // on a stream-oriented socket has closed the connection.
     int nbytes_sent = send(res->client_fd, header_res, strlen(header_res), MSG_NOSIGNAL);
     if (nbytes_sent == -1) {
-        perror("write_headers() failed");
-    }
-
-    // Send the end of the headers
-    if (send(res->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
         perror("write_headers() failed");
     }
 }
@@ -503,22 +497,6 @@ static bool send_end_of_request(Response* res) {
     return true;
 }
 
-const char* find_resp_header(Response* res, const char* name, int* index) {
-    if (index) {
-        *index = -1;  // reset to avoid carrying over from previous calls
-    }
-
-    for (size_t i = 0; i < res->header_count; i++) {
-        if (strcasecmp(name, res->headers[i]->name->data) == 0) {
-            if (index) {
-                *index = i;
-            }
-            return res->headers[i]->value->data;
-        }
-    }
-    return NULL;
-}
-
 void enable_chunked_transfer(Response* res) {
     if (!res->stream_complete) {
         set_header(res, "Transfer-Encoding", "chunked");
@@ -532,20 +510,20 @@ void set_header(Response* res, const char* name, const char* value) {
         return;
     }
 
-    // check if this header already exists
-    int index = -1;
-    find_resp_header(res, name, &index);
+    size_t name_len = strlen(name);
+    size_t value_len = strlen(value);
+    if (name_len >= MAX_HEADER_NAME || value_len >= MAX_HEADER_VALUE) {
+        fprintf(stderr, "Header name or value exceeds max length: (%d, %d)\n", MAX_HEADER_NAME, MAX_HEADER_VALUE);
+        return;
+    }
 
+    // Check if this header already exists
+    int index = find_header_index(res->headers, res->header_count, name);
     if (index == -1) {
-        Header* header = new_header(res->arena, name, value);
-        if (header) {
-            res->headers[res->header_count++] = header;
-        } else {
-            fprintf(stderr, "Failed to allocate memory for header : %s\n", name);
-        }
+        res->headers[res->header_count++] = new_header(name, value);
     } else {
         // Replace header value
-        res->headers[index]->value = cstr_from(res->arena, value);
+        snprintf(res->headers[index].value, MAX_HEADER_VALUE, "%s", value);
     }
 }
 
@@ -623,9 +601,7 @@ int send_file(Context* ctx, const char* filename) {
     assert(res);
 
     // Guess content-type if not already set
-    int index = -1;
-
-    if (!find_resp_header(res, "Content-Type", &index)) {
+    if (find_header(res->headers, res->header_count, "Content-Type") != NULL) {
         char mime[1024];
         if (get_mime_type(filename, sizeof(mime), mime)) {
             set_header(res, "Content-Type", mime);
@@ -637,9 +613,7 @@ int send_file(Context* ctx, const char* filename) {
     bool is_range_request = false;
     bool has_end_range = false;
 
-    range_header = find_req_header(ctx->request, "Range", NULL);
-    // printf("Range header: %s\n", range_header);
-
+    range_header = find_header(ctx->request->headers, ctx->request->header_length, "Range");
     if (range_header) {
         if (strstr(range_header, "bytes=") != NULL) {
             if (sscanf(range_header, "bytes=%ld-%ld", &start, &end) == 2) {
@@ -678,11 +652,7 @@ int send_file(Context* ctx, const char* filename) {
         // Send the requested range in chunks of 4MB
         ssize_t byteRangeSize = (4 * 1024 * 1024) - 1;
         if (!has_end_range && start >= 0) {
-            if (start == 0) {
-                end = file_size;
-            } else {
-                end = start + byteRangeSize;  // Send the requested range starting from the start position
-            }
+            end = start + byteRangeSize;
         } else if (start < 0) {
             // Http range requests can be negative :) Wieird but true
             // I had to read the RFC to understand this, who would have thought?
@@ -857,8 +827,7 @@ bool get_mime_type(const char* filename, size_t buffer_len, char mime_buffer[sta
         return false;
     }
 
-    strncpy(mime_buffer, mime_type, buffer_len);
-    mime_buffer[mimelen] = '\0';
+    snprintf(mime_buffer, buffer_len, "%s", mime_type);
     return true;
 }
 
