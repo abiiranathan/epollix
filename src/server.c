@@ -152,19 +152,19 @@ cstr* read_client_socket(Arena* arena, int client_fd, HttpInfo* info) {
     }
 
     int method_parsed = false;
-    while (1) {
-        char buffer[1024];
-        int bytes_read = read(client_fd, buffer, sizeof(buffer));
-        if (bytes_read <= 0) {
-            // success = (errno == EAGAIN || errno == EWOULDBLOCK);
-            break;
-        }
 
+    // 181258 read
+    // Expected to read 306694 bytes
+    size_t total_bytes_read = 0;
+    int bytes_read;
+    char buffer[1024] = {0};
+    while ((bytes_read = read(client_fd, buffer, sizeof(buffer))) > 0) {
         buffer[bytes_read] = '\0';
         if (!cstr_append(arena, request_data, buffer)) {
             fprintf(stderr, "read_client_socket: cstr_append failed\n");
             return NULL;
         }
+        total_bytes_read += bytes_read;
 
         if (!method_parsed) {
             // Parse the method and URL
@@ -193,6 +193,8 @@ cstr* read_client_socket(Arena* arena, int client_fd, HttpInfo* info) {
         fprintf(stderr, "Invalid Http method\n");
         return NULL;
     }
+
+    printf("Total bytes read: %zu\n", total_bytes_read);
     return request_data;
 }
 
@@ -322,12 +324,18 @@ void listen_and_serve(TCPServer* server, ServeMux mux, int num_threads) {
         }
 
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == server_fd) {
+            if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || (!(events[i].events & EPOLLIN))) {
+                /* An error has occured on this fd, or the socket is not
+                 ready for reading (why were we notified then?) */
+                fprintf(stderr, "epoll error\n");
+                close(events[i].data.fd);
+                continue;
+            } else if (events[i].data.fd == server_fd) {
                 socklen_t client_len = sizeof(server->server_addr);
                 int client_fd = accept(server_fd, (struct sockaddr*)&server->server_addr, &client_len);
                 if (client_fd != -1) {
                     set_nonblocking(client_fd);
-                    epoll_ctl_add(epoll_fd, client_fd, &event, EPOLLIN | EPOLLET | EPOLLONESHOT);
+                    epoll_ctl_add(epoll_fd, client_fd, &event, EPOLLIN | EPOLLET);
                     // printf("Accepted connection from %s\n", inet_ntoa(server->server_addr.sin_addr));
                     // Here EPOLLONESHOT is used to ensure that when the read event is triggered,
                     // We read all the data at once. This is because we are using edge-triggered mode.

@@ -18,44 +18,39 @@ void download(Context* ctx) {
     send_file(ctx, "./README.md");
 }
 
-// TODO: parse_form currently works well with application/x-www-form-urlencoded
-// TODO: and multipart/form-data with text fields. It supports file uploads
-// TODO: for plain text files. It does not support binary files yet.
 void loginUser(Context* ctx) {
-    parse_form(ctx->request);
+    MultipartForm form_data = {0};
+    MultipartCode code;
+    code = parse_multipart_form(ctx->request, &form_data);
 
-    MultipartForm* multipart = ctx->request->multipart;
-    if (multipart->form == NULL) {
+    if (code != MULTIPART_OK) {
         set_status(ctx->response, StatusBadRequest);
-        send_string(ctx, get_form_error(multipart->error));
+        send_string(ctx, multipart_error_message(code));
         return;
     }
 
-    const char* username = map_get(multipart->form, "username");
-    const char* password = map_get(multipart->form, "password");
+    const char* username = multipart_get_field_value(&form_data, "username");
+    const char* password = multipart_get_field_value(&form_data, "password");
     printf("Username: %s\n", username);
     printf("Password: %s\n", password);
 
-    // Extract file from request
-    // TODO: pass MAX_UPLOAD_FILES as a parameter
-    FileHeader fileHeaders[MAX_UPLOAD_FILES];
-    size_t num_files = 0;
-    get_form_files("file", ctx->request, fileHeaders, &num_files);
-    printf("Number of files: %zu\n", num_files);
+    // Save all the uploaded files if any to disk
+    char path[1024] = {0};
+    for (size_t i = 0; i < form_data.num_files; i++) {
+        memset(path, 0, sizeof(path));  // re-initialize path
+        bool ok = filepath_join_buf("uploads", form_data.files[i]->filename, path, sizeof(path));
+        if (!ok) {
+            printf("Error joining path\n");
+            continue;
+        }
 
-    if (username == NULL || password == NULL) {
-        set_status(ctx->response, StatusBadRequest);
-        send_string(ctx, "Username and password are required\n");
-        return;
-    }
-
-    char path[1024];
-    filepath_join_buf("uploads", fileHeaders[0].filename, path, sizeof(path));
-
-    if (!save_file_to_disk(path, fileHeaders[0], ctx->request)) {
-        set_status(ctx->response, StatusInternalServerError);
-        send_string(ctx, "Error saving file to disk\n");
-        return;
+        // The file is an offset+size of the body
+        ok = multipart_save_file(form_data.files[i], ctx->request->body, path);
+        if (!ok) {
+            printf("Error saving file: %s\n", path);
+            continue;
+        }
+        printf("File %s saved successfully with size %lu\n", path, form_data.files[i]->size);
     }
 
     // printf("File %s saved successfully\n", path);
@@ -64,9 +59,18 @@ void loginUser(Context* ctx) {
     // send back json
     char* reply = NULL;
     asprintf(&reply, json, username, password);
-    printf("JSON: %s\n", reply);
+
+    // send back json
+    set_status(ctx->response, StatusOK);
+    set_header(ctx->response, "Content-Type", "application/json");
+    send_json(ctx, reply);
+
+    // Free reply
     free(reply);
-    redirect(ctx, "/about");
+
+    // Free form data
+    free_form_data(&form_data);
+    //  Or better: multipart_free_form(&form_data);
 }
 
 // GET /users/{username}/profile
@@ -101,3 +105,5 @@ int main(int argc, char* argv[]) {
     listen_and_serve(server, matchRoute, 2);
     return EXIT_SUCCESS;
 }
+
+// 306694 - Screenshot

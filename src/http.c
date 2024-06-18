@@ -246,9 +246,9 @@ static void staticFileHandler(Context* ctx) {
     }
 
     if (path_exists(filepath)) {
-        const char* contentType = getWebContentType(filepath);
-        if (contentType) {
-            set_header(ctx->response, "Content-Type", contentType);
+        char mime[1024];
+        if (get_mime_type(filepath, sizeof(mime), mime)) {
+            set_header(ctx->response, "Content-Type", mime);
         }
         send_file(ctx, filepath);
         return;

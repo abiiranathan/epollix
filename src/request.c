@@ -1,9 +1,6 @@
 #include "../include/request.h"
-#include "../include/method.h"
-#include "../include/url.h"
 
 #include <assert.h>
-#include <solidc/cstr.h>
 #include <solidc/file.h>
 #include <stdlib.h>
 #include <string.h>
@@ -206,31 +203,22 @@ Request* request_parse_http(Arena* arena, cstr* data, HttpInfo* info) {
     request->header_length = 0;
     request->method = info->httpMethod;
     request->body = NULL;
-    request->body_length = content_length;
     request->url = NULL;
-    request->multipart = NULL;
 
     parse_headers(request, data->data, &header_end_idx, &content_length);
+
+    // Set body length after parsing headers
+    request->body_length = content_length;
+
+    // File alone: 306279
+    // CTLEN: 306694
+    printf("Content-Length: %zu\n", content_length);
 
     // Get the Host header and compose the full url
     const char* host = find_header(request->headers, request->header_length, "Host");
     if (!host) {
         fprintf(stderr, "Host header not found in the request\n");
         return NULL;
-    }
-
-    if (!is_safe_method(info->httpMethod)) {
-        MultipartForm* multipart = arena_alloc(arena, sizeof(MultipartForm));
-        if (!multipart) {
-            fprintf(stderr, "arena_alloc(): error allocating MultipartForm form\n");
-            return NULL;
-        }
-
-        request->multipart = multipart;
-        memset(request->multipart->files, 0, MAX_UPLOAD_FILES * sizeof(FileHeader));
-        request->multipart->num_files = 0;
-        request->multipart->error = FE_SUCCESS;
-        request->multipart->form = NULL;
     }
 
     char url_string[URL_MAX_LENGTH] = {0};
@@ -262,292 +250,114 @@ Request* request_parse_http(Arena* arena, cstr* data, HttpInfo* info) {
 
         // header end index is the start of the body
         // content_length is the length of the body
+        printf("Header end idx: %zu\n", header_end_idx);
+        // printf("%s\n", data->data + header_end_idx);
         memcpy((char*)request->body, data->data + header_end_idx, content_length);
     }
 
     return request;
 }
 
-// ========== FORM AND FILE PROCESSING===================
-typedef enum {
-    STATE_BOUNDARY,
-    STATE_HEADER,
-    STATE_KEY,
-    STATE_VALUE,
-    STATE_FILENAME,
-    STATE_FILE_MIME_HEADER,
-    STATE_MIMETYPE,
-    STATE_FILE_BODY,
-    STATE_END
-} State;
-
-const char* CONTENT_TYPE_URLENCODE = "application/x-www-form-urlencoded";
-const char* CONTENT_TYPE_MULTIPART = "multipart/form-data";
-
-static inline void set_form_error(FormError* error, FormError value) {
-    if (error != NULL) {
-        *error = value;
-    }
+// Free request and its allocated memory for urls.
+// The request itself is allocated in the arena.
+void request_destroy(Request* request) {
+    if (!request)
+        return;
+    url_free(request->url);
+    request = NULL;
 }
 
-// Get the error message for the given error
-const char* get_form_error(FormError error) {
-    switch (error) {
-        case FE_SUCCESS:
-            return "Success";
-        case FE_EMPTY_REQUEST_BODY:
-            return "Request body is required and is empty";
-        case FE_MISSING_CONTENT_TYPE:
-            return "Missing Content-Type header";
-        case FE_INVALID_CONTENT_TYPE:
-            return "Invalid Content-Type header";
-        case FE_METHOD_NOT_ALLOWED:
-            return "Method not allowed";
-        case FE_MEMORY_ALLOCATION_FAILED:
-            return "Memory allocation failed";
-        case FE_INVALID_BOUNDARY:
-            return "Invalid boundary";
-        case FE_FILE_TOO_BIG:
-            return "File exceeds maximum allowed size";
-        default:
-            return "Unknown error";
-    }
+// Get the value of the header from the request.
+const char* get_content_type(Request* request) {
+    return find_header(request->headers, request->header_length, "Content-Type");
 }
 
-static void parse_multipart_form_data_helper(Request* request, char* data, char* boundary) {
-    // Set the form
-    map* form = map_create(32, key_compare_char_ptr);
-    if (!form) {
-        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-        return;
+// Parse the multipart/form-data from the request body using the RUST multipart parser.
+// via FFI. It's the caller's responsibility to free the memory allocated by this function.
+MultipartCode parse_multipart_form(Request* request, MultipartForm* form) {
+    const char* content_type = get_content_type(request);
+    if (!content_type) {
+        return INVALID_CONTENTTYPE_HEADER;
     }
-    request->multipart->form = form;
 
-    State state = STATE_BOUNDARY;
-    const char* ptr = data;
-    const char* key_start = NULL;
-    const char* value_start = NULL;
-
-    char key[MAX_FILE_HEADER_FIELDNAME] = {0};
-    char value[MAX_FORM_TEXT_LENGTH] = {0};
-    char filename[MAX_FILE_HEADER_FILENAME] = {0};
-    char mimetype[MAX_FILE_HEADER_MIME] = {0};
-
-    // Current file in State transitions
-    FileHeader header = {.filesize = 0, .start_pos = 0};
-
-    size_t boundary_length = strlen(boundary);
-    while (*ptr != '\0') {
-        switch (state) {
-            case STATE_BOUNDARY:
-                if (strncmp(ptr, boundary, boundary_length) == 0) {
-                    state = STATE_HEADER;
-                    ptr += boundary_length;
-
-                    while (*ptr == '-' || *ptr == '\r' || *ptr == '\n') {
-                        ptr++;  // Skip extra characters after boundary
-                    }
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_HEADER:
-                if (strncmp(ptr, "Content-Disposition:", 20) == 0) {
-                    ptr = strstr(ptr, "name=\"") + 6;
-                    key_start = ptr;
-                    state = STATE_KEY;
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_KEY:
-                if (*ptr == '"' && key_start != NULL) {
-                    size_t key_length = ptr - key_start;
-                    if (key_length >= MAX_FILE_HEADER_FIELDNAME) {
-                        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-                        return;
-                    }
-                    strncpy(key, key_start, key_length);
-                    key[key_length] = '\0';  // Ensure null-termination
-
-                    if (strncmp(ptr, "\"; filename=\"", 13) == 0) {
-                        strncpy(header.field_name, key, key_length);
-                        header.field_name[key_length] = '\0';  // Ensure null-termination
-                        ptr = strstr(ptr, "; filename=\"") + 12;
-                        key_start = ptr;
-                        state = STATE_FILENAME;
-                    } else {
-                        while (*ptr != '\n') {
-                            ptr++;
-                        }
-                        ptr++;
-                        if (*ptr == '\r' && *(ptr + 1) == '\n') {
-                            ptr += 2;
-                        }
-                        value_start = ptr;
-                        state = STATE_VALUE;
-                    }
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_VALUE:
-                if ((strncmp(ptr, "\r\n--", 4) == 0 || strncmp(ptr, boundary, boundary_length) == 0) &&
-                    value_start != NULL) {
-                    size_t value_length = ptr - value_start;
-                    if (value_length >= MAX_FORM_TEXT_LENGTH) {
-                        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-                        return;
-                    }
-                    strncpy(value, value_start, value_length);
-                    value[value_length] = '\0';  // Ensure null-termination
-                    map_set(request->multipart->form, strdup(key), strdup(value));
-                    state = STATE_BOUNDARY;
-                    while (*ptr == '\r' || *ptr == '\n') {
-                        ptr++;  // Skip CRLF characters
-                    }
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_FILENAME:
-                if (*ptr == '"' && key_start != NULL) {
-                    size_t filename_length = ptr - key_start;
-                    if (filename_length >= MAX_FILE_HEADER_FILENAME) {
-                        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-                        return;
-                    }
-                    strncpy(filename, key_start, filename_length);
-                    filename[filename_length] = '\0';  // Ensure null-termination
-                    strncpy(header.filename, filename, filename_length);
-                    header.filename[filename_length] = '\0';  // Ensure null-termination
-                    while (*ptr != '\n') {
-                        ptr++;
-                    }
-                    ptr++;
-                    if (*ptr == '\r' && *(ptr + 1) == '\n') {
-                        ptr += 2;
-                    }
-                    state = STATE_FILE_MIME_HEADER;
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_FILE_MIME_HEADER:
-                if (strncmp(ptr, "Content-Type: ", 14) == 0) {
-                    ptr = strstr(ptr, "Content-Type: ") + 14;
-                    state = STATE_MIMETYPE;
-                } else {
-                    ptr++;
-                }
-                break;
-
-            case STATE_MIMETYPE: {
-                size_t mimetype_len = 0;
-                value_start = ptr;
-                while (*ptr != '\r' && *ptr != '\n') {
-                    mimetype_len++;
-                    ptr++;
-                }
-                if (mimetype_len >= MAX_FILE_HEADER_MIME) {
-                    set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-                    return;
-                }
-                strncpy(mimetype, value_start, mimetype_len);
-                mimetype[mimetype_len] = '\0';  // Ensure null-termination
-                strncpy(header.mimetype, mimetype, mimetype_len);
-                header.mimetype[mimetype_len] = '\0';  // Ensure null-termination
-                while (*ptr != '\n') {
-                    ptr++;
-                }
-                ptr++;
-                while (*ptr == '\r' && *(ptr + 1) == '\n') {
-                    ptr += 2;
-                }
-                if (mimetype[0] == '\0' || memcmp(ptr, boundary, boundary_length) == 0) {
-                    state = STATE_BOUNDARY;
-                } else {
-                    state = STATE_FILE_BODY;
-                }
-            } break;
-
-            case STATE_FILE_BODY:
-                header.start_pos = ptr - data;
-                size_t endpos = 0;
-                char* endptr = strstr(ptr, boundary);
-                if (endptr == NULL) {
-                    set_form_error(&request->multipart->error, FE_INVALID_BOUNDARY);
-                    return;
-                } else {
-                    endpos = endptr - data;
-                }
-
-                // remove CRLF from the end of the file
-                endpos -= 2;
-
-                size_t file_size = endpos - header.start_pos;  // Skip CRLF
-                header.filesize = file_size;
-                if (file_size > MAX_FILE_SIZE || request->multipart->num_files >= MAX_UPLOAD_FILES) {
-                    set_form_error(&request->multipart->error, FE_FILE_TOO_BIG);
-                    return;
-                }
-                request->multipart->files[request->multipart->num_files++] = header;
-                while (*ptr == '\r' && *(ptr + 1) == '\n') {
-                    ptr += 2;
-                }
-                state = STATE_BOUNDARY;
-                break;
-
-            case STATE_END:
-                break;
-        }
+    char boundary[128] = {0};
+    bool success = multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary));
+    if (!success) {
+        return INVALID_FORM_BOUNDARY;
     }
+
+    printf("Boundary: %s\n", boundary);
+
+    // write body to file for debugging
+    FILE* file = fopen("body.txt", "wb");
+    fwrite(request->body, 1, request->body_length, file);
+    fclose(file);
+
+    return multipart_parse_form(request->body, request->body_length, boundary, form);
 }
 
-// Parse form data from the request body if the content type is application/x-www-form-urlencoded
-static void parse_urlencoded(Request* request) {
-    const char* content_type = find_header(request->headers, request->header_length, "Content-Type");
-    if (content_type == NULL) {
-        set_form_error(&request->multipart->error, FE_MISSING_CONTENT_TYPE);
-        return;
+// Free the memory allocate with parse_multipart_form.
+void free_form_data(MultipartForm* form) {
+    multipart_free_form(form);
+}
+
+// ========== URLENCODED FORM DATA FUNCTIONS =============
+// Parse the urlencoded form data from the request body.
+URLEncodedFormData* parse_urlencoded_form(Request* request) {
+    const char* content_type = get_content_type(request);
+    if (content_type == NULL || strncmp(content_type, "application/x-www-form-urlencoded", 33) != 0) {
+        fprintf(stderr, "Content-Type is not application/x-www-form-urlencoded\n");
+        return NULL;
     }
 
-    if (strncmp(content_type, CONTENT_TYPE_URLENCODE, strlen(CONTENT_TYPE_URLENCODE)) != 0) {
-        set_form_error(&request->multipart->error, FE_INVALID_CONTENT_TYPE);
-        return;
+    URLEncodedFormData* form_data = (URLEncodedFormData*)malloc(sizeof(URLEncodedFormData));
+    if (form_data == NULL) {
+        fprintf(stderr, "Error allocating URLEncodedFormData\n");
+        return NULL;
     }
 
-    map* form = map_create(32, key_compare_char_ptr);
-    char* key = NULL;
-    char* value = NULL;
-    char *save_ptr, *save_ptr2;
+    form_data->data = map_create(32, key_compare_char_ptr);
+    if (form_data->data == NULL) {
+        free(form_data);
+        fprintf(stderr, "Error allocating map for URLEncodedFormData\n");
+        return NULL;
+    }
 
     char* body = strdup(request->body);
     if (!body) {
-        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-        return;
+        free_urlencoded_form_data(form_data);
+        fprintf(stderr, "Error allocating memory for URLEncodedFormData\n");
+        return NULL;
     }
 
+    char* key = NULL;
+    char* value = NULL;
+    char *save_ptr, *save_ptr2;
     char* token = strtok_r(body, "&", &save_ptr);
+
     while (token != NULL) {
         key = strtok_r(token, "=", &save_ptr2);
         value = strtok_r(NULL, "=", &save_ptr2);
 
         if (key != NULL && value != NULL) {
             char* field_name = strdup(key);
-            assert(field_name != NULL);
+            if (field_name == NULL) {
+                free_urlencoded_form_data(form_data);
+                fprintf(stderr, "strdup failed on field %s\n", key);
+                return NULL;
+            }
 
             char* field_value = strdup(value);
-            assert(field_value != NULL);
+            if (field_value == NULL) {
+                free(field_name);
+                free_urlencoded_form_data(form_data);
+                fprintf(stderr, "strdup for value failed on field %s\n", key);
+                return NULL;
+            }
 
-            if (map_get(form, field_name) == NULL) {
+            if (map_get(form_data->data, field_name) == NULL) {
                 // don't overwrite existing keys
-                map_set(form, field_name, field_value);
+                map_set(form_data->data, field_name, field_value);
             } else {
                 free(field_name);
                 free(field_value);
@@ -556,162 +366,18 @@ static void parse_urlencoded(Request* request) {
 
         token = strtok_r(NULL, "&", &save_ptr);
     }
-}
-
-// Parse form data from the request body based on the content type
-void parse_form(Request* request) {
-    if (request->body == NULL || request->multipart == NULL) {
-        set_form_error(&request->multipart->error, FE_EMPTY_REQUEST_BODY);
-        return;
-    }
-
-    if (is_safe_method(request->method)) {
-        set_form_error(&request->multipart->error, FE_METHOD_NOT_ALLOWED);
-        return;
-    }
-
-    const char* content_type_header = find_header(request->headers, request->header_length, "Content-Type");
-    if (content_type_header == NULL) {
-        set_form_error(&request->multipart->error, FE_MISSING_CONTENT_TYPE);
-        return;
-    }
-
-    if (strncmp(content_type_header, CONTENT_TYPE_URLENCODE, strlen(CONTENT_TYPE_URLENCODE)) == 0) {
-        parse_urlencoded(request);
-        return;
-    }
-
-    char content_type[FORM_BOUNDARY_SIZE] = {0};
-    char boundary[FORM_BOUNDARY_SIZE] = {0};
-
-    char* body = strdup(request->body);
-    if (!body) {
-        set_form_error(&request->multipart->error, FE_MEMORY_ALLOCATION_FAILED);
-        return;
-    }
-
-    if (sscanf(content_type_header, "%127[^;]; boundary=%127s", content_type, boundary) == 2) {
-        if (strncmp(content_type, CONTENT_TYPE_MULTIPART, strlen(CONTENT_TYPE_MULTIPART)) == 0) {
-            // Browsers have diferrent behavior for the boundary.
-            // Some browsers add extra "--" at the start of the boundary.
-            // So, we need to check for both cases.
-            // This is the case with Google Chrome
-            if (strncmp(body, "------", 6) == 0 && strncmp(boundary, "------", 6) != 0) {
-                char new_boundary[132] = "--";
-                strncat(new_boundary, boundary, FORM_BOUNDARY_SIZE);
-                parse_multipart_form_data_helper(request, body, new_boundary);
-            } else {
-                parse_multipart_form_data_helper(request, body, boundary);
-            }
-        }
-    } else {
-        set_form_error(&request->multipart->error, FE_INVALID_CONTENT_TYPE);
-    }
 
     free(body);
+    return form_data;
 }
 
-// Get the file contents from the file header.
-char* get_file_contents(FileHeader header, Request* req) {
-    if (req->body == NULL)
-        return NULL;
-
-    if (header.start_pos == 0 || header.filesize == 0) {
-        fprintf(stderr, "FileHeader is not valid\n");
-        return NULL;
-    }
-
-    char* bytes = malloc(header.filesize);
-    if (!bytes) {
-        perror("malloc");
-        return NULL;
-    }
-
-    memcpy(bytes, req->body + header.start_pos, header.filesize);
-    // we don't null-terminate the file contents
-    // as it may contain binary data
-    return bytes;
+// Free the memory allocated with parse_urlencoded_form.
+void free_urlencoded_form_data(URLEncodedFormData* form_data) {
+    map_destroy(form_data->data, true);
+    free(form_data);
 }
 
-// Save file.
-bool save_file_to_disk(const char* filename, FileHeader header, Request* req) {
-    if (req->body == NULL)
-        return false;
-
-    if (header.start_pos == 0 || header.filesize == 0) {
-        fprintf(stderr, "FileHeader is not valid\n");
-        return false;
-    }
-
-    // Use cross-platform file_open from solidc
-    FILE* f = fopen(filename, "w");
-    if (!f) {
-        perror("fopen");
-        return false;
-    }
-
-    char* data = (char*)get_file_contents(header, req);
-    if (!data) {
-        fclose(f);
-        return false;
-    }
-
-    size_t w = fwrite(data, 1, header.filesize, f);
-    fclose(f);
-    free(data);
-
-    if (w < header.filesize) {
-        perror("write");
-    }
-    return w == header.filesize;
-}
-
-// Free elements allocated in multipart.
-// multipart itself is allocated in the arena and should not be freed.
-static void multipart_free(MultipartForm* multipart) {
-    if (multipart == NULL)
-        return;
-
-    if (multipart->form) {
-        // Free the map and all keys and values representing fields
-        map_destroy(multipart->form, true);
-        multipart->form = NULL;
-    }
-}
-
-// get_form_files returns a FileHeader(s) matching a given name.
-void get_form_files(const char* field_name, Request* request, FileHeader headers[MAX_UPLOAD_FILES],
-                    size_t num_files[static 1]) {
-
-    size_t index = 0;
-    for (size_t i = 0; i < (request->multipart->num_files && i < MAX_UPLOAD_FILES); i++) {
-        char* name = request->multipart->files[i].field_name;
-        size_t file_size = request->multipart->files[i].filesize;
-
-        if (strcmp(name, field_name) == 0 && file_size > 0) {
-            FileHeader h;
-            h = (FileHeader){.filesize = file_size, .start_pos = request->multipart->files[i].start_pos};
-            strcpy(h.field_name, name);
-            strcpy(h.mimetype, request->multipart->files[i].mimetype);
-            strcpy(h.filename, request->multipart->files[i].filename);
-
-            headers[index++] = h;
-            (*num_files)++;
-        }
-    }
-}
-
-// Free elements allocated in multipart.
-// multipart itself is allocated in the arena and should not be freed.
-// Free request URL elements and multipart form if any.
-void request_destroy(Request* request) {
-    if (!request)
-        return;
-    url_free(request->url);
-
-    if (request->multipart)
-        multipart_free(request->multipart);
-
-    // No need to free req body as it's allocated in the arena.
-    request = NULL;
+// Get the value of the key from the URLEncodedFormData.
+const char* get_urlencoded_value(URLEncodedFormData* form_data, const char* key) {
+    return map_get(form_data->data, (char*)key);
 }

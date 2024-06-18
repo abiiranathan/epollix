@@ -15,7 +15,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define MAX_EVENTS 1024
+#define MAX_EVENTS SOMAXCONN
 
 typedef struct TCPServer {
     int server_fd;
