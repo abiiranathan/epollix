@@ -11,13 +11,13 @@
 //=========================================================================================
 #define _GNU_SOURCE  // for memmem
 
+#include "../include/multipart.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-
-#include "../include/multipart.h"
 
 // Helper function to double the capacity of files allocated in the form.
 static FileHeader** realloc_files(MultipartForm* form);
@@ -49,7 +49,7 @@ static bool insert_header(MultipartForm* form, FileHeader header) {
 
 /**
  * Parse a multipart form from the request body.
- * @param data: Request body (with out headers)
+ * @param data: Request body (with out headers). Its not assumed to be null-terminated.
  * @param size: Content-Length(size of data in bytes)
  * @param boundary: Null-terminated string for the form boundary.
  * @param form: Pointer to MultipartForm struct to store the parsed form data. It is assumed
@@ -105,7 +105,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     MultipartCode code = MULTIPART_OK;
 
     // Start parsing the form data
-    while (*ptr != '\0') {
+    while (ptr < data + size) {
         switch (state) {
             case STATE_BOUNDARY:
                 if (strncmp(ptr, boundary, boundary_length) == 0) {
@@ -119,7 +119,12 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 break;
             case STATE_HEADER:
                 if (strncmp(ptr, "Content-Disposition:", 20) == 0) {
-                    ptr = strstr(ptr, "name=\"") + 6;
+                    ptr = sstrstr(ptr, "name=\"", size - (ptr - data));
+                    if (!ptr) {
+                        code = INVALID_FORM_BOUNDARY;
+                        goto cleanup;
+                    }
+                    ptr += 6;  // Skip name=\"
                     key_start = ptr;
                     state = STATE_KEY;
                 } else {
@@ -140,7 +145,12 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
 
                     if (strncmp(ptr, "\"; filename=\"", 13) == 0) {
                         strncpy(header.field_name, key, MAX_FIELD_NAME_SIZE);
-                        ptr = strstr(ptr, "; filename=\"") + 12;
+                        ptr = sstrstr(ptr, "\"; filename=\"", size - (ptr - data));
+                        if (!ptr) {
+                            code = INVALID_FORM_BOUNDARY;
+                            goto cleanup;
+                        }
+                        ptr += 13;  // Skip "; filename=\""
                         key_start = ptr;
                         state = STATE_FILENAME;
                     } else {
@@ -223,8 +233,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                     ptr++;  // Skip the newline character
 
                     // consume the leading CRLF before value if available
-                    // avoid dereferencing null pointer if ptr+1 is null
-                    if (*ptr == '\r' && *(ptr + 1) == '\n')
+                    bool is_look_ahead_in_bounds = (ptr + 1) < (data + size);
+                    if (is_look_ahead_in_bounds && *ptr == '\r' && *(ptr + 1) == '\n')
                         ptr += 2;
 
                     // We expect the next line to be Content-Type
@@ -235,7 +245,12 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
             } break;
             case STATE_FILE_MIME_HEADER: {
                 if (strncmp(ptr, "Content-Type: ", 14) == 0) {
-                    ptr = strstr(ptr, "Content-Type: ") + 14;
+                    ptr = sstrstr(ptr, "Content-Type: ", size - (ptr - data));
+                    if (!ptr) {
+                        code = INVALID_FORM_BOUNDARY;
+                        goto cleanup;
+                    }
+                    ptr += 14;  // Skip "Content-Type: "
                     state = STATE_MIMETYPE;
                 } else {
                     ptr++;
@@ -271,12 +286,21 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 ptr++;  // Skip the newline character
 
                 // consume the leading CRLF before bytes of the file
-                while (((*ptr == '\r' && *(ptr + 1) == '\n'))) {
-                    ptr += 2;
+                // Make sure the look ahead is within bounds
+                while (((*ptr == '\r' && ((ptr + 1) < (data + size)) && *(ptr + 1) == '\n'))) {
+                    ptr += 2;  // skip CRLF
                 }
 
-                // No file content.
+                // No file content if the next line is a boundary
                 if (memcmp(ptr, boundary, boundary_length) == 0) {
+                    // If the file was never provided,the filename will be empty
+                    // That's not an error.
+                    if (strcmp(filename, "") == 0) {
+                        state = STATE_BOUNDARY;
+                        break;
+                    }
+
+                    // We have empty file body
                     code = EMPTY_FILE_CONTENT;
                     goto cleanup;
                 }
@@ -334,7 +358,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 memset(&header, 0, sizeof(FileHeader));
 
                 // consume the trailing CRLF before the next boundary
-                while (((*ptr == '\r' && *(ptr + 1) == '\n'))) {
+                // Make sure the look ahead is within bounds
+                while (((*ptr == '\r' && ((ptr + 1) < (data + size)) && *(ptr + 1) == '\n'))) {
                     ptr += 2;
                 }
                 state = STATE_BOUNDARY;
@@ -350,15 +375,37 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
 cleanup:
     if (code != MULTIPART_OK)
         multipart_free_form(form);
-
     return code;
+}
+
+// A simple implementation of strstr that takes a length parameter.
+// and does not search beyond the length. This avoids dependence on
+// both the haystack and needle being null-terminated.
+// Shamelessly copied verbatim from:
+// https://stackoverflow.com/questions/8584644/strstr-for-a-string-that-is-not-null-terminated
+char* sstrstr(const char* haystack, const char* needle, size_t length) {
+    size_t needle_length = strlen(needle);
+    size_t i;
+    for (i = 0; i < length; i++) {
+        if (i + needle_length > length) {
+            return NULL;
+        }
+        if (strncmp(&haystack[i], needle, needle_length) == 0) {
+            return (char*)&haystack[i];
+        }
+    }
+    return NULL;
 }
 
 // Parses the form boundary from the request body and copies it into the boundary buffer.
 // size if the sizeof(boundary) buffer.
+// body is the request body and is not assumed to be null-terminated. The boundary is assumed to be
+// within the first 64 bytes of the body.
 // Returns: true on success, false if the size is small or no boundary found.
 bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
-    char* boundary_end = strstr(body, "\r\n");  // should end at first CRLF
+    // Search within the first 64 bytes for the boundary
+    // This is a reasonable assumption since the boundary is usually within the first few bytes.
+    char* boundary_end = sstrstr(body, "\r\n", 64);
     if (!boundary_end) {
         fprintf(stderr, "Unable to determine the boundary in body: %s\n", body);
         return false;
@@ -376,7 +423,7 @@ bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
     return true;
 }
 
-// Parses the form boundary from the content-type header.
+// Parses the form boundary from the content-type header that is expected to be a NULL-terminated string.
 // Note that this boundary must always be -- shorter than what's in the body, so it's prefixed for you.
 // Returns true if successful, otherwise false(Invalid Content-Type, no boundary).
 bool multipart_parse_boundary_from_header(const char* content_type, char* boundary, size_t size) {
@@ -389,7 +436,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
         return false;
     }
 
-    char* start = strstr(content_type, "boundary=");
+    char* start = sstrstr(content_type, "boundary=", total_length);
     size_t length = total_length - ((start + 9) - content_type);
 
     // Account for prefix and null terminater
@@ -525,8 +572,6 @@ const char* multipart_error_message(MultipartCode error) {
             return "Value too long";
         case EMPTY_FILE_CONTENT:
             return "Empty file content";
-        case INVALID_CONTENTTYPE_HEADER:
-            return "Invalid Content-Type header";
         default:
             return "Multipart OK";
     }

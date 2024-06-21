@@ -1,19 +1,23 @@
 # epollix
 
-An ambitious project to create a web server using epoll in C.
+Robust web server written in C using epoll.
+
+Warning: This is a work in progress and possibly not yet fit for production use.
+It's API is going to change. That said, give it a try and report bugs!
 
 ## Features
-- [x] Basic HTTP server
-- [x] Static file serving
+- [x] Robust HTTP server with epoll.
+- [x] Efficient static file serving with chunked transfer with `sendfile` unix function.
 - [x] Routing with parameter parsing and query string parsing(regex not supported yet)
-- [x] Form processing(application/x-www-form-urlencoded + multipart/form-data(Only plain text for now))
+- [x] Form processing(application/x-www-form-urlencoded + multipart/form-data that supports multiple file uploads).
 - [x] Appropriate error handling
 - [x] Support for range requests( making it easy to stream videos and audio files)
-- [x] Very fast and efficient, uses epoll for event handling. Consumes < 10 MB of memory for > 100000 concurrent connections and < 10% CPU usage.
+- [x] Very fast and efficient, uses epoll for event handling. Consumes ~= 5 MB of memory for > 1,000,000 concurrent connections and < 15% CPU usage.
+
+No support for windows yet.
 
 ## Big missing features
 - [ ] Support for keep-alive connections
-- [ ] Regex support for routing
 - [ ] Support for binary files in multipart/form-data
 - [ ] Support for cookies
 - [ ] Support for sessions
@@ -23,20 +27,11 @@ An ambitious project to create a web server using epoll in C.
 - [ ] Better project structure and refactoring
 - [ ] Tests for all features
 
-Known issues:
-We can improve the performance of the server by not using `EPOLLONESHOT` flag. This flag is used to make sure that the same file descriptor is not added to the epoll queue multiple times. The problem is that without it, you need to keep state for each file descriptor and that is not possible with the current design. If we can find a way to keep state for each file descriptor, we can remove this flag and improve the performance of the server.
-
 ## How to run
 
 ```bash
 make
-./bin/server 8080
-```
-
-## How to test
-
-```bash
-make test
+./bin/server 8000
 ```
 
 Check for memory leaks:
@@ -47,32 +42,10 @@ make check
 
 Dependencies:
 - solidc: A personal C library for common data structures and utilities that are cross-platform and easy to use. [Find solidc on Github](https://github.com/abiiranathan/solidc)
-- libcurl: For url parsing
-- libmagic: For mime type detection
-
-Installing dependencies:
-
-Ubuntu or Debian:
-```bash
-sudo apt-get install libcurl4-openssl-dev libmagic-dev
-```
-
-Arch Linux:
-
-```bash
-sudo pacman -S curl file
-```
-
-Verify the installation:
-
-```bash
-curl --version
-file --version
-```
 
 Install solidc:
 
-Required cmake and make to be installed. You may also require Ninja build system.
+Requires cmake and make to be installed. You may also require the Ninja build system.
 
 ```bash
 git clone https://github.com/abiiranathan/solidc.git
@@ -84,17 +57,17 @@ make
 sudo cmake --install .
 ```
 
-
 ### Benchmarks with ab( Apache Benchmark)
 ```bash
-ab -n 1000000 -c 100 http://localhost:8080/
+ab -n 1000000 -c 100 http://localhost:8000/
 ```
-Running the above command will send 1000000 requests with 100 concurrent connections to the server running on localhost:8080. The server should be able to handle this load without any issues.
+
+Running the above command will send 1000000 requests with 100 concurrent connections to the server running on localhost:8000. The server should be able to handle this load without any issues.
 
 Results when compiled with -O3 flag:
 
 ```bash
-ab -n 1000000 -c 100 http://localhost:8080/
+ab -n 1000000 -c 100 http://localhost:8000/
 This is ApacheBench, Version 2.3 <$Revision: 1913912 $>
 Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
 Licensed to The Apache Software Foundation, http://www.apache.org/
@@ -115,56 +88,39 @@ Finished 1000000 requests
 
 Server Software:        
 Server Hostname:        localhost
-Server Port:            8080
+Server Port:            8000
 
 Document Path:          /
-Document Length:        36 bytes
+Document Length:        1800 bytes
 
 Concurrency Level:      100
-Time taken for tests:   29.257 seconds
+Time taken for tests:   38.653 seconds
 Complete requests:      1000000
 Failed requests:        0
-Total transferred:      100000000 bytes
-HTML transferred:       36000000 bytes
-Requests per second:    34179.52 [#/sec] (mean)
-Time per request:       2.926 [ms] (mean)
-Time per request:       0.029 [ms] (mean, across all concurrent requests)
-Transfer rate:          3337.84 [Kbytes/sec] received
+Total transferred:      1908000000 bytes
+HTML transferred:       1800000000 bytes
+Requests per second:    25870.95 [#/sec] (mean)
+Time per request:       3.865 [ms] (mean)
+Time per request:       0.039 [ms] (mean, across all concurrent requests)
+Transfer rate:          48204.85 [Kbytes/sec] received
 
 Connection Times (ms)
               min  mean[+/-sd] median   max
-Connect:        0    1   0.3      1       6
-Processing:     1    2   0.6      2      53
-Waiting:        0    1   0.6      1      52
-Total:          2    3   0.7      3      53
+Connect:        0    2   0.4      2       8
+Processing:     0    2   0.5      2      24
+Waiting:        0    1   0.4      1      24
+Total:          3    4   0.6      4      25
 
 Percentage of the requests served within a certain time (ms)
-  50%      3
-  66%      3
-  75%      3
-  80%      3
+  50%      4
+  66%      4
+  75%      4
+  80%      4
   90%      4
-  95%      4
-  98%      4
-  99%      4
- 100%     53 (longest request)
-
-```
-
-### Using wrk:
-
-```bash
-wrk -c 5 -d 15 -T 5000 -H "Host: localhost:8080" --timeout=1000 http://localhost:8080
-
-Running 15s test @ http://localhost:8080
-  2 threads and 5 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    63.62us   31.34us   2.70ms   92.58%
-    Req/Sec    16.99k   772.59    19.10k    64.57%
-  510375 requests in 15.10s, 48.67MB read
-  Socket errors: connect 0, read 510375, write 0, timeout 0
-Requests/sec:  33800.44
-Transfer/sec:      3.22MB
+  95%      5
+  98%      5
+  99%      6
+ 100%     25 (longest request)
 ```
 
 License: MIT

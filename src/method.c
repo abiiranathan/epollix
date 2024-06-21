@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char* httpMethodMapping[6] = {
-    [M_OPTIONS] = "OPTIONS", [M_GET] = "GET",    [M_POST] = "POST",
+static const char* method_mapping[7] = {
+    [M_OPTIONS] = "OPTIONS", [M_HEAD] = "HEAD",  [M_GET] = "GET",       [M_POST] = "POST",
     [M_PUT] = "PUT",         [M_PATCH] = "PATH", [M_DELETE] = "DELETE",
 };
 
@@ -13,7 +13,7 @@ const char* method_tostring(HttpMethod method) {
     if (method < M_OPTIONS || method > M_DELETE) {
         return NULL;
     }
-    return httpMethodMapping[method];
+    return method_mapping[method];
 }
 
 HttpMethod method_fromstring(const char* method) {
@@ -37,8 +37,9 @@ HttpMethod method_fromstring(const char* method) {
 
 bool is_safe_method(HttpMethod method) {
     switch (method) {
-        case M_OPTIONS:
         case M_GET:
+        case M_OPTIONS:
+        case M_HEAD:
             return true;
         default:
             return false;

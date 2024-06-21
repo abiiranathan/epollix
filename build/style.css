@@ -1,0 +1,8 @@
+body {
+  background-color: blue;
+  color: wheat;
+  font-size: 20px;
+  max-width: 800px;
+  padding: 2rem;
+  margin: auto;
+}

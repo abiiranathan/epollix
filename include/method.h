@@ -5,6 +5,7 @@
 typedef enum {
     M_INVALID = -1,
     M_OPTIONS,
+    M_HEAD,
     M_GET,
     M_POST,
     M_PUT,

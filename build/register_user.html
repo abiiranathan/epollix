@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Register user</title>
+
+    <style>
+      * {
+        margin: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        max-width: 1000px;
+        padding: 2rem;
+        margin: auto;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: auto;
+
+        form {
+          width: 30em;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+      }
+
+      form section {
+        display: grid;
+        grid-template-columns: 10em auto;
+        align-items: center;
+        gap: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 style="font: 800; margin: 1rem 0">Register user</h1>
+      <form action="/users/create" method="post" enctype="multipart/form-data">
+        <section>
+          <label for="username">Username</label>
+          <input
+            type="text"
+            name="username"
+            id="username"
+            placeholder="Username..."
+            required
+          />
+        </section>
+
+        <section>
+          <label for="email">Email</label>
+          <input
+            type="email"
+            name="email"
+            id="email"
+            placeholder="email..."
+            required
+          />
+        </section>
+
+        <section>
+          <label for="password">Password</label>
+          <input
+            type="password"
+            name="password"
+            id="password"
+            placeholder="Password..."
+            required
+          />
+        </section>
+
+        <section>
+          <label for="file">Attachment</label>
+          <input
+            type="file"
+            name="file"
+            id="file"
+            accept="application/pdf"
+            multiple
+            placeholder="file..."
+          />
+        </section>
+        <section>
+          <button>REGISTER</button>
+        </section>
+      </form>
+    </div>
+  </body>
+</html>

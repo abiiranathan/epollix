@@ -1,12 +1,21 @@
 #include "../include/mime.h"
+
+#include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
-// Define an array of ExtensionContentTypeMapping
+typedef struct {
+    const char* extension;
+    const char* contentType;
+} ct_mapping;
+
+// Define an array of file extension:content_type mapping.
 // https://mimetype.io/all-types
-static const ContentTypeMapping mapping[] = {
-    // Text
+static const ct_mapping mapping[] = {
+    // Text mime types
     {"html", "text/html"},
     {"htm", "text/html"},
     {"xhtml", "application/xhtml+xml"},
@@ -198,10 +207,47 @@ static const ContentTypeMapping mapping[] = {
     // Scientific Data
     {"netcdf", "application/x-netcdf"},
     {"fits", "application/fits"},
-    {NULL, NULL},
 };
 
-const char* getWebContentType(char* filename) {
+#define HASH_TABLE_SIZE (sizeof(mapping) / sizeof(mapping[0]))
+#define DEFAULT_CONTENT_TYPE "application/octet-stream"
+
+typedef struct HashEntry {
+    const char* extension;
+    const char* contentType;
+    struct HashEntry* next;
+} HashEntry;
+
+// A simple hash table to store the mapping.
+// Uses separate chaining for collision resolution.
+static HashEntry* hashTable[HASH_TABLE_SIZE];
+
+uint32_t hash(const char* str) {
+    uint32_t hash = 0;
+    while (*str) {
+        hash = hash * 31 + *str++;
+    }
+    return hash;
+}
+
+void init_mime_hashtable() {
+    for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
+        uint32_t index = hash(mapping[i].extension) % HASH_TABLE_SIZE;
+        HashEntry* entry = malloc(sizeof(HashEntry));
+        if (entry == NULL) {
+            fprintf(stderr, "Failed to allocate memory for HashEntry\n");
+            exit(EXIT_FAILURE);
+        }
+
+        entry->extension = mapping[i].extension;
+        entry->contentType = mapping[i].contentType;
+        entry->next = hashTable[index];
+        hashTable[index] = entry;
+    }
+}
+
+const char* get_mimetype(char* filename) {
+    size_t len = strlen(filename);
     // Get the file extension
     char *ptr, *start = filename, *last = NULL;
     while ((ptr = strstr(start, "."))) {
@@ -211,21 +257,50 @@ const char* getWebContentType(char* filename) {
 
     // No extension.
     if (last == NULL) {
-        return "application/octet-stream";
+        return DEFAULT_CONTENT_TYPE;
     }
 
-    const char* extension = last + 1;  // skip "."
+    char* extension = last + 1;  // skip "."
+    char* end = filename + len;
 
-    // Determine the size of the mapping array
-    size_t mappingSize = sizeof(mapping) / sizeof(mapping[0]);
+    size_t ext_len = end - extension;
+    if (ext_len == 0) {
+        return DEFAULT_CONTENT_TYPE;
+    }
 
-    // Loop through the mappings and find a matching extension
-    for (size_t i = 0; i < mappingSize; i++) {
-        if (strcmp(extension, mapping[i].extension) == 0) {
-            return mapping[i].contentType;
+    if (ext_len > 255) {
+        fprintf(stderr, "File extension is too long\n");
+        return DEFAULT_CONTENT_TYPE;
+    }
+
+    char file_extension[256] = {0};
+    strncpy(file_extension, extension, sizeof(file_extension) - 1);
+    file_extension[ext_len] = '\0';
+
+    // convert extension to lowercase
+    for (size_t i = 0; i < ext_len; i++) {
+        file_extension[i] = tolower(file_extension[i]);
+    }
+
+    uint32_t index = hash(file_extension) % HASH_TABLE_SIZE;
+    HashEntry* entry = hashTable[index];
+
+    while (entry) {
+        if (strcasecmp(file_extension, entry->extension) == 0) {
+            return entry->contentType;
+        }
+        entry = entry->next;
+    }
+    return DEFAULT_CONTENT_TYPE;
+}
+
+void destroy_mime_hashtable() {
+    for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
+        HashEntry* entry = hashTable[i];
+        while (entry) {
+            HashEntry* temp = entry;
+            entry = entry->next;
+            free(temp);
         }
     }
-
-    // Default content type if no match is found
-    return "application/octet-stream";
 }

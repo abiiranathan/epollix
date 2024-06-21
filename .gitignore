@@ -55,13 +55,6 @@ main
 server
 a.out
 .env
-build
-epoll-server
-select-server
-map_test
+
 uploads
 *.mp4
-web
-
-rust/rcore/target
-rust/rcore/main
