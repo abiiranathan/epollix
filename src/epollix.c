@@ -1,5 +1,4 @@
-#include "../include/server.h"
-#include "../include/mime.h"
+#include "../include/epollix.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -10,6 +9,7 @@
 #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
 #include <signal.h>
 #include <solidc/filepath.h>
+#include <solidc/map.h>
 #include <solidc/thread.h>
 #include <solidc/threadpool.h>
 #include <stdbool.h>
@@ -31,6 +31,56 @@
 #define INVALID_STATUS_LINE "Invalid http status line\n"
 #define METHOD_NOT_ALLOWED "Method not allowed\n"
 
+static const char* CONTENT_TYPE_HEADER = "Content-Type";
+
+typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
+
+typedef struct header {
+    char name[MAX_HEADER_NAME];    // Header key
+    char value[MAX_HEADER_VALUE];  // Header value
+} header_t;
+
+typedef struct Route {
+    HttpMethod method;          // HTTP Method.
+    RouteType type;             // Type of Route (Normal or Static)
+    char* pattern;              // Pattern to match
+    Handler handler;            // Handler for the route
+    char dirname[MAX_DIRNAME];  // Dirname for static route.
+    PathParams* params;         // Parameters extracted from the URL
+} Route;
+
+typedef struct request {
+    int client_fd;        // Peer connection file descriptor
+    int epoll_fd;         // epoll file descriptor.
+    HttpMethod method;    // Http request method as an integer enum;
+    char method_str[16];  // Http request method
+
+    char path[1024];        // Request path and query string
+    char http_version[16];  // Http version
+
+    size_t header_count;                // Number of headers
+    header_t headers[MAX_REQ_HEADERS];  // Request headers
+
+    size_t content_length;  // Content length or size of body
+    uint8_t* body;          // Body of the request.
+    map* query_params;      // Query parameters
+
+    struct Route* route;  // Matching route
+} request_t;
+
+// epollix context containing response primitives and request state.
+typedef struct ep_context {
+    http_status status;                 // Status code
+    uint8_t* data;                      // Response data as bytes.
+    size_t content_length;              // Content-Length
+    size_t header_count;                // Number of headers set.
+    header_t headers[MAX_RES_HEADERS];  // Response headers
+
+    request_t* request;  // Pointer to the request
+    bool headers_sent;   // Headers already sent
+    bool chunked;        // Is a chunked transfer
+} context_t;
+
 static Route routeTable[MAX_ROUTES] = {0};
 static size_t numRoutes = 0;
 
@@ -41,7 +91,7 @@ static Route* notFoundRoute = NULL;
 // =================== STATIC DECLARATIONS ================================================
 static void file_basename(const char* path, char* basename, size_t size);
 static bool parse_url_query_params(char* query, map* query_params);
-static void staticFileHandler(response_t* res);
+static void staticFileHandler(context_t* ctx);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
@@ -305,8 +355,8 @@ int find_header_index(header_t* headers, size_t count, const char* name) {
     return -1;
 }
 
-bool set_header(response_t* res, const char* name, const char* value) {
-    if (res->header_count >= MAX_RES_HEADERS) {
+bool set_header(context_t* ctx, const char* name, const char* value) {
+    if (ctx->header_count >= MAX_RES_HEADERS) {
         fprintf(stderr, "Exceeded max response headers: %d\n", MAX_RES_HEADERS);
         return false;
     }
@@ -319,21 +369,33 @@ bool set_header(response_t* res, const char* name, const char* value) {
     }
 
     // Check if this header already exists
-    int index = find_header_index(res->headers, res->header_count, name);
+    int index = find_header_index(ctx->headers, ctx->header_count, name);
     if (index == -1) {
         header_t header = {0};
         snprintf(header.name, MAX_HEADER_NAME, "%s", name);
         snprintf(header.value, MAX_HEADER_VALUE, "%s", value);
-        res->headers[res->header_count++] = header;
+        ctx->headers[ctx->header_count++] = header;
     } else {
         // Replace header value
-        snprintf(res->headers[index].value, MAX_HEADER_VALUE, "%s", value);
+        snprintf(ctx->headers[index].value, MAX_HEADER_VALUE, "%s", value);
     }
     return true;
 }
 
-const char* get_content_type(request_t* request) {
-    return find_header(request->headers, request->header_count, "Content-Type");
+const Route* get_current_route(context_t* ctx) {
+    return ctx->request->route;
+}
+
+const char* route_pattern(Route* route) {
+    return route->pattern;
+}
+
+void set_status(context_t* ctx, http_status status) {
+    ctx->status = status;
+}
+
+const char* get_content_type(context_t* ctx) {
+    return find_header(ctx->request->headers, ctx->request->header_count, CONTENT_TYPE_HEADER);
 }
 
 bool header_valid(const header_t* h) {
@@ -393,12 +455,14 @@ header_t header_fromstring(const char* str) {
 
 static void handle_write(request_t* req, Route* route) {
     // Initialise response
-    response_t res = {0};
+    context_t res = {0};
     res.content_length = 0;
     res.header_count = 0;
     memset(res.headers, 0, sizeof(res.headers));
     res.status = StatusOK;
     res.request = req;
+    res.headers_sent = false;
+    res.chunked = false;
 
     route->handler(&res);
 
@@ -689,9 +753,9 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
 // Like send(2) but sends the request in chunks if larger than 4K.
 // Uses MSG_NOSIGNAL as the flags.
 ssize_t sendall(int fd, const void* buf, size_t n) {
-    // // Enable TCP_NODELAY to disable Nagle's algorithm
-    // int flag = 1;
-    // setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    // Enable TCP_NODELAY to disable Nagle's algorithm
+    int flag = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 
     if (n <= 64)
         return send(fd, buf, n, MSG_NOSIGNAL);
@@ -727,13 +791,13 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
     return sent;
 }
 
-static void write_headers(response_t* res) {
-    if (res->headers_sent)
+static void write_headers(context_t* ctx) {
+    if (ctx->headers_sent)
         return;
 
     // Set default status code
-    if (res->status == 0) {
-        res->status = StatusOK;
+    if (ctx->status == 0) {
+        ctx->status = StatusOK;
     }
 
     size_t written = 0;
@@ -741,7 +805,7 @@ static void write_headers(response_t* res) {
     char header_res[MAX_RES_HEADER_SIZE] = {0};
     int ret;
 
-    ret = snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", res->status, http_status_text(res->status));
+    ret = snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", ctx->status, http_status_text(ctx->status));
     if (ret > (int)sizeof(status_line)) {
         fprintf(stderr, "status line truncated. Aborted!!\n");
         return;
@@ -752,9 +816,9 @@ static void write_headers(response_t* res) {
     written += strlen(status_line);
 
     // Add headers
-    for (size_t i = 0; i < res->header_count; i++) {
+    for (size_t i = 0; i < ctx->header_count; i++) {
         char header[MAX_HEADER_NAME + MAX_HEADER_VALUE + 4] = {0};
-        header_tostring(&res->headers[i], header, sizeof(header));
+        header_tostring(&ctx->headers[i], header, sizeof(header));
 
         // append \r\n to the end of header
         strncat(header, "\r\n", sizeof(header) - strlen(header) - 1);
@@ -778,30 +842,49 @@ static void write_headers(response_t* res) {
     // Send the response headers
     // MSG_NOSIGNAL: Do not generate a SIGPIPE signal if the peer
     // on a stream-oriented socket has closed the connection.
-    int nbytes_sent = sendall(res->request->client_fd, header_res, strlen(header_res));
+    int nbytes_sent = sendall(ctx->request->client_fd, header_res, strlen(header_res));
     if (nbytes_sent == -1) {
         perror("write_headers() failed");
     }
 
-    res->headers_sent = true;
+    ctx->headers_sent = true;
 }
 
 // Send the response to the client.
 // Returns the number of bytes sent.
-int send_response(response_t* res, char* data, size_t len) {
-    write_headers(res);
-    return sendall(res->request->client_fd, data, len);
+int send_response(context_t* ctx, char* data, size_t len) {
+    char content_len[24];
+    int ret = snprintf(content_len, sizeof(content_len), "%ld", len);
+
+    // This invariant must be respected.
+    if (ret >= (int)sizeof(content_len)) {
+        fprintf(stderr, "Warning: send_response(): truncation of content_len\n");
+    }
+
+    set_header(ctx, "Content-Length", content_len);
+    write_headers(ctx);
+    return sendall(ctx->request->client_fd, data, len);
+}
+
+int send_json(context_t* ctx, char* data, size_t len) {
+    set_header(ctx, CONTENT_TYPE_HEADER, "application/json");
+    return send_response(ctx, data, len);
+}
+
+int send_raw_string(context_t* ctx, char* data, size_t len) {
+    set_header(ctx, CONTENT_TYPE_HEADER, "plain/text");
+    return send_response(ctx, data, len);
 }
 
 // Writes chunked data to the client.
 // Returns the number of bytes written.
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
-int response_send_chunk(response_t* res, char* data, size_t len) {
-    if (!res->headers_sent) {
-        res->status = StatusOK;
-        set_header(res, "Transfer-Encoding", "chunked");
-        write_headers(res);
+int response_send_chunk(context_t* ctx, char* data, size_t len) {
+    if (!ctx->headers_sent) {
+        ctx->status = StatusOK;
+        set_header(ctx, "Transfer-Encoding", "chunked");
+        write_headers(ctx);
     }
 
     // Send the chunked header
@@ -810,37 +893,37 @@ int response_send_chunk(response_t* res, char* data, size_t len) {
     if (ret >= (int)sizeof(chunked_header)) {
         fprintf(stderr, "chunked header truncated\n");
         // end the chunked response
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
-    int nbytes_sent = send(res->request->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
+    int nbytes_sent = send(ctx->request->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
     if (nbytes_sent == -1) {
         perror("error sending chunked header");
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
     // Send the chunked data
-    nbytes_sent = sendall(res->request->client_fd, data, len);
+    nbytes_sent = sendall(ctx->request->client_fd, data, len);
     if (nbytes_sent == -1) {
         perror("error sending chunked data");
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
     // Send end of chunk: Send the chunk's CRLF (carriage return and line feed)
-    if (send(res->request->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
+    if (send(ctx->request->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
         perror("error send end of chunk sentinel");
-        response_end(res);
+        response_end(ctx);
         return false;
     };
     return nbytes_sent;
 }
 
 // End the chunked response. Must be called after all chunks have been sent.
-int response_end(response_t* res) {
-    int nbytes_sent = sendall(res->request->client_fd, "0\r\n\r\n", 5);
+int response_end(context_t* ctx) {
+    int nbytes_sent = sendall(ctx->request->client_fd, "0\r\n\r\n", 5);
     if (nbytes_sent == -1) {
         perror("error sending end of chunked response");
         return -1;
@@ -849,18 +932,18 @@ int response_end(response_t* res) {
 }
 
 // redirect to the given url with a 302 status code
-void response_redirect(response_t* res, const char* url) {
-    if (res->status < StatusMovedPermanently || res->status > StatusPermanentRedirect) {
-        res->status = StatusSeeOther;
+void response_redirect(context_t* ctx, const char* url) {
+    if (ctx->status < StatusMovedPermanently || ctx->status > StatusPermanentRedirect) {
+        ctx->status = StatusSeeOther;
     }
 
-    set_header(res, "Location", url);
-    write_headers(res);
+    set_header(ctx, "Location", url);
+    write_headers(ctx);
 }
 
 // Write headers for the Content-Range and Accept-Ranges.
 // Also sets the status code for partial content.
-static void send_range_headers(response_t* res, ssize_t start, ssize_t end, off64_t file_size) {
+static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64_t file_size) {
     int ret;
     char content_len[24];
     ret = snprintf(content_len, sizeof(content_len), "%ld", end - start + 1);
@@ -871,8 +954,8 @@ static void send_range_headers(response_t* res, ssize_t start, ssize_t end, off6
         exit(EXIT_FAILURE);
     }
 
-    set_header(res, "Accept-Ranges", "bytes");
-    set_header(res, "Content-Length", content_len);
+    set_header(ctx, "Accept-Ranges", "bytes");
+    set_header(ctx, "Content-Length", content_len);
 
     char content_range_str[128];
     ret = snprintf(content_range_str, sizeof(content_range_str), "bytes %ld-%ld/%ld", start, end, file_size);
@@ -882,8 +965,8 @@ static void send_range_headers(response_t* res, ssize_t start, ssize_t end, off6
         exit(EXIT_FAILURE);
     }
 
-    set_header(res, "Content-Range", content_range_str);
-    res->status = StatusPartialContent;
+    set_header(ctx, "Content-Range", content_range_str);
+    ctx->status = StatusPartialContent;
 }
 
 // serve a file with support for partial content specified by the "Range" header.
@@ -891,13 +974,13 @@ static void send_range_headers(response_t* res, ssize_t start, ssize_t end, off6
 // See man(2) sendfile for more information.
 // RFC: https://datatracker.ietf.org/doc/html/rfc7233 for more information about
 // range requests.
-int http_serve_file(response_t* res, const char* filename) {
-    assert(res);
-    assert(res->request);
+int http_serve_file(context_t* ctx, const char* filename) {
+    assert(ctx);
+    assert(ctx->request);
 
     // Guess content-type if not already set
-    if (find_header(res->headers, res->header_count, "Content-Type") == NULL) {
-        set_header(res, "Content-Type", get_mimetype((char*)filename));
+    if (find_header(ctx->headers, ctx->header_count, CONTENT_TYPE_HEADER) == NULL) {
+        set_header(ctx, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
     }
 
     ssize_t start = 0, end = 0;
@@ -905,7 +988,7 @@ int http_serve_file(response_t* res, const char* filename) {
     bool is_range_request = false;
     bool has_end_range = false;
 
-    range_header = find_header(res->request->headers, res->request->header_count, "Range");
+    range_header = find_header(ctx->request->headers, ctx->request->header_count, "Range");
     if (range_header) {
         if (strstr(range_header, "bytes=") != NULL) {
             if (sscanf(range_header, "bytes=%ld-%ld", &start, &end) == 2) {
@@ -922,8 +1005,8 @@ int http_serve_file(response_t* res, const char* filename) {
     FILE* file = fopen64(filename, "rb");
     if (file == NULL) {
         perror("fopen64");
-        res->status = StatusInternalServerError;
-        write_headers(res);
+        ctx->status = StatusInternalServerError;
+        write_headers(ctx);
         return -1;
     }
 
@@ -935,9 +1018,9 @@ int http_serve_file(response_t* res, const char* filename) {
     // Set appropriate headers for partial content
     if (is_range_request) {
         if (start >= file_size) {
-            res->status = StatusRequestedRangeNotSatisfiable;
+            ctx->status = StatusRequestedRangeNotSatisfiable;
             fclose(file);
-            write_headers(res);
+            write_headers(ctx);
             return -1;
         }
 
@@ -963,17 +1046,17 @@ int http_serve_file(response_t* res, const char* filename) {
 
         // Ensure the start and end range are within the file size
         if (start < 0 || end < 0 || end >= file_size) {
-            res->status = StatusRequestedRangeNotSatisfiable;
+            ctx->status = StatusRequestedRangeNotSatisfiable;
             fclose(file);
-            write_headers(res);
+            write_headers(ctx);
             return -1;
         }
 
-        send_range_headers(res, start, end, file_size);
+        send_range_headers(ctx, start, end, file_size);
 
         // Move file position to the start of the requested range
         if (fseeko64(file, start, SEEK_SET) != 0) {
-            res->status = StatusRequestedRangeNotSatisfiable;
+            ctx->status = StatusRequestedRangeNotSatisfiable;
             perror("fseeko64");
             fclose(file);
             return -1;
@@ -988,7 +1071,7 @@ int http_serve_file(response_t* res, const char* filename) {
         }
 
         // Set the content length header if it's not a range request
-        set_header(res, "Content-Length", content_len_str);
+        set_header(ctx, "Content-Length", content_len_str);
     }
 
     // Set content disposition
@@ -996,10 +1079,10 @@ int http_serve_file(response_t* res, const char* filename) {
     char base_name[108] = {0};
     file_basename(filename, base_name, sizeof(base_name));
     snprintf(content_disposition, 128, "filename=%s", base_name);
-    set_header(res, "Content-Disposition", content_disposition);
+    set_header(ctx, "Content-Disposition", content_disposition);
 
     // Write the headers to the client
-    write_headers(res);
+    write_headers(ctx);
 
     ssize_t total_bytes_sent = 0;   // Total bytes sent to the client
     off64_t buffer_size = 2 << 20;  // 2MB buffer size
@@ -1023,13 +1106,13 @@ int http_serve_file(response_t* res, const char* filename) {
 
     // Enbale TCP_CORK to avoid sending small packets
     int flag = 1;
-    setsockopt(res->request->client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
+    setsockopt(ctx->request->client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
 
     // Send the file using sendfile to avoid copying data from the kernel to user space
     // This is more efficient than read/write
     // See man sendfile(2) for more information
     while (total_bytes_sent < file_size || (is_range_request && total_bytes_sent < max_range)) {
-        sent_bytes = sendfile(res->request->client_fd, file_fd, &offset, buffer_size);
+        sent_bytes = sendfile(ctx->request->client_fd, file_fd, &offset, buffer_size);
         if (sent_bytes > 0) {
             total_bytes_sent += sent_bytes;
 
@@ -1265,16 +1348,44 @@ static void free_static_routes() {
     }
 }
 
-// url_query_param returns the value associated with a query parameter.
-// Returns NULL if the parameter is not found.
-const char* url_query_param(request_t* req, const char* name) {
-    return map_get(req->query_params, (char*)name);
+const char* get_query(context_t* ctx, const char* name) {
+    return map_get(ctx->request->query_params, (char*)name);
 }
 
-// url_path_param returns the value associated with a path parameter.
-// Returns NULL if the parameter is not found.
-const char* url_path_param(request_t* req, const char* name) {
-    return get_path_param(req->route->params, name);
+const char* get_param(context_t* ctx, const char* name) {
+    return get_path_param(ctx->request->route->params, name);
+}
+
+char* get_body(context_t* ctx) {
+    return (char*)ctx->request->body;
+}
+
+size_t get_body_length(context_t* ctx) {
+    return ctx->request->content_length;
+}
+
+const char* get_path(context_t* ctx) {
+    return ctx->request->path;
+}
+
+const char* get_header(context_t* ctx, const char* name) {
+    return find_header(ctx->request->headers, ctx->request->header_count, name);
+}
+
+const char* get_response_header(context_t* ctx, const char* name) {
+    return find_header(ctx->headers, ctx->header_count, name);
+}
+
+const char* get_method_str(context_t* ctx) {
+    return ctx->request->method_str;
+}
+
+HttpMethod get_method(context_t* ctx) {
+    return ctx->request->method;
+}
+
+void set_content_type(context_t* ctx, const char* content_type) {
+    set_header(ctx, CONTENT_TYPE_HEADER, content_type);
 }
 
 void OPTIONS_ROUTE(const char* pattern, Handler handler) {
@@ -1345,8 +1456,8 @@ void NOT_FOUND_ROUTE(const char* pattern, Handler h) {
     not_found_registered = true;
 }
 
-static void staticFileHandler(response_t* res) {
-    request_t* req = res->request;
+static void staticFileHandler(context_t* ctx) {
+    request_t* req = ctx->request;
     Route* route = req->route;
 
     const char* dirname = route->dirname;
@@ -1361,9 +1472,9 @@ static void staticFileHandler(response_t* res) {
     if (n < 0 || n >= MAX_PATH_LEN) {
         char errmsg[256];
         snprintf(errmsg, 256, "%s %d", "The path exceeds the maximum path size of", MAX_PATH_LEN);
-        set_header(res, "Content-Type", "text/html");
-        res->status = StatusRequestURITooLong;
-        send_response(res, errmsg, strlen(errmsg));
+        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        ctx->status = StatusRequestURITooLong;
+        send_response(ctx, errmsg, strlen(errmsg));
         return;
     }
 
@@ -1387,16 +1498,16 @@ static void staticFileHandler(response_t* res) {
 
     if (path_exists(filepath)) {
         const char* web_ct = get_mimetype(filepath);
-        set_header(res, "Content-Type", web_ct);
-        http_serve_file(res, filepath);
+        set_header(ctx, CONTENT_TYPE_HEADER, web_ct);
+        http_serve_file(ctx, filepath);
         return;
     }
 
     // Send a 404 response if the file is not found
     char* response = "File Not Found\n";
-    set_header(res, "Content-Type", "text/html");
-    res->status = StatusNotFound;
-    send_response(res, response, strlen(response));
+    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    ctx->status = StatusNotFound;
+    send_response(ctx, response, strlen(response));
 }
 
 static void enable_keepalive(int sockfd) {

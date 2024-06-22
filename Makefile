@@ -5,7 +5,7 @@ LDFLAGS=-lm -lsolidc -lpthread
 
 SRC_DIR=src
 OBJ_DIR=obj
-SRCS=$(wildcard $(SRC_DIR)/*.c) epollix.c
+SRCS=$(wildcard $(SRC_DIR)/*.c) main.c
 OBJS=$(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 BIN_DIR=bin
 TARGET=$(BIN_DIR)/server
