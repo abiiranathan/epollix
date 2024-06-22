@@ -1,7 +1,10 @@
 #include "include/server.h"
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <time.h>
+#include <unistd.h>
 
 #define INDEX_TEMPL "index.html"
 #define REGISTER_TEMPL "register_user.html"
@@ -30,7 +33,7 @@ void handle_greet(response_t* res) {
     printf("Hello %s\n", name);
 
     set_header(res, "Content-Type", "text/plain");
-    response_writeall(res, name, strlen(name));
+    send_response(res, name, strlen(name));
 }
 
 // /POST /users/create
@@ -48,7 +51,7 @@ void handle_create_user(response_t* res) {
         if (code != MULTIPART_OK) {
             res->status = StatusBadRequest;
             const char* error = multipart_error_message(code);
-            response_writeall(res, (char*)error, strlen(error));
+            send_response(res, (char*)error, strlen(error));
             return;
         }
 
@@ -70,13 +73,46 @@ void handle_create_user(response_t* res) {
     } else {
         res->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
-        response_writeall(res, (char*)error, strlen(error));
+        send_response(res, (char*)error, strlen(error));
     }
 }
 
 // GET /users/register
 void render_register_form(response_t* res) {
     http_serve_file(res, "./build/register_user.html");
+}
+
+void* send_time(void* arg) {
+    response_t* res = (response_t*)arg;
+    while (1) {
+        time_t rawtime;
+        struct tm* timeinfo;
+        char buffer[80];
+
+        time(&rawtime);
+        timeinfo = localtime(&rawtime);
+        strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
+
+        int ret = response_send_chunk(res, buffer, strlen(buffer));
+        if (ret < 0) {
+            break;
+        }
+
+        usleep(5000);  // sleep for 500ms.
+    }
+
+    pthread_exit(NULL);
+}
+
+void chunked_response(response_t* res) {
+    // send server time every second in a seperate thread to avoid blocking the main thread.
+    pthread_t thread;
+    pthread_create(&thread, NULL, send_time, res);
+
+    // Wait for the thread to finish.
+    pthread_join(thread, NULL);
+
+    response_end(res);
 }
 
 int main(int argc, char** argv) {
@@ -92,6 +128,9 @@ int main(int argc, char** argv) {
     GET_ROUTE("/greet/{name}", handle_greet);
     GET_ROUTE("/users/register", render_register_form);
     POST_ROUTE("/users/create", handle_create_user);
+
+    // Chunked response.
+    GET_ROUTE("/chunked", chunked_response);
 
     // Serve a static directory.
     STATIC_DIR("/static", "./build");

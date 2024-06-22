@@ -68,18 +68,18 @@ typedef Route* (*RouteMatcher)(HttpMethod method, const char* path);
 
 bool set_header(response_t* res, const char* name, const char* value);
 
-// Like send(2) but sends the request in chunks if larger than 4K.
-// Adds MSG_NOSIGNAL to flags to ignore sigpipe.
-ssize_t sendall(int fd, const void* buf, size_t n);
+// Writes chunked data to the client. Note that each chunk must
+// end with \r\n.
+// Returns the number of bytes written.
+// To end the chunked response, call response_end.
+// The first-time call to this function will send the chunked header.
+int response_send_chunk(response_t* res, char* data, size_t len);
 
-// Perform a partial write of data to response.
-int response_write(response_t* res, char* data, size_t len);
-
-// Send end of body sentinel.
-int response_flush(response_t* res);
+// End the chunked response. Must be called after all chunks have been sent.
+int response_end(response_t* res);
 
 // Write data to client connected to this response and send end of body.
-int response_writeall(response_t* res, char* data, size_t len);
+int send_response(response_t* res, char* data, size_t len);
 
 // serve a file with support for partial content specified by the "Range" header.
 // Uses sendfile to copy content from file directly into the kernel space.

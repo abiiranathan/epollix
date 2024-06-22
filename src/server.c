@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <netdb.h>
+#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
 #include <signal.h>
 #include <solidc/filepath.h>
 #include <solidc/thread.h>
@@ -42,6 +43,10 @@ static void file_basename(const char* path, char* basename, size_t size);
 static bool parse_url_query_params(char* query, map* query_params);
 static void staticFileHandler(response_t* res);
 
+// Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
+// Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
+ssize_t sendall(int fd, const void* buf, size_t n);
+
 // ==================== END =================================================================
 
 // Send error back to client as html with a status code.
@@ -69,6 +74,7 @@ void handle_sigint(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         running = 0;
         printf("Caught signal %s, exiting...\n", strsignal(sig));
+        exit(EXIT_SUCCESS);
     }
 }
 
@@ -683,6 +689,10 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
 // Like send(2) but sends the request in chunks if larger than 4K.
 // Uses MSG_NOSIGNAL as the flags.
 ssize_t sendall(int fd, const void* buf, size_t n) {
+    // // Enable TCP_NODELAY to disable Nagle's algorithm
+    // int flag = 1;
+    // setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+
     if (n <= 64)
         return send(fd, buf, n, MSG_NOSIGNAL);
 
@@ -776,46 +786,66 @@ static void write_headers(response_t* res) {
     res->headers_sent = true;
 }
 
-// Perform a partial write of data to response.
-// Does not flush. Call response_flush to end the response.
-int response_write(response_t* res, char* data, size_t len) {
+// Send the response to the client.
+// Returns the number of bytes sent.
+int send_response(response_t* res, char* data, size_t len) {
     write_headers(res);
-    int sent = sendall(res->request->client_fd, data, len);
-    if (sent != -1) {
-        res->content_length += sent;
-    }
-
-    if (sent != (int)len) {
-        fprintf(stderr, "partial write of %d / %ld", sent, len);
-        return -1;
-    }
-    return sent;
+    return sendall(res->request->client_fd, data, len);
 }
 
-// Signal the end of the response with a zero-size chunk.
-// Should return 4 as len of bytes sent(\r\n\r\n)
-int response_flush(response_t* res) {
-    int sent;
-    if ((sent = send(res->request->client_fd, "\r\n\r\n", 4, MSG_NOSIGNAL)) == -1) {
-        perror("error sending end of response sentinel");
+// Writes chunked data to the client.
+// Returns the number of bytes written.
+// To end the chunked response, call response_end.
+// The first-time call to this function will send the chunked header.
+int response_send_chunk(response_t* res, char* data, size_t len) {
+    if (!res->headers_sent) {
+        res->status = StatusOK;
+        set_header(res, "Transfer-Encoding", "chunked");
+        write_headers(res);
+    }
+
+    // Send the chunked header
+    char chunked_header[32] = {0};
+    int ret = snprintf(chunked_header, sizeof(chunked_header), "%zx\r\n", len);
+    if (ret >= (int)sizeof(chunked_header)) {
+        fprintf(stderr, "chunked header truncated\n");
+        // end the chunked response
+        response_end(res);
         return -1;
+    }
+
+    int nbytes_sent = send(res->request->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
+    if (nbytes_sent == -1) {
+        perror("error sending chunked header");
+        response_end(res);
+        return -1;
+    }
+
+    // Send the chunked data
+    nbytes_sent = sendall(res->request->client_fd, data, len);
+    if (nbytes_sent == -1) {
+        perror("error sending chunked data");
+        response_end(res);
+        return -1;
+    }
+
+    // Send end of chunk: Send the chunk's CRLF (carriage return and line feed)
+    if (send(res->request->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
+        perror("error send end of chunk sentinel");
+        response_end(res);
+        return false;
     };
-    return sent;
+    return nbytes_sent;
 }
 
-// Write and flush, signalling end of request.
-// Returns number of bytes sent or -1 on error.
-int response_writeall(response_t* res, char* data, size_t len) {
-    write_headers(res);
-
-    int sent;
-    if ((sent = response_write(res, data, len))) {
-        int ret = response_flush(res);
-        if (ret != 4) {
-            return -1;
-        }
+// End the chunked response. Must be called after all chunks have been sent.
+int response_end(response_t* res) {
+    int nbytes_sent = sendall(res->request->client_fd, "0\r\n\r\n", 5);
+    if (nbytes_sent == -1) {
+        perror("error sending end of chunked response");
+        return -1;
     }
-    return sent;
+    return nbytes_sent;
 }
 
 // redirect to the given url with a 302 status code
@@ -971,8 +1001,8 @@ int http_serve_file(response_t* res, const char* filename) {
     // Write the headers to the client
     write_headers(res);
 
-    ssize_t total_bytes_sent = 0;  // Total bytes sent to the client
-    off64_t buffer_size = 4096;    // 4K buffer size
+    ssize_t total_bytes_sent = 0;   // Total bytes sent to the client
+    off64_t buffer_size = 2 << 20;  // 2MB buffer size
 
     if (is_range_request) {
         // Ensure the buffer size doesn't exceed the remaining bytes in the requested range
@@ -990,6 +1020,10 @@ int http_serve_file(response_t* res, const char* filename) {
     ssize_t sent_bytes = -1;
     int file_fd = fileno(file);
     int max_range = end - start + 1;
+
+    // Enbale TCP_CORK to avoid sending small packets
+    int flag = 1;
+    setsockopt(res->request->client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
 
     // Send the file using sendfile to avoid copying data from the kernel to user space
     // This is more efficient than read/write
@@ -1329,7 +1363,7 @@ static void staticFileHandler(response_t* res) {
         snprintf(errmsg, 256, "%s %d", "The path exceeds the maximum path size of", MAX_PATH_LEN);
         set_header(res, "Content-Type", "text/html");
         res->status = StatusRequestURITooLong;
-        response_writeall(res, errmsg, strlen(errmsg));
+        send_response(res, errmsg, strlen(errmsg));
         return;
     }
 
@@ -1354,7 +1388,6 @@ static void staticFileHandler(response_t* res) {
     if (path_exists(filepath)) {
         const char* web_ct = get_mimetype(filepath);
         set_header(res, "Content-Type", web_ct);
-        printf("content_type:%s %s\n", filepath, web_ct);
         http_serve_file(res, filepath);
         return;
     }
@@ -1363,7 +1396,34 @@ static void staticFileHandler(response_t* res) {
     char* response = "File Not Found\n";
     set_header(res, "Content-Type", "text/html");
     res->status = StatusNotFound;
-    response_writeall(res, response, strlen(response));
+    send_response(res, response, strlen(response));
+}
+
+static void enable_keepalive(int sockfd) {
+    int keepalive = 1;  // Enable keepalive
+    int keepidle = 60;  // 60 seconds before sending keepalive probes
+    int keepintvl = 5;  // 5 seconds interval between keepalive probes
+    int keepcnt = 3;    // 3 keepalive probes before closing the connection
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int)) < 0) {
+        perror("setsockopt(): new_tcpserver failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int)) < 0) {
+        perror("setsockopt(): new_tcpserver failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(int)) < 0) {
+        perror("setsockopt(): new_tcpserver failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(int)) < 0) {
+        perror("setsockopt(): new_tcpserver failed");
+        exit(EXIT_FAILURE);
+    }
 }
 
 // Server request on given port. This blocks forever.
@@ -1377,6 +1437,8 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
     server_fd = setup_server_socket(port);
     if (server_fd == -1)
         exit(EXIT_FAILURE);
+
+    enable_keepalive(server_fd);
 
     ret = set_nonblocking(server_fd);
     if (ret == -1)
@@ -1434,6 +1496,10 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
                     client_fd = accept(server_fd, &internetAddress, &client_len);
 
                     if (client_fd == -1) {
+                        if (errno == EINTR && running == false) {
+                            return -1;  // Interrupted by signal
+                        }
+
                         if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                             /* We have processed all incoming connections. */
                             break;
