@@ -24,9 +24,16 @@ typedef void (*Handler)(context_t* ctx);
 // Route struct.
 typedef struct Route Route;
 
+// A middleware function that takes a context and a next function.
+// The next function is a callback that will be called to pass control to the next middleware.
+typedef void (*Middleware)(context_t* ctx, Handler next);
+
 // RouteMatcher matches the request to a given Route.
 // The route handler is passed the response and request objects.
 typedef Route* (*RouteMatcher)(HttpMethod method, const char* path);
+
+void use_global_middleware(Middleware middleware);
+void use_route_middleware(Route* route, Middleware middleware);
 
 //  ================== Getters =====================
 const char* get_query(context_t* ctx, const char* name);
@@ -79,29 +86,29 @@ void decode_uri(const char* url, char* dst, size_t dst_size);
 void response_redirect(context_t* ctx, const char* url);
 
 // Register an OPTIONS route.
-void OPTIONS_ROUTE(const char* pattern, Handler handler);
+Route* OPTIONS_ROUTE(const char* pattern, Handler handler);
 
 // Register a GET route.
-void GET_ROUTE(const char* pattern, Handler handler);
+Route* GET_ROUTE(const char* pattern, Handler handler);
 
 // Register a POST route.
-void POST_ROUTE(const char* pattern, Handler handler);
+Route* POST_ROUTE(const char* pattern, Handler handler);
 
 // Register a PUT route.
-void PUT_ROUTE(const char* pattern, Handler handler);
+Route* PUT_ROUTE(const char* pattern, Handler handler);
 
 // Register a PATCH route.
-void PATCH_ROUTE(const char* pattern, Handler handler);
+Route* PATCH_ROUTE(const char* pattern, Handler handler);
 
 // Register a DELETE route.
-void DELETE_ROUTE(const char* pattern, Handler handler);
+Route* DELETE_ROUTE(const char* pattern, Handler handler);
 
 // Serve directory at dirname.
 // e.g   STATIC_DIR("/web", "/var/www/html");
-void STATIC_DIR(const char* pattern, char* dirname);
+Route* STATIC_DIR(const char* pattern, char* dirname);
 
 // Set a NotFoundHandler. This is handy for SPAs.
-void NOT_FOUND_ROUTE(const char* pattern, Handler h);
+Route* NOT_FOUND_ROUTE(const char* pattern, Handler h);
 
 // Default route matcher.
 Route* default_route_matcher(HttpMethod method, const char* path);

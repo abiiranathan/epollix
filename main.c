@@ -8,8 +8,21 @@
 #include <time.h>
 #include <unistd.h>
 
-#define INDEX_TEMPL "index.html"
-#define REGISTER_TEMPL "register_user.html"
+void logging_middleware(context_t* ctx, Handler next) {
+    printf("Request: %s %s\n", get_method_str(ctx), get_path(ctx));
+    next(ctx);
+}
+
+void auth_middleware(context_t* ctx, Handler next) {
+    const char* auth = get_header(ctx, "Authorization");
+    if (auth && strcmp(auth, "secret") == 0) {
+        printf("Authenticated!!\n");
+        next(ctx);
+    } else {
+        set_status(ctx, 401);
+        send_response(ctx, "Unauthorized", strlen("Unauthorized"));
+    }
+}
 
 void index_page(context_t* ctx) {
     http_serve_file(ctx, "build/index.html");
@@ -121,9 +134,16 @@ int main(int argc, char** argv) {
     GET_ROUTE("/", index_page);
     GET_ROUTE("/movie", serve_movie);
     GET_ROUTE("/greet/{name}", handle_greet);
-    GET_ROUTE("/users/register", render_register_form);
+
+    Route* reg = GET_ROUTE("/users/register", render_register_form);
+    use_route_middleware(reg, auth_middleware);
+
     POST_ROUTE("/users/create", handle_create_user);
     GET_ROUTE("/chunked", chunked_response);
     STATIC_DIR("/static", "./build");
+
+    // Add middleware
+    use_global_middleware(logging_middleware);
+
     listen_and_serve(port, default_route_matcher, 4);
 }

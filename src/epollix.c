@@ -40,15 +40,6 @@ typedef struct header {
     char value[MAX_HEADER_VALUE];  // Header value
 } header_t;
 
-typedef struct Route {
-    HttpMethod method;          // HTTP Method.
-    RouteType type;             // Type of Route (Normal or Static)
-    char* pattern;              // Pattern to match
-    Handler handler;            // Handler for the route
-    char dirname[MAX_DIRNAME];  // Dirname for static route.
-    PathParams* params;         // Parameters extracted from the URL
-} Route;
-
 typedef struct request {
     int client_fd;        // Peer connection file descriptor
     int epoll_fd;         // epoll file descriptor.
@@ -79,10 +70,36 @@ typedef struct ep_context {
     request_t* request;  // Pointer to the request
     bool headers_sent;   // Headers already sent
     bool chunked;        // Is a chunked transfer
+
+    struct MiddlewareContext* mw_ctx;  // Middleware context
 } context_t;
 
+typedef struct MiddlewareContext {
+    Middleware* middleware;
+    size_t count;
+    size_t index;
+    void (*handler)(context_t* ctx);
+} MiddlewareContext;
+
+typedef struct Route {
+    HttpMethod method;          // HTTP Method.
+    RouteType type;             // Type of Route (Normal or Static)
+    char* pattern;              // Pattern to match
+    Handler handler;            // Handler for the route
+    char dirname[MAX_DIRNAME];  // Dirname for static route.
+    PathParams* params;         // Parameters extracted from the URL
+
+    Middleware middleware[MAX_ROUTE_MIDDLEWARE];  // Array of middleware functions
+    size_t middleware_count;                      // Number of middleware functions
+} Route;
+
+// Routing table.
 static Route routeTable[MAX_ROUTES] = {0};
 static size_t numRoutes = 0;
+
+// Global middleware
+static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE];
+static size_t global_middleware_count = 0;
 
 volatile sig_atomic_t running = 1;
 
@@ -92,6 +109,8 @@ static Route* notFoundRoute = NULL;
 static void file_basename(const char* path, char* basename, size_t size);
 static bool parse_url_query_params(char* query, map* query_params);
 static void staticFileHandler(context_t* ctx);
+static void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler next);
+static void middleware_next(context_t* ctx);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
@@ -454,17 +473,38 @@ header_t header_fromstring(const char* str) {
 }
 
 static void handle_write(request_t* req, Route* route) {
-    // Initialise response
+    // Initialize response
     context_t res = {0};
-    res.content_length = 0;
-    res.header_count = 0;
-    memset(res.headers, 0, sizeof(res.headers));
-    res.status = StatusOK;
     res.request = req;
+    res.status = StatusOK;
     res.headers_sent = false;
     res.chunked = false;
 
-    route->handler(&res);
+    // Define middleware context
+    MiddlewareContext mw_ctx = {0};
+    res.mw_ctx = &mw_ctx;
+
+    // Combine global and route-specific middleware
+    Middleware combined_middleware[MAX_GLOBAL_MIDDLEWARE + MAX_ROUTE_MIDDLEWARE] = {0};
+    size_t combined_count = 0;
+
+    if (global_middleware_count > 0) {
+        memcpy(combined_middleware, global_middleware, sizeof(Middleware) * global_middleware_count);
+        combined_count += global_middleware_count;
+    }
+
+    if (route->middleware_count > 0) {
+        memcpy(combined_middleware + combined_count, route->middleware, sizeof(Middleware) * route->middleware_count);
+        combined_count += route->middleware_count;
+    }
+
+    mw_ctx.middleware = combined_middleware;
+    mw_ctx.count = combined_count;
+    mw_ctx.index = 0;
+    mw_ctx.handler = route->handler;
+
+    // Execute middleware chain
+    execute_middleware(&res, combined_middleware, combined_count, 0, route->handler);
 
     // Close the connection after sending the response
     close(req->client_fd);
@@ -1348,6 +1388,42 @@ static void free_static_routes() {
     }
 }
 
+// ================ Middleware logic ==================
+void use_global_middleware(Middleware middleware) {
+    if (global_middleware_count < MAX_GLOBAL_MIDDLEWARE) {
+        global_middleware[global_middleware_count++] = middleware;
+    } else {
+        fprintf(stderr, "Exceeded maximum global middleware count\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void use_route_middleware(Route* route, Middleware middleware) {
+    if (route->middleware_count < MAX_ROUTE_MIDDLEWARE) {
+        route->middleware[route->middleware_count++] = middleware;
+    } else {
+        fprintf(stderr, "Exceeded maximum middleware count for route\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void middleware_next(context_t* ctx) {
+    MiddlewareContext* mw_ctx = (MiddlewareContext*)ctx->mw_ctx;
+    execute_middleware(ctx, mw_ctx->middleware, mw_ctx->count, ++mw_ctx->index, mw_ctx->handler);
+}
+
+static void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler handler) {
+    if (index < count) {
+        // Execute the next middleware in the chain
+        middleware[index](ctx, middleware_next);
+    } else if (handler) {
+        // Call the handler if all middleware have been executed
+        handler(ctx);
+    }
+}
+
+// ================== End middleware logic ==============
+
 const char* get_query(context_t* ctx, const char* name) {
     return map_get(ctx->request->query_params, (char*)name);
 }
@@ -1388,31 +1464,31 @@ void set_content_type(context_t* ctx, const char* content_type) {
     set_header(ctx, CONTENT_TYPE_HEADER, content_type);
 }
 
-void OPTIONS_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_OPTIONS, pattern, handler, NormalRoute);
+Route* OPTIONS_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_OPTIONS, pattern, handler, NormalRoute);
 }
 
-void GET_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_GET, pattern, handler, NormalRoute);
+Route* GET_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_GET, pattern, handler, NormalRoute);
 }
 
-void POST_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_POST, pattern, handler, NormalRoute);
+Route* POST_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_POST, pattern, handler, NormalRoute);
 }
 
-void PUT_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_PUT, pattern, handler, NormalRoute);
+Route* PUT_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_PUT, pattern, handler, NormalRoute);
 }
 
-void PATCH_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_PATCH, pattern, handler, NormalRoute);
+Route* PATCH_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_PATCH, pattern, handler, NormalRoute);
 }
 
-void DELETE_ROUTE(const char* pattern, Handler handler) {
-    registerRoute(M_DELETE, pattern, handler, NormalRoute);
+Route* DELETE_ROUTE(const char* pattern, Handler handler) {
+    return registerRoute(M_DELETE, pattern, handler, NormalRoute);
 }
 
-void STATIC_DIR(const char* pattern, char* dir) {
+Route* STATIC_DIR(const char* pattern, char* dir) {
     assert(MAX_DIRNAME > strlen(dir) + 1);
 
     char* dirname = strdup(dir);
@@ -1429,7 +1505,6 @@ void STATIC_DIR(const char* pattern, char* dir) {
         fprintf(stderr, "STATIC_DIR: Directory \"%s\"does not exist\n", dirname);
         free(dirname);
         exit(EXIT_FAILURE);
-        return;
     }
 
     size_t dirlen = strlen(dirname);
@@ -1443,10 +1518,12 @@ void STATIC_DIR(const char* pattern, char* dir) {
     route->type = StaticRoute;
     snprintf(route->dirname, MAX_DIRNAME, "%s", dirname);
     free(dirname);
+
+    return route;
 }
 
 bool not_found_registered = false;
-void NOT_FOUND_ROUTE(const char* pattern, Handler h) {
+Route* NOT_FOUND_ROUTE(const char* pattern, Handler h) {
     if (not_found_registered) {
         fprintf(stderr, "registration of more than one 404 handler\n");
         exit(EXIT_FAILURE);
@@ -1454,6 +1531,7 @@ void NOT_FOUND_ROUTE(const char* pattern, Handler h) {
 
     notFoundRoute = registerRoute(M_GET, pattern, h, NormalRoute);
     not_found_registered = true;
+    return notFoundRoute;
 }
 
 static void staticFileHandler(context_t* ctx) {
