@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <netdb.h>
 #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
+#include <pthread.h>
 #include <signal.h>
 #include <solidc/filepath.h>
 #include <solidc/map.h>
@@ -93,17 +94,24 @@ typedef struct Route {
     size_t middleware_count;                      // Number of middleware functions
 } Route;
 
-// Routing table.
+// =================== STATIC DECLARATIONS ================================================
 static Route routeTable[MAX_ROUTES] = {0};
 static size_t numRoutes = 0;
-
-// Global middleware
 static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE];
 static size_t global_middleware_count = 0;
-
 volatile sig_atomic_t running = 1;
-
 static Route* notFoundRoute = NULL;
+
+// To be cleaned up on exit
+int epoll_fd = -1;
+int server_fd = -1;
+volatile sig_atomic_t cleanup_done = false;
+
+ThreadPool pool = NULL;
+pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t shutdown_thread = 0;
+
+// ============ GLOBALS ==================================================================
 
 // =================== STATIC DECLARATIONS ================================================
 static void file_basename(const char* path, char* basename, size_t size);
@@ -111,6 +119,7 @@ static bool parse_url_query_params(char* query, map* query_params);
 static void staticFileHandler(context_t* ctx);
 static void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler next);
 static void middleware_next(context_t* ctx);
+static void epollix_cleanup(void);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
@@ -126,7 +135,7 @@ void http_error(int client_fd, http_status status, const char* message) {
     int ret = asprintf(&reply, "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n", status,
                        http_status_text(status), strlen(message), message);
     if (ret == -1) {
-        fprintf(stderr, MEMORY_ALLOC_FAILED);
+        LOG_ERROR(MEMORY_ALLOC_FAILED);
         return;
     }
 
@@ -139,11 +148,36 @@ void close_connection(int client_fd, int epoll_fd) {
     close(client_fd);
 }
 
+static void* exit_timer_thread(void* arg) {
+    UNUSED(arg);
+
+    int tick = 0;
+    while (!cleanup_done) {
+        sleep(1);
+        tick++;
+        if (tick >= SHUTDOWN_TIMEOUT) {
+            break;
+        }
+    }
+
+    if (!cleanup_done) {
+        epollix_cleanup();
+    }
+    return NULL;
+}
+
 void handle_sigint(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         running = 0;
-        printf("Caught signal %s, exiting...\n", strsignal(sig));
-        exit(EXIT_SUCCESS);
+        printf("Caught signal %s, exiting within %d seconds\n", strsignal(sig), SHUTDOWN_TIMEOUT);
+
+        // Schedule a thread to cleanup resources after SHUTDOWN_TIMEOUT seconds
+        pthread_create(&shutdown_thread, NULL, exit_timer_thread, NULL);
+
+        // Configure the thread for cancellation
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+        pthread_detach(shutdown_thread);
     }
 }
 
@@ -243,8 +277,7 @@ static void install_signal_handler() {
 
     // See man 2 sigaction for more information.
     if (sigaction(SIGINT, &sa, NULL) == -1) {
-        fprintf(stderr, "unable to call sigaction\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("unable to call sigaction\n");
     };
 
     // Ignore SIGPIPE signal when writing to a closed socket or pipe.
@@ -293,15 +326,15 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
 
     for (size_t i = start_pos; i <= endpos; i++) {
         if (req->header_count >= MAX_REQ_HEADERS) {
-            fprintf(stderr, "header_idx is too large. Max headers is %d\n", MAX_REQ_HEADERS);
+            LOG_ERROR("header_idx is too large. Max headers is %d\n", MAX_REQ_HEADERS);
             return http_max_headers_exceeded;
         }
 
         switch (state) {
             case STATE_HEADER_NAME:
                 if (header_name_idx >= MAX_HEADER_NAME) {
-                    fprintf(stderr, "header name: %.*s is too long. Max length is %d\n", (int)header_name_idx,
-                            header_name, MAX_HEADER_NAME);
+                    LOG_ERROR("header name: %.*s is too long. Max length is %d\n", (int)header_name_idx, header_name,
+                              MAX_HEADER_NAME);
                     return http_max_header_name_exceeded;
                 }
 
@@ -322,8 +355,8 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
 
             case STATE_HEADER_VALUE:
                 if (header_value_idx >= MAX_HEADER_VALUE) {
-                    fprintf(stderr, "header value %.*s is too long. Max length is %d\n", (int)header_value_idx,
-                            header_value, MAX_HEADER_VALUE);
+                    LOG_ERROR("header value %.*s is too long. Max length is %d\n", (int)header_value_idx, header_value,
+                              MAX_HEADER_VALUE);
                     return http_max_header_value_exceeded;
                 }
 
@@ -376,14 +409,14 @@ int find_header_index(header_t* headers, size_t count, const char* name) {
 
 bool set_header(context_t* ctx, const char* name, const char* value) {
     if (ctx->header_count >= MAX_RES_HEADERS) {
-        fprintf(stderr, "Exceeded max response headers: %d\n", MAX_RES_HEADERS);
+        LOG_ERROR("Exceeded max response headers: %d\n", MAX_RES_HEADERS);
         return false;
     }
 
     size_t name_len = strlen(name);
     size_t value_len = strlen(value);
     if (name_len >= MAX_HEADER_NAME || value_len >= MAX_HEADER_VALUE) {
-        fprintf(stderr, "Header name or value exceeds max lengths: (%d, %d)\n", MAX_HEADER_NAME, MAX_HEADER_VALUE);
+        LOG_ERROR("Header name or value exceeds max lengths: (%d, %d)\n", MAX_HEADER_NAME, MAX_HEADER_VALUE);
         return false;
     }
 
@@ -433,7 +466,7 @@ void print_headers(header_t* headers, size_t n) {
 void header_tostring(const header_t* h, char* buffer, size_t buffer_size) {
     int ret = snprintf(buffer, buffer_size, "%s: %s", h->name, h->value);
     if (ret >= (int)buffer_size) {
-        fprintf(stderr, "buffer too small to fit header, \"%s: %s\". header has been trucated\n", h->name, h->value);
+        LOG_ERROR("buffer too small to fit header, \"%s: %s\". header has been trucated\n", h->name, h->value);
     }
 }
 
@@ -449,7 +482,7 @@ header_t header_fromstring(const char* str) {
     // verify that the header is empty by checking if the name is empty.
     // i.e header.name[0] == '\0'
     if (str[n] == '\0' || n == 0 || n >= MAX_HEADER_NAME) {
-        fprintf(stderr, "header name too long: %s\n", str);
+        LOG_ERROR("header name too long: %s\n", str);
         return (header_t){0};
     }
 
@@ -620,7 +653,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
         query_params = map_create(0, key_compare_char_ptr);
         if (!query_params) {
             free(query);
-            fprintf(stderr, "unable to create map for query params\n");
+            LOG_ERROR("unable to create map for query params\n");
             http_error(client_fd, StatusInternalServerError, "error parsing query params");
             close_connection(client_fd, epoll_fd);
             return;
@@ -628,7 +661,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
 
         bool ok = parse_url_query_params(query, query_params);
         if (!ok) {
-            fprintf(stderr, "parse_url_query_params() failed\n");
+            LOG_ERROR("parse_url_query_params() failed\n");
             free(query);
             map_destroy(query_params, true);
             http_error(client_fd, StatusInternalServerError, "error parsing query params");
@@ -659,7 +692,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
     // Find the end of headers
     char* end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
     if (!end_of_headers) {
-        fprintf(stderr, "Could not find the end of headers\n");
+        LOG_ERROR("Could not find the end of headers\n");
         close_connection(client_fd, epoll_fd);
         return;
     }
@@ -804,7 +837,7 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
     size_t chunk_size = 4096;
     char* data = (char*)buf;
 
-    while (remaining > 0) {
+    while (remaining > 0 && running) {
         char buffer[4096] = {0};
 
         // Make sure we don't overflow the buffer
@@ -847,7 +880,7 @@ static void write_headers(context_t* ctx) {
 
     ret = snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", ctx->status, http_status_text(ctx->status));
     if (ret > (int)sizeof(status_line)) {
-        fprintf(stderr, "status line truncated. Aborted!!\n");
+        LOG_ERROR("status line truncated. Aborted!!\n");
         return;
     }
 
@@ -865,7 +898,7 @@ static void write_headers(context_t* ctx) {
 
         size_t header_len = strlen(header);
         if (written + header_len >= MAX_RES_HEADER_SIZE - 4) {  // 4 is for the \r\n\r\n
-            fprintf(stderr, "Exceeded max header size: %d\n", MAX_RES_HEADER_SIZE);
+            LOG_ERROR("Exceeded max header size: %d\n", MAX_RES_HEADER_SIZE);
             return;
         }
 
@@ -898,7 +931,7 @@ int send_response(context_t* ctx, char* data, size_t len) {
 
     // This invariant must be respected.
     if (ret >= (int)sizeof(content_len)) {
-        fprintf(stderr, "Warning: send_response(): truncation of content_len\n");
+        LOG_ERROR("Warning: send_response(): truncation of content_len\n");
     }
 
     set_header(ctx, "Content-Length", content_len);
@@ -931,7 +964,7 @@ int response_send_chunk(context_t* ctx, char* data, size_t len) {
     char chunked_header[32] = {0};
     int ret = snprintf(chunked_header, sizeof(chunked_header), "%zx\r\n", len);
     if (ret >= (int)sizeof(chunked_header)) {
-        fprintf(stderr, "chunked header truncated\n");
+        LOG_ERROR("chunked header truncated\n");
         // end the chunked response
         response_end(ctx);
         return -1;
@@ -990,8 +1023,7 @@ static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64
 
     // This invariant must be respected.
     if (ret >= (int)sizeof(content_len)) {
-        fprintf(stderr, "send_range_headers(): truncation of content_len\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("send_range_headers(): truncation of content_len\n");
     }
 
     set_header(ctx, "Accept-Ranges", "bytes");
@@ -1001,8 +1033,7 @@ static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64
     ret = snprintf(content_range_str, sizeof(content_range_str), "bytes %ld-%ld/%ld", start, end, file_size);
     // This invariant must be respected.
     if (ret >= (int)sizeof(content_range_str)) {
-        fprintf(stderr, "send_range_headers(): truncation of content_range_str\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("send_range_headers(): truncation of content_range_str\n");
     }
 
     set_header(ctx, "Content-Range", content_range_str);
@@ -1152,6 +1183,10 @@ int http_serve_file(context_t* ctx, const char* filename) {
     // This is more efficient than read/write
     // See man sendfile(2) for more information
     while (total_bytes_sent < file_size || (is_range_request && total_bytes_sent < max_range)) {
+        if (!running) {
+            break;
+        }
+
         sent_bytes = sendfile(ctx->request->client_fd, file_fd, &offset, buffer_size);
         if (sent_bytes > 0) {
             total_bytes_sent += sent_bytes;
@@ -1235,7 +1270,7 @@ static int setup_server_socket(char* port) {
 
     s = getaddrinfo(NULL, port, &hints, &result);
     if (s != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+        LOG_ERROR("getaddrinfo: %s\n", gai_strerror(s));
         return -1;
     }
 
@@ -1247,8 +1282,8 @@ static int setup_server_socket(char* port) {
         // Allow reuse of the port.
         int enable = 1;
         if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
-            perror("setsockopt(): new_tcpserver failed");
-            exit(EXIT_FAILURE);
+            perror("setsockopt");
+            LOG_FATAL("setsockopt(): new_tcpserver failed\n");
         }
 
         s = bind(sfd, rp->ai_addr, rp->ai_addrlen);
@@ -1261,7 +1296,7 @@ static int setup_server_socket(char* port) {
     }
 
     if (rp == NULL) {
-        fprintf(stderr, "Could not bind\n");
+        LOG_ERROR("Could not bind\n");
         return -1;
     }
 
@@ -1311,7 +1346,7 @@ Route* default_route_matcher(HttpMethod method, const char* path) {
 bool parse_url_query_params(char* query, map* query_params) {
     map* queryParams = map_create(0, key_compare_char_ptr);
     if (!queryParams) {
-        fprintf(stderr, "Unable to allocate queryParams\n");
+        LOG_ERROR("Unable to allocate queryParams\n");
         return false;
     }
 
@@ -1352,8 +1387,7 @@ bool parse_url_query_params(char* query, map* query_params) {
 // Helper function to register a new route
 static Route* registerRoute(HttpMethod method, const char* pattern, Handler handler, RouteType type) {
     if (numRoutes >= (size_t)MAX_ROUTES) {
-        fprintf(stderr, "Number of routes %ld exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Number of routes %ld exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
     }
 
     Route* route = &routeTable[numRoutes];
@@ -1370,8 +1404,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     memset(route->params->params, 0, sizeof(route->params->params));
 
     if ((strstr("{", pattern) && !strstr("}", pattern)) || (strstr("}", pattern) && !strstr("{", pattern))) {
-        fprintf(stderr, "Invalid path parameter in pattern: %s\n", pattern);
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Invalid path parameter in pattern: %s\n", pattern);
     }
 
     numRoutes++;
@@ -1393,8 +1426,7 @@ void use_global_middleware(Middleware middleware) {
     if (global_middleware_count < MAX_GLOBAL_MIDDLEWARE) {
         global_middleware[global_middleware_count++] = middleware;
     } else {
-        fprintf(stderr, "Exceeded maximum global middleware count\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Exceeded maximum global middleware count\n");
     }
 }
 
@@ -1402,8 +1434,7 @@ void use_route_middleware(Route* route, Middleware middleware) {
     if (route->middleware_count < MAX_ROUTE_MIDDLEWARE) {
         route->middleware[route->middleware_count++] = middleware;
     } else {
-        fprintf(stderr, "Exceeded maximum middleware count for route\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Exceeded maximum middleware count for route\n");
     }
 }
 
@@ -1502,7 +1533,7 @@ Route* STATIC_DIR(const char* pattern, char* dir) {
 
     // Check that dirname exists
     if (access(dirname, F_OK) == -1) {
-        fprintf(stderr, "STATIC_DIR: Directory \"%s\"does not exist\n", dirname);
+        LOG_ERROR("STATIC_DIR: Directory \"%s\"does not exist\n", dirname);
         free(dirname);
         exit(EXIT_FAILURE);
     }
@@ -1525,8 +1556,7 @@ Route* STATIC_DIR(const char* pattern, char* dir) {
 bool not_found_registered = false;
 Route* NOT_FOUND_ROUTE(const char* pattern, Handler h) {
     if (not_found_registered) {
-        fprintf(stderr, "registration of more than one 404 handler\n");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("registration of more than one 404 handler\n");
     }
 
     notFoundRoute = registerRoute(M_GET, pattern, h, NormalRoute);
@@ -1595,23 +1625,19 @@ static void enable_keepalive(int sockfd) {
     int keepcnt = 3;    // 3 keepalive probes before closing the connection
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int)) < 0) {
-        perror("setsockopt(): new_tcpserver failed");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int)) < 0) {
-        perror("setsockopt(): new_tcpserver failed");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(int)) < 0) {
-        perror("setsockopt(): new_tcpserver failed");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(int)) < 0) {
-        perror("setsockopt(): new_tcpserver failed");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
     }
 }
 
@@ -1621,28 +1647,31 @@ static void enable_keepalive(int sockfd) {
 int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads) {
     assert(port);
 
-    int epoll_fd, server_fd, ret;
+    int ret;
     struct epoll_event event = {0}, events[MAXEVENTS] = {0};
+
     server_fd = setup_server_socket(port);
-    if (server_fd == -1)
-        exit(EXIT_FAILURE);
+    if (server_fd == -1) {
+        LOG_FATAL("Failed to setup server socket\n");
+    }
 
     enable_keepalive(server_fd);
 
     ret = set_nonblocking(server_fd);
-    if (ret == -1)
-        exit(EXIT_FAILURE);
+    if (ret == -1) {
+        LOG_FATAL("Failed to set non-blocking on server socket\n");
+    }
 
     ret = listen(server_fd, MAXEVENTS);
     if (ret == -1) {
         perror("listen");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Failed to listen on server socket\n");
     }
 
     epoll_fd = epoll_create1(0);
     if (epoll_fd == -1) {
         perror("epoll_create");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Failed to create epoll instance\n");
     }
 
     event.data.fd = server_fd;
@@ -1650,7 +1679,7 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
     ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event);
     if (ret == -1) {
         perror("epoll_ctl");
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Failed to add server socket to epoll\n");
     }
 
     /* The event loop */
@@ -1662,11 +1691,11 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
         nworkers = num_threads;
     }
 
-    printf("Server listening on port %s with %d threads\n", port, nworkers);
-    printf("PID: %d\n", get_gid());
+    printf("[PID: %d]\n", get_gid());
+    printf("[Server listening on port %s with %d threads]\n", port, nworkers);
 
     // Create a threadpool with n threads
-    ThreadPool pool = threadpool_create(nworkers);
+    pool = threadpool_create(nworkers);
     assert(pool);
 
     while (running) {
@@ -1706,8 +1735,7 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
 
                     ret = set_nonblocking(client_fd);
                     if (ret == -1) {
-                        fprintf(stderr, "Failed to set non-blocking\n");
-                        exit(EXIT_FAILURE);
+                        LOG_FATAL("Failed to set non-blocking\n");
                     }
 
                     event.data.fd = client_fd;
@@ -1715,7 +1743,7 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
                     ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
                     if (ret == -1) {
                         perror("epoll_ctl");
-                        exit(EXIT_FAILURE);
+                        LOG_FATAL("Failed to add client socket to epoll\n");
                     }
                 }
             } else {
@@ -1735,18 +1763,30 @@ int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads)
                     threadpool_add_task(pool, (void (*)(void*))submit_read_task, task);
 
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
-                    fprintf(stderr, "error on fd %d\n", events[i].data.fd);
+                    LOG_ERROR("error on fd %d\n", events[i].data.fd);
                     close(events[i].data.fd);
                 }
             }
         }
     }
 
-    // Clean up
+    epollix_cleanup();
+    return EXIT_SUCCESS;
+}
+
+static void epollix_cleanup() {
+    if (cleanup_done) {
+        return;
+    }
+
+    cleanup_done = true;
+    pthread_mutex_lock(&cleanup_mutex);
     threadpool_wait(pool);
     threadpool_destroy(pool);
+    close(epoll_fd);
     close(server_fd);
+
     free_static_routes();
     destroy_mime_hashtable();
-    return EXIT_SUCCESS;
+    pthread_mutex_unlock(&cleanup_mutex);
 }

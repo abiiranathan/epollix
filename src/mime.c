@@ -1,4 +1,5 @@
 #include "../include/mime.h"
+#include "../include/logging.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -235,8 +236,7 @@ void init_mime_hashtable() {
         uint32_t index = hash(mapping[i].extension) % HASH_TABLE_SIZE;
         HashEntry* entry = malloc(sizeof(HashEntry));
         if (entry == NULL) {
-            fprintf(stderr, "Failed to allocate memory for HashEntry\n");
-            exit(EXIT_FAILURE);
+            LOG_FATAL("Failed to allocate memory for HashEntry\n");
         }
 
         entry->extension = mapping[i].extension;
@@ -269,7 +269,7 @@ const char* get_mimetype(char* filename) {
     }
 
     if (ext_len > 255) {
-        fprintf(stderr, "File extension is too long\n");
+        LOG_ERROR("File extension is too long\n");
         return DEFAULT_CONTENT_TYPE;
     }
 

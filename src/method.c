@@ -1,4 +1,5 @@
 #include "../include/method.h"
+#include "../include/logging.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +31,7 @@ HttpMethod method_fromstring(const char* method) {
     } else if (strcmp(method, "DELETE") == 0) {
         return M_DELETE;
     } else {
-        fprintf(stderr, "Unsupported http method: %s\n", method);
+        LOG_ERROR("Unsupported http method: %s\n", method);
         return M_INVALID;
     }
 }

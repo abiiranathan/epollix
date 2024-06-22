@@ -12,6 +12,7 @@
 #define _GNU_SOURCE  // for memmem
 
 #include "../include/multipart.h"
+#include "../include/logging.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -28,14 +29,14 @@ static FormField* realloc_fields(MultipartForm* form);
 static bool insert_header(MultipartForm* form, FileHeader header) {
     if (form->num_files >= INITIAL_FILE_CAPACITY) {
         if (!realloc_files(form)) {
-            fprintf(stderr, "Failed to reallocate files\n");
+            LOG_ERROR("Failed to reallocate files\n");
             return false;
         }
     }
 
     FileHeader* new_header = (FileHeader*)malloc(sizeof(FileHeader));
     if (!new_header) {
-        fprintf(stderr, "Failed to allocate memory for file header\n");
+        LOG_ERROR("Failed to allocate memory for file header\n");
         return false;
     }
 
@@ -80,7 +81,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     // Allocate initial memory for files and fields.
     form->files = (FileHeader**)malloc(INITIAL_FILE_CAPACITY * sizeof(FileHeader*));
     if (!form->files) {
-        fprintf(stderr, "Failed to allocate memory for files\n");
+        LOG_ERROR("Failed to allocate memory for files\n");
         return MEMORY_ALLOC_ERROR;
     }
     // zero out the memory
@@ -95,7 +96,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     // Allocate memory for fields
     form->fields = (FormField*)malloc(INITIAL_FIELD_CAPACITY * sizeof(FormField));
     if (!form->fields) {
-        fprintf(stderr, "Failed to allocate memory for fields\n");
+        LOG_ERROR("Failed to allocate memory for fields\n");
         return MEMORY_ALLOC_ERROR;
     }
 
@@ -187,7 +188,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                     // Check if we have enough capacity for fields
                     if (form->num_fields >= INITIAL_FIELD_CAPACITY) {
                         if (!realloc_fields(form)) {
-                            fprintf(stderr, "Failed to reallocate fields\n");
+                            LOG_ERROR("Failed to reallocate fields\n");
                             code = MEMORY_ALLOC_ERROR;
                             goto cleanup;
                         }
@@ -342,7 +343,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 // Check if we have enough capacity for files
                 if (form->num_files >= INITIAL_FILE_CAPACITY) {
                     if (!realloc_files(form)) {
-                        fprintf(stderr, "Failed to reallocate files\n");
+                        LOG_ERROR("Failed to reallocate files\n");
                         code = MEMORY_ALLOC_ERROR;
                         goto cleanup;
                     }
@@ -367,8 +368,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
             default:
                 // This is unreachable but just in case, we don't want an infinite-loop
                 // Crash and burn!!
-                fprintf(stderr, "default: unreachable state\n");
-                exit(EXIT_FAILURE);
+                LOG_FATAL("default: unreachable state\n");
         }
     }
 
@@ -407,14 +407,14 @@ bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
     // This is a reasonable assumption since the boundary is usually within the first few bytes.
     char* boundary_end = sstrstr(body, "\r\n", 64);
     if (!boundary_end) {
-        fprintf(stderr, "Unable to determine the boundary in body: %s\n", body);
+        LOG_ERROR("Unable to determine the boundary in body: %s\n", body);
         return false;
     }
 
     size_t length = boundary_end - body;
     size_t total_capacity = length + 1;
     if (size <= total_capacity) {
-        fprintf(stderr, "boundary buffer is smaller than %ld bytes\n", length + 1);
+        LOG_ERROR("boundary buffer is smaller than %ld bytes\n", length + 1);
         return false;
     }
 
@@ -432,7 +432,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
     size_t total_length = strlen(content_type);
 
     if (strncasecmp(content_type, "multipart/form-data", 19) != 0) {
-        fprintf(stderr, "content type is missing multipart/form-data in header\n");
+        LOG_ERROR("content type is missing multipart/form-data in header\n");
         return false;
     }
 
@@ -441,7 +441,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
 
     // Account for prefix and null terminater
     if (size <= length + prefix_len + 1) {
-        fprintf(stderr, "buffer size for boundary is too small\n");
+        LOG_ERROR("buffer size for boundary is too small\n");
         return false;
     }
 

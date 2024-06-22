@@ -4,6 +4,7 @@
 #define _GNU_SOURCE 1
 
 #include "constants.h"
+#include "logging.h"
 #include "method.h"
 #include "mime.h"
 #include "multipart.h"

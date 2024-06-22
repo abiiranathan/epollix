@@ -61,4 +61,9 @@
 #define MAX_GLOBAL_MIDDLEWARE 10
 #endif
 
+// Time to wait for active connections to close.
+#ifndef SHUTDOWN_TIMEOUT
+#define SHUTDOWN_TIMEOUT 5
+#endif
+
 #endif /* EA56F184_3413_409F_A9D5_E26BBDFC9535 */

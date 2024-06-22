@@ -91,7 +91,7 @@ void render_register_form(context_t* ctx) {
 
 void* send_time(void* arg) {
     context_t* ctx = (context_t*)arg;
-    int count = 10000;
+    int count = 1000;
     while (1) {
         time_t rawtime;
         struct tm* timeinfo;
@@ -125,8 +125,7 @@ void chunked_response(context_t* ctx) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s [port]\n", argv[0]);
-        exit(EXIT_FAILURE);
+        LOG_FATAL("Usage: %s [port]\n", argv[0]);
     }
 
     char* port = argv[1];

@@ -1,4 +1,5 @@
 #include "../include/params.h"
+#include "../include/logging.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -34,7 +35,7 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
         if (*pattern_ptr == '{') {
             // Check if we have space to store more parameters
             if (pathParams->match_count >= MAX_PARAMS) {
-                fprintf(stderr, "PathParams size exceeded\n");
+                LOG_ERROR("PathParams size exceeded\n");
                 return false;
             }
 
@@ -126,7 +127,7 @@ const char* get_path_param(const PathParams* pathParams, const char* name) {
 #ifdef TEST_PARAMS
 int main() {
     const char* pattern = "/about/{name}/profile/{id}/";
-    const char url[] = "/about/Abiira Nathan Kyarugahi/profile/123/";
+    const char url[] = "/about/John Doe/profile/123/";
 
     PathParams pathParams = {0};
     bool matches = match_path_parameters(pattern, url, &pathParams);
