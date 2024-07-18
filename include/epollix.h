@@ -1,6 +1,10 @@
 #ifndef C09A2944_5DDC_4879_9E04_7CF7FB027FC3
 #define C09A2944_5DDC_4879_9E04_7CF7FB027FC3
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define _GNU_SOURCE 1
 
 #include "constants.h"
@@ -11,19 +15,31 @@
 #include "params.h"
 #include "status.h"
 
+// Macro to silence unused variable errors.
 #define UNUSED(var) ((void)var)
+
+#define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
+#define ERR_TOO_MANY_HEADERS "Too many headers\n"
+#define ERR_HEADER_NAME_TOO_LONG "Header name too long\n"
+#define ERR_HEADER_VALUE_TOO_LONG "Header name too long\n"
+#define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
+#define ERR_INVALID_STATUS_LINE "Invalid http status line\n"
+#define ERR_METHOD_NOT_ALLOWED "Method not allowed\n"
 
 // Request object.
 typedef struct request request_t;
 
 // Response object.
-typedef struct ep_context context_t;
+typedef struct epollix_context context_t;
 
 // Handler func.
 typedef void (*Handler)(context_t* ctx);
 
 // Route struct.
 typedef struct Route Route;
+
+// RouteGroup struct.
+typedef struct RouteGroup RouteGroup;
 
 // A middleware function that takes a context and a next function.
 // The next function is a callback that will be called to pass control to the next middleware.
@@ -33,47 +49,95 @@ typedef void (*Middleware)(context_t* ctx, Handler next);
 // The route handler is passed the response and request objects.
 typedef Route* (*RouteMatcher)(HttpMethod method, const char* path);
 
-void use_global_middleware(Middleware middleware);
-void use_route_middleware(Route* route, Middleware middleware);
+// Apply middleware(s) to all registered routes.
+void use_global_middleware(int count, ...);
+
+// Apply middleware(s) to a spacific route.
+void use_route_middleware(Route* route, int count, ...);
+
+// Apply middleware(s) to a group of routes.
+void use_group_middleware(RouteGroup* group, int count, ...);
 
 //  ================== Getters =====================
+
+// Returns the query parameter by name or NULL if it does not exist.
 const char* get_query(context_t* ctx, const char* name);
+
+// Returns the path parameter by name or NULL if it does not exist.
 const char* get_param(context_t* ctx, const char* name);
+
+// Returns the Request PATH associated with this request.
+// This excludes the query params.
 const char* get_path(context_t* ctx);
+
+// Returns a request header by name or NULL if it does not exist.
 const char* get_header(context_t* ctx, const char* name);
+
+// Returns a response header by name or NULL if it does not exist.
 const char* get_response_header(context_t* ctx, const char* name);
+
+// Returns the http method as a const char*. All methods are in uppercase.
+// If you want the type-safe enum, use get_method.
 const char* get_method_str(context_t* ctx);
+
+// Returns the content-type for this request by reading the Content-Type header.
 const char* get_content_type(context_t* ctx);
+
+// Returns the HttpMethod enum for the request.
+// Use get_method_str if you want the method as a char*.
 HttpMethod get_method(context_t* ctx);
+
+// Returns the body of the request or NULL if there is no body.
 char* get_body(context_t* ctx);
-size_t get_body_length(context_t* ctx);
+
+// Returns the number of bytes in the request body or 0 if no body.
+size_t get_body_size(context_t* ctx);
+
+// Returns the current route.
 const Route* get_current_route(context_t* ctx);
-const char* route_pattern(Route* route);
+
+// Returns the pattern for which route was registered.
+const char* get_route_pattern(Route* route);
 
 // =================== Setters =================================
 
+// Set response header.
 bool set_header(context_t* ctx, const char* name, const char* value);
+
+// Set http status code for the response.
 void set_status(context_t* ctx, http_status status);
+
+// Set content type for the response.
 void set_content_type(context_t* ctx, const char* content_type);
 
 // ============== Send function variants ==========================
 
 // Writes chunked data to the client.
-// Returns the number of bytes written.
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
+// Returns the number of bytes written or -1 on error.
 int response_send_chunk(context_t* ctx, char* data, size_t len);
 
 // End the chunked response. Must be called after all chunks have been sent.
+// Returns the number of bytes sent(that should be equal to 5) or -1 on error.
 int response_end(context_t* ctx);
 
-// Write data to client connected to this response and send end of body.
+// Write data of length len as response to the client.
 // Default content-type is text/html.
+// Returns the number of bytes sent or -1 on error.
 int send_response(context_t* ctx, char* data, size_t len);
 
+// Send response as JSON with the correct header.
+// Returns the number of bytes sent or -1 on error.
 int send_json(context_t* ctx, char* data, size_t len);
 
-int send_raw_string(context_t* ctx, char* data, size_t len);
+// Send null-terminated JSON string.
+int send_json_string(context_t* ctx, char* data);
+
+// Send the response as a null-terminated string.
+// Default content-type is text/html.
+// You can override it by calling set_content_type.
+int send_string(context_t* ctx, char* data);
 
 // percent-encode a string for safe use in a URL.
 // Returns an allocated char* that the caller must free after use.
@@ -86,6 +150,7 @@ void decode_uri(const char* url, char* dst, size_t dst_size);
 // Redirect the response to a new URL with a 302 status code.
 void response_redirect(context_t* ctx, const char* url);
 
+// ==================== REGISTER ROUTES ON CTX ===================================
 // Register an OPTIONS route.
 Route* OPTIONS_ROUTE(const char* pattern, Handler handler);
 
@@ -104,14 +169,51 @@ Route* PATCH_ROUTE(const char* pattern, Handler handler);
 // Register a DELETE route.
 Route* DELETE_ROUTE(const char* pattern, Handler handler);
 
-// Serve directory at dirname.
+// Serve static directory at dirname.
 // e.g   STATIC_DIR("/web", "/var/www/html");
 Route* STATIC_DIR(const char* pattern, char* dirname);
 
+// =========== REGISTER ROUTES ON Group ========================
+
+// Create a new RouteGroup.
+RouteGroup* ROUTE_GROUP(const char* pattern);
+
+// Free a RouteGroup.
+void ROUTE_GROUP_FREE(RouteGroup* group);
+
+// Register an OPTIONS route.
+Route* OPTIONS_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Register a GET route.
+Route* GET_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Register a POST route.
+Route* POST_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Register a PUT route.
+Route* PUT_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Register a PATCH route.
+Route* PATCH_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Register a DELETE route.
+Route* DELETE_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+
+// Serve static directory at dirname.
+// e.g   STATIC_GROUP_DIR(group, "/web", "/var/www/html");
+Route* STATIC_GROUP_DIR(RouteGroup* group, const char* pattern, char* dirname);
+
 // Set a NotFoundHandler. This is handy for SPAs.
+// It will be called if the RouteMatcher returns NULL.
 Route* NOT_FOUND_ROUTE(const char* pattern, Handler h);
 
-// Default route matcher.
+// =========================================================================
+
+// Default route matcher. It matches the request method and path
+// to the correct Route with support for path parameters, specified
+// by curry-braces: e.g /users/{username}. This matcher will popolate the
+// path parameters before returning the matched route or NULL if not found.
+// No support for 405 codes. (right path for wrong method)
 Route* default_route_matcher(HttpMethod method, const char* path);
 
 // serve a file with support for partial content specified by the "Range" header.
@@ -124,6 +226,13 @@ int http_serve_file(context_t* ctx, const char* filename);
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
+// The route matcher is a function pointer that is passed the request method
+// and path and returns the matching route. It is also for pupulating the Route
+// parameters be4 returning the route.
 int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* C09A2944_5DDC_4879_9E04_7CF7FB027FC3 */

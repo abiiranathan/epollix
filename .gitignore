@@ -58,3 +58,6 @@ a.out
 
 uploads
 *.mp4
+.cache
+node_modules
+build

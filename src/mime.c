@@ -231,7 +231,7 @@ uint32_t hash(const char* str) {
     return hash;
 }
 
-void init_mime_hashtable() {
+void init_mime_hashtable(void) {
     for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
         uint32_t index = hash(mapping[i].extension) % HASH_TABLE_SIZE;
         HashEntry* entry = malloc(sizeof(HashEntry));
@@ -269,7 +269,7 @@ const char* get_mimetype(char* filename) {
     }
 
     if (ext_len > 255) {
-        LOG_ERROR("File extension is too long\n");
+        LOG_ERROR("File extension is too long: %s", extension);
         return DEFAULT_CONTENT_TYPE;
     }
 
@@ -294,7 +294,7 @@ const char* get_mimetype(char* filename) {
     return DEFAULT_CONTENT_TYPE;
 }
 
-void destroy_mime_hashtable() {
+void destroy_mime_hashtable(void) {
     for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
         HashEntry* entry = hashTable[i];
         while (entry) {

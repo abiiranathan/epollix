@@ -1,6 +1,10 @@
 #ifndef D227A8DB_94E5_4627_A7A8_A35E2CA3AA04
 #define D227A8DB_94E5_4627_A7A8_A35E2CA3AA04
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -58,5 +62,9 @@ typedef struct PathParams {
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams);
 
 const char* get_path_param(const PathParams* pathParams, const char* name);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* D227A8DB_94E5_4627_A7A8_A35E2CA3AA04 */

@@ -1,5 +1,6 @@
 #ifndef METHOD_H
 #define METHOD_H
+
 #include <stdbool.h>
 
 typedef enum {

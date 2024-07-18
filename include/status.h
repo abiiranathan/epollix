@@ -1,6 +1,10 @@
 #ifndef DA10BEC2_4A02_42D1_B171_8EF58E7CDD5B
 #define DA10BEC2_4A02_42D1_B171_8EF58E7CDD5B
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     StatusContinue = 100,
     StatusSwitchingProtocols = 101,
@@ -72,5 +76,9 @@ typedef enum {
 } http_status;
 
 const char* http_status_text(http_status code);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* DA10BEC2_4A02_42D1_B171_8EF58E7CDD5B */

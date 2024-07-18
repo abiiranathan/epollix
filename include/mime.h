@@ -2,10 +2,10 @@
 #define CEF815FD_9502_4556_B51E_B7573472FAA6
 
 // Initialize the mime hashtable with the default mapping.
-void init_mime_hashtable();
+void init_mime_hashtable(void);
 
 // Destroy the mime hashtable and free the memory.
-void destroy_mime_hashtable();
+void destroy_mime_hashtable(void);
 
 // Returns the mime type expected for files. If your file is not included in the
 // default mapping, feel-free to contribute.

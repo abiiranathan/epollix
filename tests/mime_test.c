@@ -3,6 +3,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "../include/logging.h"
 #include "../include/mime.h"
 
 typedef struct {
@@ -13,10 +14,10 @@ typedef struct {
 void run_test(TestCase test) {
     const char* actual_content_type = get_mimetype(test.filename);
     if (strcasecmp(actual_content_type, test.expected_content_type) != 0) {
-        LOG_ERROR("Test failed for filename: %s\n", test.filename);
-        LOG_ERROR("Expected: %s, but got: %s\n", test.expected_content_type, actual_content_type);
+        LOG_ERROR("Test failed for filename: %s", test.filename);
+        LOG_ERROR("Expected: %s, but got: %s", test.expected_content_type, actual_content_type);
     } else {
-        printf("Test passed for filename: %s\n", test.filename);
+        LOG_INFO("Test passed for filename: %s", test.filename);
     }
 }
 

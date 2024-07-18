@@ -1,6 +1,10 @@
 #ifndef __MULTIPART_H__
 #define __MULTIPART_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -149,5 +153,9 @@ bool multipart_save_file(const FileHeader* file, const char* body, const char* p
 // Shamelessly copied verbatim from:
 // https://stackoverflow.com/questions/8584644/strstr-for-a-string-that-is-not-null-terminated
 char* sstrstr(const char* haystack, const char* needle, size_t length);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // __MULTIPART_H__

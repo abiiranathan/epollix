@@ -31,7 +31,7 @@ HttpMethod method_fromstring(const char* method) {
     } else if (strcmp(method, "DELETE") == 0) {
         return M_DELETE;
     } else {
-        LOG_ERROR("Unsupported http method: %s\n", method);
+        LOG_ERROR("Unsupported http method: %s", method);
         return M_INVALID;
     }
 }

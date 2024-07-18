@@ -35,7 +35,7 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
         if (*pattern_ptr == '{') {
             // Check if we have space to store more parameters
             if (pathParams->match_count >= MAX_PARAMS) {
-                LOG_ERROR("PathParams size exceeded\n");
+                LOG_ERROR("PathParams size exceeded");
                 return false;
             }
 

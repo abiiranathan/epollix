@@ -49,6 +49,10 @@
 #define MAX_ROUTES 100
 #endif
 
+#ifndef MAX_GROUP_ROUTES
+#define MAX_GROUP_ROUTES 24
+#endif
+
 #ifndef MAX_PATH_LEN
 #define MAX_PATH_LEN 1024
 #endif
@@ -59,6 +63,10 @@
 
 #ifndef MAX_GLOBAL_MIDDLEWARE
 #define MAX_GLOBAL_MIDDLEWARE 10
+#endif
+
+#ifndef MAX_GROUP_MIDDLEWARE
+#define MAX_GROUP_MIDDLEWARE 4
 #endif
 
 // Time to wait for active connections to close.

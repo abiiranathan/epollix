@@ -1,4 +1,4 @@
-#include "include/epollix.h"
+#include "../../include/epollix.h"
 
 #include <assert.h>
 #include <pthread.h>
