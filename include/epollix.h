@@ -171,7 +171,7 @@ Route* DELETE_ROUTE(const char* pattern, Handler handler);
 
 // Serve static directory at dirname.
 // e.g   STATIC_DIR("/web", "/var/www/html");
-Route* STATIC_DIR(const char* pattern, char* dirname);
+Route* STATIC_DIR(const char* pattern, const char* dirname);
 
 // =========== REGISTER ROUTES ON Group ========================
 

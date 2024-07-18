@@ -1529,7 +1529,7 @@ Route* DELETE_ROUTE(const char* pattern, Handler handler) {
     return registerRoute(M_DELETE, pattern, handler, NormalRoute);
 }
 
-Route* STATIC_DIR(const char* pattern, char* dir) {
+Route* STATIC_DIR(const char* pattern, const char* dir) {
     assert(MAX_DIRNAME > strlen(dir) + 1);
 
     char* dirname = strdup(dir);
