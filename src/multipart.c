@@ -499,7 +499,7 @@ FileHeader* multipart_get_file(const MultipartForm* form, const char* field_name
     return NULL;
 }
 
-size_t* multipart_get_files(const MultipartForm* form, const char* field_name, size_t count[static 1]) {
+size_t* multipart_get_files(const MultipartForm* form, const char* field_name, size_t* count) {
     size_t num_files = 0;
     for (size_t i = 0; i < form->num_files; i++) {
         if (strcmp(form->files[i]->field_name, field_name) == 0) {
