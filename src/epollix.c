@@ -1256,7 +1256,7 @@ static int set_nonblocking(int sfd) {
     return 0;
 }
 
-static int setup_server_socket(char* port) {
+static int setup_server_socket(const char* port) {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
     int s, sfd;
@@ -1779,7 +1779,7 @@ static void enable_keepalive(int sockfd) {
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
-int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads) {
+int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads) {
     assert(port);  // we need a valid port
 
     int ret;

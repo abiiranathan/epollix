@@ -229,7 +229,7 @@ int http_serve_file(context_t* ctx, const char* filename);
 // The route matcher is a function pointer that is passed the request method
 // and path and returns the matching route. It is also for pupulating the Route
 // parameters be4 returning the route.
-int listen_and_serve(char* port, RouteMatcher route_matcher, size_t num_threads);
+int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads);
 
 #ifdef __cplusplus
 }
