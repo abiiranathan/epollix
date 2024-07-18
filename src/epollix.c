@@ -924,7 +924,7 @@ static void write_headers(context_t* ctx) {
 
 // Send the response to the client.
 // Returns the number of bytes sent.
-int send_response(context_t* ctx, char* data, size_t len) {
+int send_response(context_t* ctx, const char* data, size_t len) {
     char content_len[24];
     int ret = snprintf(content_len, sizeof(content_len), "%ld", len);
 
@@ -938,17 +938,17 @@ int send_response(context_t* ctx, char* data, size_t len) {
     return sendall(ctx->request->client_fd, data, len);
 }
 
-int send_json(context_t* ctx, char* data, size_t len) {
+int send_json(context_t* ctx, const char* data, size_t len) {
     set_header(ctx, CONTENT_TYPE_HEADER, "application/json");
     return send_response(ctx, data, len);
 }
 
 // Send null-terminated JSON string.
-int send_json_string(context_t* ctx, char* data) {
+int send_json_string(context_t* ctx, const char* data) {
     return send_json(ctx, data, strlen(data));
 }
 
-int send_string(context_t* ctx, char* data) {
+int send_string(context_t* ctx, const char* data) {
     return send_response(ctx, data, strlen(data));
 }
 
@@ -956,7 +956,7 @@ int send_string(context_t* ctx, char* data) {
 // Returns the number of bytes written.
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
-int response_send_chunk(context_t* ctx, char* data, size_t len) {
+int response_send_chunk(context_t* ctx, const char* data, size_t len) {
     if (!ctx->headers_sent) {
         ctx->status = StatusOK;
         set_header(ctx, "Transfer-Encoding", "chunked");

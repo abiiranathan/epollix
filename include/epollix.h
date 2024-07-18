@@ -116,7 +116,7 @@ void set_content_type(context_t* ctx, const char* content_type);
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
 // Returns the number of bytes written or -1 on error.
-int response_send_chunk(context_t* ctx, char* data, size_t len);
+int response_send_chunk(context_t* ctx, const char* data, size_t len);
 
 // End the chunked response. Must be called after all chunks have been sent.
 // Returns the number of bytes sent(that should be equal to 5) or -1 on error.
@@ -125,19 +125,19 @@ int response_end(context_t* ctx);
 // Write data of length len as response to the client.
 // Default content-type is text/html.
 // Returns the number of bytes sent or -1 on error.
-int send_response(context_t* ctx, char* data, size_t len);
+int send_response(context_t* ctx, const char* data, size_t len);
 
 // Send response as JSON with the correct header.
 // Returns the number of bytes sent or -1 on error.
-int send_json(context_t* ctx, char* data, size_t len);
+int send_json(context_t* ctx, const char* data, size_t len);
 
 // Send null-terminated JSON string.
-int send_json_string(context_t* ctx, char* data);
+int send_json_string(context_t* ctx, const char* data);
 
 // Send the response as a null-terminated string.
 // Default content-type is text/html.
 // You can override it by calling set_content_type.
-int send_string(context_t* ctx, char* data);
+int send_string(context_t* ctx, const char* data);
 
 // percent-encode a string for safe use in a URL.
 // Returns an allocated char* that the caller must free after use.
