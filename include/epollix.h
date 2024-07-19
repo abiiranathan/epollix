@@ -99,6 +99,9 @@ const Route* get_current_route(context_t* ctx);
 // Returns the pattern for which route was registered.
 const char* get_route_pattern(Route* route);
 
+// Get response status code.
+http_status get_status(context_t* ctx);
+
 // =================== Setters =================================
 
 // Set response header.
@@ -152,60 +155,62 @@ void response_redirect(context_t* ctx, const char* url);
 
 // ==================== REGISTER ROUTES ON CTX ===================================
 // Register an OPTIONS route.
-Route* OPTIONS_ROUTE(const char* pattern, Handler handler);
+Route* route_options(const char* pattern, Handler handler);
 
 // Register a GET route.
-Route* GET_ROUTE(const char* pattern, Handler handler);
+Route* route_get(const char* pattern, Handler handler);
 
 // Register a POST route.
-Route* POST_ROUTE(const char* pattern, Handler handler);
+Route* route_post(const char* pattern, Handler handler);
 
 // Register a PUT route.
-Route* PUT_ROUTE(const char* pattern, Handler handler);
+Route* route_put(const char* pattern, Handler handler);
 
 // Register a PATCH route.
-Route* PATCH_ROUTE(const char* pattern, Handler handler);
+Route* route_patch(const char* pattern, Handler handler);
 
 // Register a DELETE route.
-Route* DELETE_ROUTE(const char* pattern, Handler handler);
+Route* route_delete(const char* pattern, Handler handler);
 
 // Serve static directory at dirname.
-// e.g   STATIC_DIR("/web", "/var/www/html");
-Route* STATIC_DIR(const char* pattern, const char* dirname);
+// e.g   route_static("/web", "/var/www/html");
+Route* route_static(const char* pattern, const char* dirname);
 
 // =========== REGISTER ROUTES ON Group ========================
 
 // Create a new RouteGroup.
-RouteGroup* ROUTE_GROUP(const char* pattern);
+// A RouteGroup is a collection of routes that share the same prefix.
+// The allocated group must be freed by calling ROUTE_GROUP_FREE.
+RouteGroup* route_group(const char* pattern);
 
-// Free a RouteGroup.
-void ROUTE_GROUP_FREE(RouteGroup* group);
+// Free a RouteGroup allocated by ROUTE_GROUP.
+void route_group_free(RouteGroup* group);
 
 // Register an OPTIONS route.
-Route* OPTIONS_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_options(RouteGroup* group, const char* pattern, Handler handler);
 
 // Register a GET route.
-Route* GET_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_get(RouteGroup* group, const char* pattern, Handler handler);
 
 // Register a POST route.
-Route* POST_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_post(RouteGroup* group, const char* pattern, Handler handler);
 
 // Register a PUT route.
-Route* PUT_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_put(RouteGroup* group, const char* pattern, Handler handler);
 
 // Register a PATCH route.
-Route* PATCH_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_patch(RouteGroup* group, const char* pattern, Handler handler);
 
 // Register a DELETE route.
-Route* DELETE_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler);
+Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handler);
 
 // Serve static directory at dirname.
 // e.g   STATIC_GROUP_DIR(group, "/web", "/var/www/html");
-Route* STATIC_GROUP_DIR(RouteGroup* group, const char* pattern, char* dirname);
+Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns NULL.
-Route* NOT_FOUND_ROUTE(const char* pattern, Handler h);
+Route* route_notfound(const char* pattern, Handler h);
 
 // =========================================================================
 
@@ -221,7 +226,16 @@ Route* default_route_matcher(HttpMethod method, const char* path);
 // See man(2) sendfile for more information.
 // RFC: https://datatracker.ietf.org/doc/html/rfc7233 for more information about
 // range requests.
-int http_serve_file(context_t* ctx, const char* filename);
+int http_servefile(context_t* ctx, const char* filename);
+
+// Add a value to the context. This is useful for sharing data between middleware.
+// The key must be a null-terminated string. The value can be any
+// heap-allocated pointer. If the key already exists, the value is replaced.
+void set_context_value(context_t* ctx, const char* key, void* value);
+
+// Get a value stored by  a call to `set_context_value` from the context.
+// Returns NULL if the key does not exist.
+void* get_context_value(context_t* ctx, const char* key);
 
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.

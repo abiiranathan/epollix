@@ -71,15 +71,21 @@ typedef struct epollix_context {
     bool chunked;        // Is a chunked transfer
 
     struct MiddlewareContext* mw_ctx;  // Middleware context
+
+    // Locals is a map of key-value pairs that can be used to store user-data
+    // that can be accessed by middleware functions.
+    map* locals;
 } context_t;
 
+// Context for middleware functions.
 typedef struct MiddlewareContext {
-    Middleware* middleware;
-    size_t count;
-    size_t index;
-    void (*handler)(context_t* ctx);
+    Middleware* middleware;           // Array of middleware functions
+    size_t count;                     // Number of middleware functions
+    size_t index;                     // Current index in the middleware array
+    void (*handler)(context_t* ctx);  // Handler function
 } MiddlewareContext;
 
+// Route is a struct that contains the route pattern, handler, and middleware.
 typedef struct Route {
     HttpMethod method;          // HTTP Method.
     RouteType type;             // Type of Route (Normal or Static)
@@ -134,8 +140,6 @@ ssize_t sendall(int fd, const void* buf, size_t n);
 
 // Send error back to client as html with a status code.
 void http_error(int client_fd, http_status status, const char* message) {
-    assert(status >= StatusBadRequest && status <= StatusNetworkAuthenticationRequired);
-
     char* reply = NULL;
     int ret = asprintf(&reply, "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n", status,
                        http_status_text(status), strlen(message), message);
@@ -434,20 +438,17 @@ void set_status(context_t* ctx, http_status status) {
     ctx->status = status;
 }
 
+// Get response status code.
+http_status get_status(context_t* ctx) {
+    return ctx->status;
+}
+
 const char* get_content_type(context_t* ctx) {
     return find_header(ctx->request->headers, ctx->request->header_count, CONTENT_TYPE_HEADER);
 }
 
 bool header_valid(const header_t* h) {
     return h->name[0] != '\0';
-}
-
-void print_headers(header_t* headers, size_t n) {
-    printf("============ HEADERS ===================\n");
-    for (size_t i = 0; i < n; i++) {
-        printf("%s: %s\n", headers[i].name, headers[i].value);
-    }
-    printf("========================================\n");
 }
 
 // Create a header into buffer.
@@ -493,6 +494,45 @@ header_t header_fromstring(const char* str) {
     return header;
 }
 
+static void free_request(request_t* req) {
+    if (!req) {
+        return;
+    }
+
+    // Close the connection after sending the response
+    close_connection(req->client_fd, req->epoll_fd);
+
+    // Free memory for the request body
+    if (req->body) {
+        free(req->body);
+        req->body = NULL;
+    }
+
+    if (req->query_params) {
+        map_destroy(req->query_params, true);
+    }
+
+    // Free the request
+    free(req);
+
+    req = NULL;
+}
+
+// Add a value to the context. This is useful for sharing data between middleware.
+void set_context_value(context_t* ctx, const char* key, void* value) {
+    char* k = strdup(key);
+    if (!k) {
+        LOG_ERROR("unable to allocate memory for key: %s", key);
+        return;
+    }
+    map_set(ctx->locals, k, value);
+}
+
+// Get a value from the context. Returns NULL if the key does not exist.
+void* get_context_value(context_t* ctx, const char* key) {
+    return map_get(ctx->locals, (char*)key);
+}
+
 static void handle_write(request_t* req, Route* route) {
     // Initialize response
     context_t res = {0};
@@ -500,6 +540,15 @@ static void handle_write(request_t* req, Route* route) {
     res.status = StatusOK;
     res.headers_sent = false;
     res.chunked = false;
+
+    // Initialize locals map with a capacity of 8
+    res.locals = map_create(8, key_compare_char_ptr);
+    if (!res.locals) {
+        LOG_ERROR("unable to create map for locals");
+        http_error(req->client_fd, StatusInternalServerError, "error creating locals map");
+        free_request(req);
+        return;
+    }
 
     // Define middleware context
     MiddlewareContext mw_ctx = {0};
@@ -527,21 +576,16 @@ static void handle_write(request_t* req, Route* route) {
     // Execute middleware chain
     execute_middleware(&res, combined_middleware, combined_count, 0, route->handler);
 
-    // Close the connection after sending the response
-    close(req->client_fd);
+    free_request(req);
 
-    // Free memory for the request body
-    if (req->body) {
-        free(req->body);
-        req->body = NULL;
-    }
+    // Free the locals map
+    map_destroy(res.locals, true);
+}
 
-    if (req->query_params) {
-        map_destroy(req->query_params, true);
-    }
-
-    // Free the request
-    free(req);
+void defaultNotFoundHandler(context_t* ctx, Handler next) {
+    UNUSED(next);
+    http_error(ctx->request->client_fd, StatusNotFound, "Not Found");
+    free_request(ctx->request);
 }
 
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
@@ -667,7 +711,8 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
         if (notFoundRoute != NULL) {
             route = notFoundRoute;
         } else {
-            http_error(client_fd, StatusNotFound, "Not Found");
+            fprintf(stderr, "%s - %s %s 404 Not Found\n", method, http_version, path);
+            http_error(client_fd, StatusNotFound, "Not Found\n");
             close_connection(client_fd, epoll_fd);
             return;
         }
@@ -1048,7 +1093,7 @@ static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64
 // See man(2) sendfile for more information.
 // RFC: https://datatracker.ietf.org/doc/html/rfc7233 for more information about
 // range requests.
-int http_serve_file(context_t* ctx, const char* filename) {
+int http_servefile(context_t* ctx, const char* filename) {
     // Guess content-type if not already set
     if (find_header(ctx->headers, ctx->header_count, CONTENT_TYPE_HEADER) == NULL) {
         set_header(ctx, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
@@ -1505,31 +1550,31 @@ void set_content_type(context_t* ctx, const char* content_type) {
     set_header(ctx, CONTENT_TYPE_HEADER, content_type);
 }
 
-Route* OPTIONS_ROUTE(const char* pattern, Handler handler) {
+Route* route_options(const char* pattern, Handler handler) {
     return registerRoute(M_OPTIONS, pattern, handler, NormalRoute);
 }
 
-Route* GET_ROUTE(const char* pattern, Handler handler) {
+Route* route_get(const char* pattern, Handler handler) {
     return registerRoute(M_GET, pattern, handler, NormalRoute);
 }
 
-Route* POST_ROUTE(const char* pattern, Handler handler) {
+Route* route_post(const char* pattern, Handler handler) {
     return registerRoute(M_POST, pattern, handler, NormalRoute);
 }
 
-Route* PUT_ROUTE(const char* pattern, Handler handler) {
+Route* route_put(const char* pattern, Handler handler) {
     return registerRoute(M_PUT, pattern, handler, NormalRoute);
 }
 
-Route* PATCH_ROUTE(const char* pattern, Handler handler) {
+Route* route_patch(const char* pattern, Handler handler) {
     return registerRoute(M_PATCH, pattern, handler, NormalRoute);
 }
 
-Route* DELETE_ROUTE(const char* pattern, Handler handler) {
+Route* route_delete(const char* pattern, Handler handler) {
     return registerRoute(M_DELETE, pattern, handler, NormalRoute);
 }
 
-Route* STATIC_DIR(const char* pattern, const char* dir) {
+Route* route_static(const char* pattern, const char* dir) {
     assert(MAX_DIRNAME > strlen(dir) + 1);
 
     char* dirname = strdup(dir);
@@ -1566,7 +1611,7 @@ Route* STATIC_DIR(const char* pattern, const char* dir) {
 // ============= route group ==============
 
 // Create a new RouteGroup.
-RouteGroup* ROUTE_GROUP(const char* pattern) {
+RouteGroup* route_group(const char* pattern) {
     RouteGroup* group = malloc(sizeof(RouteGroup));
     if (!group) {
         LOG_FATAL("Failed to allocate memory for RouteGroup\n");
@@ -1584,7 +1629,7 @@ RouteGroup* ROUTE_GROUP(const char* pattern) {
     return group;
 }
 
-void ROUTE_GROUP_FREE(RouteGroup* group) {
+void route_group_free(RouteGroup* group) {
     free(group->prefix);
     free(group);
 }
@@ -1622,38 +1667,38 @@ static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const cha
 }
 
 // Register an OPTIONS route.
-Route* OPTIONS_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_options(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_OPTIONS, pattern, handler, NormalRoute);
 }
 
 // Register a GET route.
-Route* GET_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_get(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_GET, pattern, handler, NormalRoute);
 }
 
 // Register a POST route.
-Route* POST_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_post(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_POST, pattern, handler, NormalRoute);
 }
 
 // Register a PUT route.
-Route* PUT_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_put(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_PUT, pattern, handler, NormalRoute);
 }
 
 // Register a PATCH route.
-Route* PATCH_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_patch(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_PATCH, pattern, handler, NormalRoute);
 }
 
 // Register a DELETE route.
-Route* DELETE_GROUP_ROUTE(RouteGroup* group, const char* pattern, Handler handler) {
+Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handler) {
     return registerGroupRoute(group, M_DELETE, pattern, handler, NormalRoute);
 }
 
 // Serve static directory at dirname.
 // e.g   STATIC_GROUP_DIR(group, "/web", "/var/www/html");
-Route* STATIC_GROUP_DIR(RouteGroup* group, const char* pattern, char* dirname) {
+Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname) {
     assert(MAX_DIRNAME > strlen(dirname) + 1);
 
     char* fullpath = strdup(dirname);
@@ -1689,7 +1734,7 @@ Route* STATIC_GROUP_DIR(RouteGroup* group, const char* pattern, char* dirname) {
 //=======================================
 
 bool not_found_registered = false;
-Route* NOT_FOUND_ROUTE(const char* pattern, Handler h) {
+Route* route_notfound(const char* pattern, Handler h) {
     if (not_found_registered) {
         LOG_FATAL("registration of more than one 404 handler\n");
     }
@@ -1742,7 +1787,7 @@ static void staticFileHandler(context_t* ctx) {
     if (path_exists(filepath)) {
         const char* web_ct = get_mimetype(filepath);
         set_header(ctx, CONTENT_TYPE_HEADER, web_ct);
-        http_serve_file(ctx, filepath);
+        http_servefile(ctx, filepath);
         return;
     }
 
@@ -1844,7 +1889,6 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
                     struct sockaddr internetAddress;
                     socklen_t client_len;
                     int client_fd;
-                    char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
 
                     client_len = sizeof internetAddress;
                     client_fd = accept(server_fd, &internetAddress, &client_len);
@@ -1863,11 +1907,12 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
                         }
                     }
 
-                    ret = getnameinfo(&internetAddress, client_len, hostbuf, sizeof hostbuf, portbuf, sizeof portbuf,
-                                      NI_NUMERICHOST | NI_NUMERICSERV);
-                    if (ret == 0) {
-                        printf("new connection on fd %d (host=%s, port=%s)\n", client_fd, hostbuf, portbuf);
-                    }
+                    // char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
+                    // ret = getnameinfo(&internetAddress, client_len, hostbuf, sizeof hostbuf, portbuf, sizeof portbuf,
+                    //                   NI_NUMERICHOST | NI_NUMERICSERV);
+                    // if (ret == 0) {
+                    //     printf("new connection on fd %d (host=%s, port=%s)\n", client_fd, hostbuf, portbuf);
+                    // }
 
                     ret = set_nonblocking(client_fd);
                     if (ret == -1) {

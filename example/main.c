@@ -1,4 +1,5 @@
 #include "../include/epollix.h"
+#include "../include/middleware.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -7,12 +8,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-// ================ Middleware ================================
-void logging_middleware(context_t* ctx, Handler next) {
-    printf("Request: %s %s\n", get_method_str(ctx), get_path(ctx));
-    next(ctx);
-}
 
 void auth_middleware(context_t* ctx, Handler next) {
     const char* auth = get_header(ctx, "Authorization");
@@ -27,11 +22,11 @@ void auth_middleware(context_t* ctx, Handler next) {
 
 // ======================= Routes =======================
 void index_page(context_t* ctx) {
-    http_serve_file(ctx, "assets/index.html");
+    http_servefile(ctx, "assets/index.html");
 }
 
 void serve_movie(context_t* ctx) {
-    http_serve_file(ctx, "assets/BigBuckBunny.mp4");
+    http_servefile(ctx, "assets/BigBuckBunny.mp4");
 }
 
 // GET /greet/{name}
@@ -88,7 +83,7 @@ void handle_create_user(context_t* ctx) {
 
 // GET /users/register
 void render_register_form(context_t* ctx) {
-    http_serve_file(ctx, "./assets/register_user.html");
+    http_servefile(ctx, "./assets/register_user.html");
 }
 
 void* send_time(void* arg) {
@@ -151,26 +146,27 @@ int main(int argc, char** argv) {
         port = argv[1];
     }
 
-    GET_ROUTE("/", index_page);
-    GET_ROUTE("/movie", serve_movie);
-    GET_ROUTE("/greet/{name}", handle_greet);
+    route_get("/", index_page);
+    route_get("/movie", serve_movie);
+    route_get("/greet/{name}", handle_greet);
 
-    Route* reg = GET_ROUTE("/users/register", render_register_form);
+    Route* reg = route_get("/users/register", render_register_form);
     use_route_middleware(reg, 1, auth_middleware);
 
-    POST_ROUTE("/users/create", handle_create_user);
-    GET_ROUTE("/chunked", chunked_response);
-    STATIC_DIR("/static", "./assets");
+    route_post("/users/create", handle_create_user);
+    route_get("/chunked", chunked_response);
+    route_static("/static", "./assets");
 
     // Create a route group
-    RouteGroup* group = ROUTE_GROUP("/api/v1");
-    GET_GROUP_ROUTE(group, "/", api_index);
-    GET_GROUP_ROUTE(group, "/users", api_users);
-    GET_GROUP_ROUTE(group, "/users/{id}", api_user_by_id);
-    ROUTE_GROUP_FREE(group);
+    RouteGroup* group = route_group("/api/v1");
+    route_group_get(group, "/", api_index);
+    route_group_get(group, "/users", api_users);
+    route_group_get(group, "/users/{id}", api_user_by_id);
+    route_group_free(group);
 
     // Add middleware
-    use_global_middleware(1, logging_middleware);
+    append_log_flags(LOG_IP);
+    use_global_middleware(1, epollix_logger);
 
     listen_and_serve(port, default_route_matcher, 4);
 }
