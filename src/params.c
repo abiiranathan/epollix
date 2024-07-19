@@ -122,29 +122,3 @@ const char* get_path_param(const PathParams* pathParams, const char* name) {
     }
     return NULL;
 }
-
-// #define TEST_PARAMS
-#ifdef TEST_PARAMS
-int main() {
-    const char* pattern = "/about/{name}/profile/{id}/";
-    const char url[] = "/about/John Doe/profile/123/";
-
-    PathParams pathParams = {0};
-    bool matches = match_path_parameters(pattern, url, &pathParams);
-    printf("Url Matches: %d\n", matches);
-    printf("Matching Params: %ld\n", pathParams.match_count);
-
-    // Print param values
-    for (size_t i = 0; i < pathParams.match_count; i++) {
-        printf("Param: %s, Value: %s\n", pathParams.params[i].name, pathParams.params[i].value);
-    }
-
-    // Get param by name
-    const char* name = get_path_param(&pathParams, "name");
-    const char* id = get_path_param(&pathParams, "id");
-
-    printf("Name: %s, ID: %s\n", name, id);
-
-    return 0;
-}
-#endif
