@@ -25,6 +25,14 @@ extern "C" {
         exit(EXIT_FAILURE);                                                                                            \
     } while (0)
 
+// Verbose ASSERT macro.
+#define LOG_ASSERT(condition, fmt, ...)                                                                                \
+    do {                                                                                                               \
+        if (!(condition)) {                                                                                            \
+            LOG_FATAL("Assertion failed: " #condition " " fmt, ##__VA_ARGS__);                                         \
+        }                                                                                                              \
+    } while (0)
+
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif

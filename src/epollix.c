@@ -363,9 +363,6 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
 
                     req->headers[req->header_count++] = h;
                     state = STATE_HEADER_END;
-
-                    // assert(*(ptr + i) == '\r');
-                    // assert(*(ptr + i + 1) == '\n');
                 } else {
                     header_value[header_value_idx++] = ptr[i];
                 }
@@ -627,7 +624,9 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
 
         size_t length = ptr - clptr - header_len;
         strncpy(content_length, clptr + header_len, sizeof(content_length) - 1);
-        assert(length + 1 <= sizeof(content_length));
+
+        LOG_ASSERT((length + 1 <= sizeof(content_length)), "content_length is too long");
+
         content_length[length] = '\0';
     }
 
@@ -1434,10 +1433,10 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->type = type;
     memset(route->dirname, 0, sizeof(route->dirname));
     route->pattern = strdup(pattern);
-    assert(route->pattern);
+    LOG_ASSERT(route->pattern, "strdup failed");
 
     route->params = malloc(sizeof(PathParams));
-    assert(route->params);
+    LOG_ASSERT(route->params, "malloc failed");
 
     route->params->match_count = 0;
     memset(route->params->params, 0, sizeof(route->params->params));
@@ -1570,15 +1569,15 @@ Route* route_delete(const char* pattern, Handler handler) {
 }
 
 Route* route_static(const char* pattern, const char* dir) {
-    assert(MAX_DIRNAME > strlen(dir) + 1);
+    LOG_ASSERT(MAX_DIRNAME > strlen(dir) + 1, "dir name too long");
 
     char* dirname = strdup(dir);
-    assert(dirname != NULL);
+    LOG_ASSERT(dirname, "strdup failed");
 
     if (strstr(dirname, "~")) {
         free(dirname);
         dirname = filepath_expanduser(dir);
-        assert(dirname != NULL);
+        LOG_ASSERT(dirname, "filepath_expanduser failed");
     }
 
     // Check that dirname exists
@@ -1594,7 +1593,7 @@ Route* route_static(const char* pattern, const char* dir) {
     }
 
     Route* route = registerRoute(M_GET, pattern, staticFileHandler, StaticRoute);
-    assert(route != NULL);
+    LOG_ASSERT(route, "registerRoute failed");
 
     route->type = StaticRoute;
     snprintf(route->dirname, MAX_DIRNAME, "%s", dirname);
@@ -1694,15 +1693,15 @@ Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handle
 // Serve static directory at dirname.
 // e.g   STATIC_GROUP_DIR(group, "/web", "/var/www/html");
 Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname) {
-    assert(MAX_DIRNAME > strlen(dirname) + 1);
+    LOG_ASSERT(MAX_DIRNAME > strlen(dirname) + 1, "dirname is too long");
 
     char* fullpath = strdup(dirname);
-    assert(fullpath != NULL);
+    LOG_ASSERT(fullpath != NULL, "strdup failed");
 
     if (strstr(fullpath, "~")) {
         free(fullpath);
         fullpath = filepath_expanduser(dirname);
-        assert(fullpath != NULL);
+        LOG_ASSERT(fullpath != NULL, "filepath_expanduser failed");
     }
 
     // Check that dirname exists
@@ -1718,7 +1717,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     }
 
     Route* route = registerGroupRoute(group, M_GET, pattern, staticFileHandler, StaticRoute);
-    assert(route != NULL);
+    LOG_ASSERT(route != NULL, "registerGroupRoute failed");
 
     route->type = StaticRoute;
     snprintf(route->dirname, MAX_DIRNAME, "%s", fullpath);
@@ -1820,7 +1819,7 @@ static void enable_keepalive(int sockfd) {
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
 int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads) {
-    assert(port);  // we need a valid port
+    LOG_ASSERT(port != NULL, "port is NULL but expected to be a valid port number");
 
     int ret;
     struct epoll_event event = {0}, events[MAXEVENTS] = {0};
@@ -1871,7 +1870,7 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
 
     // Create a threadpool with n threads
     pool = threadpool_create(nworkers);
-    assert(pool);
+    LOG_ASSERT(pool, "Failed to create threadpool\n");
 
     while (running) {
         // Block indefinitely until we have ready events (-1)
