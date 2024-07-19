@@ -582,12 +582,6 @@ static void handle_write(request_t* req, Route* route) {
     map_destroy(res.locals, true);
 }
 
-void defaultNotFoundHandler(context_t* ctx, Handler next) {
-    UNUSED(next);
-    http_error(ctx->request->client_fd, StatusNotFound, "Not Found");
-    free_request(ctx->request);
-}
-
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
 completely, as we are running in edge-triggered mode and won't get a notification again for the same data. */
 static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
@@ -803,6 +797,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
             // Reset idle interval
             clock_gettime(CLOCK_MONOTONIC, &last_read_time);
 
+            // Copy the data to the body buffer
             memcpy(body + total_read, buf, count);
             total_read += count;
         }
@@ -822,7 +817,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
         return;
     }
 
-    // Init request
+    // Initialize the request
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
     req->body = body;
