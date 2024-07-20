@@ -28,6 +28,9 @@ extern "C" {
 #include <time.h>
 #include <unistd.h>
 
+// for inet_ntop and inet_pton
+#include <arpa/inet.h>
+
 #ifdef __cplusplus
 }
 #endif
@@ -1114,7 +1117,7 @@ int http_servefile(context_t* ctx, const char* filename) {
     // Open the file with fopen64 to support large files
     FILE* file = fopen64(filename, "rb");
     if (file == NULL) {
-        perror("fopen64");
+        LOG_ERROR("Unable to open file: %s", filename);
         ctx->status = StatusInternalServerError;
         write_headers(ctx);
         return -1;
@@ -1815,6 +1818,34 @@ static void enable_keepalive(int sockfd) {
     }
 }
 
+char* get_ip_address(context_t* ctx) {
+    // try the forwarded header
+    const char* ip_addr = get_header(ctx, "X-Forwarded-For");
+    if (!ip_addr) {
+        // try the real ip address
+        ip_addr = get_header(ctx, "X-Real-IP");
+    }
+
+    if (!ip_addr) {
+        // use peer address
+        struct sockaddr_storage addr;
+        socklen_t len = sizeof(addr);
+        getpeername(ctx->request->client_fd, (struct sockaddr*)&addr, &len);
+
+        char ipstr[INET6_ADDRSTRLEN];
+        if (addr.ss_family == AF_INET) {
+            struct sockaddr_in* s = (struct sockaddr_in*)&addr;
+            inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof(ipstr));
+        } else {  // AF_INET6
+            struct sockaddr_in6* s = (struct sockaddr_in6*)&addr;
+            inet_ntop(AF_INET6, &s->sin6_addr, ipstr, sizeof(ipstr));
+        }
+
+        return strdup(ipstr);
+    }
+    return strdup(ip_addr);
+}
+
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
@@ -1856,7 +1887,6 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
         LOG_FATAL("Failed to add server socket to epoll\n");
     }
 
-    /* The event loop */
     install_signal_handler();
     init_mime_hashtable();
 
@@ -1872,6 +1902,7 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
     pool = threadpool_create(nworkers);
     LOG_ASSERT(pool, "Failed to create threadpool\n");
 
+    /* The event loop */
     while (running) {
         // Block indefinitely until we have ready events (-1)
         int nfds = epoll_wait(epoll_fd, events, MAXEVENTS, -1);

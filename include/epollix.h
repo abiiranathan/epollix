@@ -83,6 +83,12 @@ const char* get_method_str(context_t* ctx);
 // Returns the content-type for this request by reading the Content-Type header.
 const char* get_content_type(context_t* ctx);
 
+// Returns the IP address of the client.
+// It reads the X-Forwarded-For header if it exists, if not
+// reads X-Real-IP header before resolving the IP address from the socket.
+// The returned address is a heap-allocated string that the caller must free.
+char* get_ip_address(context_t* ctx);
+
 // Returns the HttpMethod enum for the request.
 // Use get_method_str if you want the method as a char*.
 HttpMethod get_method(context_t* ctx);

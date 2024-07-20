@@ -1,5 +1,6 @@
 #include "../include/middleware.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #define COLOR_RESET "\x1b[0m"
@@ -93,22 +94,19 @@ void epollix_logger(context_t* ctx, Handler next) {
 
         // Print time in microseconds if less than 1 second, otherwise in milliseconds
         if (seconds == 0 && milliseconds == 0) {
-            printf("%ldµs", microseconds);
+            printf("%ldµs ", microseconds);
         } else if (seconds >= 1) {
-            printf("%lds", seconds);
+            printf("%lds ", seconds);
         } else {
-            printf("%ldms", milliseconds);
+            printf("%ldms ", milliseconds);
         }
     }
 
     if (log_flags & LOG_IP) {
-        const char* ip = get_header(ctx, "X-Forwarded-For");
-        if (!ip) {
-            ip = get_header(ctx, "X-Real-IP");
-        }
-
+        char* ip = get_ip_address(ctx);
         if (ip) {
             printf("%s ", ip);
+            free(ip);
         }
     }
 
