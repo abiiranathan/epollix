@@ -16,7 +16,7 @@ extern "C" {
 #include "params.h"
 #include "status.h"
 
-#include "../include/defer.h"
+#include "defer.h"
 
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)var)

@@ -164,11 +164,11 @@ void close_connection(int client_fd, int epoll_fd) {
 static void* exit_timer_thread(void* arg) {
     UNUSED(arg);
 
-    int tick = 0;
+    volatile int tick = 0;
     while (!cleanup_done) {
-        sleep(1);
+        usleep(1000);
         tick++;
-        if (tick >= SHUTDOWN_TIMEOUT) {
+        if (tick >= SHUTDOWN_TIMEOUT * 1000) {
             break;
         }
     }

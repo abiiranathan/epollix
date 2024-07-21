@@ -1,9 +1,9 @@
 #include "../include/middleware.h"
-#include <unistd.h>
-
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
 #define COLOR_RESET "\x1b[0m"
 #define COLOR_RED "\x1b[31m"
@@ -19,6 +19,12 @@ FILE* log_file = NULL;
 
 // Default global log flags
 LogFlag log_flags = LOG_DEFAULT;
+
+// spin lock for thread-safe printf
+static pthread_spinlock_t spinlock;
+
+// flag whether the spinlock has been initialized
+_Atomic int spinlock_initialized = 0;
 
 // Get the log flags
 LogFlag get_log_flags(void) {
@@ -81,6 +87,12 @@ void epollix_logger(context_t* ctx, Handler next) {
         return;
     }
 
+    // Initialize the spinlock if it hasn't been initialized
+    if (!spinlock_initialized) {
+        pthread_spin_init(&spinlock, PTHREAD_PROCESS_PRIVATE);
+        spinlock_initialized = 1;
+    }
+
     if (log_file == NULL) {
         log_file = stdout;
     }
@@ -96,8 +108,8 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
-    // Lock the mutex for thread-safe printf
-    flockfile(log_file);
+    // Lock the spinlock for thread-safe printf
+    pthread_spin_lock(&spinlock);
 
     if (log_flags & LOG_DATE) {
         fprintf(log_file, "%d-%02d-%02d ", tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday);
@@ -153,5 +165,5 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     fprintf(log_file, "\n");
     fflush(log_file);
-    funlockfile(log_file);
+    pthread_spin_unlock(&spinlock);
 }
