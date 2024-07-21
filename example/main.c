@@ -178,5 +178,5 @@ int main(int argc, char** argv) {
     set_log_file(file);
     use_global_middleware(1, epollix_logger);
 
-    listen_and_serve(port, default_route_matcher, 4);
+    listen_and_serve(port, default_route_matcher, 2);
 }

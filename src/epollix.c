@@ -43,42 +43,42 @@ typedef struct header {
     char value[MAX_HEADER_VALUE];  // Header value
 } header_t;
 
+#pragma pack(1)
 typedef struct request {
-    int client_fd;        // Peer connection file descriptor
-    int epoll_fd;         // epoll file descriptor.
+    int client_fd;  // Peer connection file descriptor
+    int epoll_fd;   // epoll file descriptor.
+
     HttpMethod method;    // Http request method as an integer enum;
     char method_str[16];  // Http request method
 
-    char path[1024];        // Request path and query string
-    char http_version[16];  // Http version
+    map* query_params;    // Query parameters
+    struct Route* route;  // Matching route
+
+    char path[MAX_PATH_LEN];  // Request path and query string
+    char http_version[16];    // Http version
 
     size_t header_count;                // Number of headers
     header_t headers[MAX_REQ_HEADERS];  // Request headers
 
     size_t content_length;  // Content length or size of body
     uint8_t* body;          // Body of the request.
-    map* query_params;      // Query parameters
-
-    struct Route* route;  // Matching route
 } request_t;
 
 // epollix context containing response primitives and request state.
 typedef struct epollix_context {
-    http_status status;                 // Status code
-    uint8_t* data;                      // Response data as bytes.
-    size_t content_length;              // Content-Length
-    size_t header_count;                // Number of headers set.
-    header_t headers[MAX_RES_HEADERS];  // Response headers
+    http_status status;     // Status code
+    uint8_t* data;          // Response data as bytes.
+    size_t content_length;  // Content-Length
 
     request_t* request;  // Pointer to the request
     bool headers_sent;   // Headers already sent
     bool chunked;        // Is a chunked transfer
 
-    struct MiddlewareContext* mw_ctx;  // Middleware context
+    size_t header_count;                // Number of headers set.
+    header_t headers[MAX_RES_HEADERS];  // Response headers
 
-    // Locals is a map of key-value pairs that can be used to store user-data
-    // that can be accessed by middleware functions.
-    map* locals;
+    struct MiddlewareContext* mw_ctx;  // Middleware context
+    map* locals;                       // user-data key-value store for sharing data between middleware and handlers.
 } context_t;
 
 // Context for middleware functions.

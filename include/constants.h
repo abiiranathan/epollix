@@ -37,20 +37,16 @@
 #define MAX_DIRNAME 128
 #endif
 
-#ifndef MAX_PATTERN_LENGTH
-#define MAX_PATTERN_LENGTH 256
-#endif
-
 #ifndef MAX_HEADER_SIZE
 #define MAX_HEADER_SIZE 4096
 #endif
 
 #ifndef MAX_ROUTES
-#define MAX_ROUTES 100
+#define MAX_ROUTES 48
 #endif
 
 #ifndef MAX_GROUP_ROUTES
-#define MAX_GROUP_ROUTES 24
+#define MAX_GROUP_ROUTES 8
 #endif
 
 #ifndef MAX_PATH_LEN
@@ -62,7 +58,7 @@
 #endif
 
 #ifndef MAX_GLOBAL_MIDDLEWARE
-#define MAX_GLOBAL_MIDDLEWARE 10
+#define MAX_GLOBAL_MIDDLEWARE 8
 #endif
 
 #ifndef MAX_GROUP_MIDDLEWARE
