@@ -12,6 +12,7 @@ extern "C" {
 #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
 #include <pthread.h>
 #include <signal.h>
+#include <solidc/cstr.h>
 #include <solidc/filepath.h>
 #include <solidc/map.h>
 #include <solidc/thread.h>
@@ -1741,6 +1742,152 @@ Route* route_notfound(const char* pattern, Handler h) {
     return notFoundRoute;
 }
 
+// format_file_size returns a human-readable string representation of the file size.
+// The function returns a pointer to a static buffer that is overwritten on each call.
+// This means that it is not thread-safe.
+const char* format_file_size(off_t size) {
+    static char buf[32];
+    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+
+    int i = 0;
+    double s = size;
+
+    while (s >= 1024 && i < 8) {
+        s /= 1024;
+        i++;
+    }
+
+    if (i == 0) {
+        snprintf(buf, sizeof(buf), "%ld %s", (long)size, units[i]);
+    } else {
+        snprintf(buf, sizeof(buf), "%.0f %s", s, units[i]);
+    }
+    return buf;
+}
+
+static void serve_directory_listing(context_t* ctx, const char* dirname, const char* base_prefix) {
+    DIR* dir;
+    struct dirent* ent;
+    Arena* arena = arena_create(4096, 8);
+    if (!arena) {
+        LOG_ERROR("Failed to create arena\n");
+        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        ctx->status = StatusInternalServerError;
+        send_string(ctx, "Failed to create arena");
+        return;
+    }
+
+    cstr* html_response = cstr_from(arena,
+                                    "<html>"
+                                    "<head>"
+                                    "<style>"
+                                    "body { font-family: Arial, sans-serif; padding: 1rem; }"
+                                    "h1 { color: #333; }"
+                                    "table { width: 100%; border-collapse: collapse; }"
+                                    "th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }"
+                                    "th { background-color: #f2f2f2; }"
+                                    "a { text-decoration: none; color: #0066cc; }"
+                                    "a:hover { text-decoration: underline; }"
+                                    ".breadcrumbs { margin-bottom: 20px; }"
+                                    ".breadcrumbs a { color: #0066cc; text-decoration: none; }"
+                                    ".breadcrumbs a:hover { text-decoration: underline; }"
+                                    "</style>"
+                                    "</head>"
+                                    "<body>"
+                                    "<h1>Directory Listing</h1>");
+
+    // Create breadcrumbs
+    cstr_append(arena, html_response, "<div class=\"breadcrumbs\">");
+    cstr_append(arena, html_response, "<a href=\"/\">Home</a>");
+
+    char* path = strdup(base_prefix);
+    if (!path) {
+        LOG_ERROR("Failed to allocate memory for path\n");
+        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        ctx->status = StatusInternalServerError;
+        send_string(ctx, "Failed to allocate memory for path");
+        arena_destroy(arena);
+        return;
+    }
+
+    char* token = strtok(path, "/");
+    char breadcrumb_path[MAX_PATH_LEN] = {0};
+
+    while (token) {
+        strcat(breadcrumb_path, "/");
+        strcat(breadcrumb_path, token);
+        cstr_append(arena, html_response, " / <a href=\"");
+        cstr_append(arena, html_response, breadcrumb_path);
+        cstr_append(arena, html_response, "\">");
+        cstr_append(arena, html_response, token);
+        cstr_append(arena, html_response, "</a>");
+        token = strtok(NULL, "/");
+    }
+
+    free(path);
+    cstr_append(arena, html_response, "</div>");
+
+    cstr_append(arena, html_response,
+                "<table>"
+                "<tr><th>Name</th><th>Size</th></tr>");
+
+    if ((dir = opendir(dirname)) != NULL) {
+        while ((ent = readdir(dir)) != NULL) {
+            if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
+                cstr_append(arena, html_response, "<tr><td><a href=\"");
+                cstr_append(arena, html_response, base_prefix);
+                cstr_append(arena, html_response, "/");
+                cstr_append(arena, html_response, ent->d_name);
+                cstr_append(arena, html_response, "\">");
+                cstr_append(arena, html_response, ent->d_name);
+                cstr_append(arena, html_response, "</a></td>");
+
+                char filepath[MAX_PATH_LEN] = {0};
+                snprintf(filepath, MAX_PATH_LEN, "%s/%s", dirname, ent->d_name);
+
+                struct stat st;
+                if (stat(filepath, &st) == 0) {
+                    if (S_ISDIR(st.st_mode)) {
+                        cstr_append(arena, html_response, "<td>Directory</td>");
+                    } else {
+                        cstr_append(arena, html_response, "<td>");
+                        cstr_append(arena, html_response, format_file_size(st.st_size));
+                        cstr_append(arena, html_response, "</td>");
+                    }
+                } else {
+                    cstr_append(arena, html_response, "<td>Unknown</td>");
+                }
+
+                cstr_append(arena, html_response, "</tr>");
+            }
+        }
+        closedir(dir);
+    } else {
+        // Could not open directory
+        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        ctx->status = StatusInternalServerError;
+        send_string(ctx, "Unable to open directory");
+        arena_destroy(arena);
+        return;
+    }
+
+    cstr_append(arena, html_response, "</table></body></html>");
+    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    ctx->status = StatusOK;
+    send_string(ctx, html_response->data);
+
+    arena_destroy(arena);
+}
+
+// Flag to enable or disable directory browsing.
+static bool browse_enabled = false;
+
+// Enable or disable directory browsing for the server.
+// If the requested path is a directory, the server will list the files in the directory.
+void enable_directory_browsing(bool enable) {
+    browse_enabled = enable;
+}
+
 static void staticFileHandler(context_t* ctx) {
     request_t* req = ctx->request;
     Route* route = req->route;
@@ -1777,8 +1924,24 @@ static void staticFileHandler(context_t* ctx) {
             filepath[filepath_len - 1] = '\0';
         }
 
-        // Append /index.html to the path
-        strncat(filepath, "/index.html", sizeof(filepath) - filepath_len - 1);
+        char index_file[MAX_PATH_LEN + 16] = {0};
+        snprintf(index_file, MAX_PATH_LEN + 16, "%s/index.html", filepath);
+
+        if (!path_exists(index_file)) {
+            if (browse_enabled) {
+                char prefix[MAX_PATH_LEN] = {0};
+                snprintf(prefix, MAX_PATH_LEN, "%s%s", route->pattern, static_path);
+                serve_directory_listing(ctx, filepath, prefix);
+            } else {
+                set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+                ctx->status = StatusForbidden;
+                send_string(ctx, "<h1>Directory listing is disabled</h1>");
+            }
+            return;
+        } else {
+            // Append /index.html to the path
+            strncat(filepath, "/index.html", sizeof(filepath) - filepath_len - 1);
+        }
     }
 
     if (path_exists(filepath)) {

@@ -49,9 +49,12 @@ void handle_create_user(context_t* ctx) {
     char boundary[128] = {0};
     // You can also parse it from the body.
     bool ok = multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary));
+
     if (ok) {
         char* body = get_body(ctx);
         code = multipart_parse_form(body, get_body_size(ctx), boundary, &form);
+        defer({ multipart_free_form((MultipartForm*)&form); });
+
         if (code != MULTIPART_OK) {
             set_status(ctx, StatusBadRequest);
             const char* error = multipart_error_message(code);
@@ -72,7 +75,6 @@ void handle_create_user(context_t* ctx) {
             printf("Saved file %s\n", form.files[i]->filename);
         }
 
-        multipart_free_form(&form);
         response_redirect(ctx, "/");
     } else {
         set_status(ctx, StatusBadRequest);
@@ -155,6 +157,9 @@ int main(int argc, char** argv) {
 
     route_post("/users/create", handle_create_user);
     route_get("/chunked", chunked_response);
+
+    // Enable directory browsing
+    enable_directory_browsing(true);
     route_static("/static", "./assets");
 
     // Create a route group
@@ -166,6 +171,11 @@ int main(int argc, char** argv) {
 
     // Add middleware
     append_log_flags(LOG_IP);
+
+    FILE* file = fopen("server.log", "w");
+    defer({ fclose(file); });
+
+    set_log_file(file);
     use_global_middleware(1, epollix_logger);
 
     listen_and_serve(port, default_route_matcher, 4);

@@ -27,7 +27,7 @@ void run_tests(TestCase* tests, size_t num_tests) {
     }
 }
 
-int main() {
+int main(void) {
     init_mime_hashtable();
 
     TestCase tests[] = {

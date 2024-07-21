@@ -4,12 +4,17 @@ project(epollix VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
+# export the compile_commands.json file
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Build type
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-# Set compiler
-# set(CMAKE_C_COMPILER "clang")
-
 option(BUILD_TESTS "Build the tests" ON)
+
 
 # Find the solidc library
 find_package(solidc REQUIRED)
@@ -30,6 +35,31 @@ add_library(epollix ${SOURCES})
 
 # Link the math library, pthreads, and the solidc library
 target_link_libraries(epollix PUBLIC m pthread solidc::solidc)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror )
+
+# If using clang, add support for -fblocks
+# Add Clang-specific compile options
+# sudo pacman -S libdispatch # provides libBlocksRuntime
+# Or sudo apt-get install libblocksruntime-dev
+# Detect compiler and set options
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    message(STATUS "Using Clang, adding -fblocks support")
+    target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)
+    target_link_libraries(epollix PUBLIC BlocksRuntime)
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "Using GCC, adding -noexecstack support")
+
+    # Add noexecstack to the linker options to prevent stack execution
+    target_compile_options(epollix PUBLIC 
+        -Wl,-z,noexecstack 
+        -fstack-protector-strong 
+        -D_FORTIFY_SOURCE=2 
+        -fPIE 
+        -fPIC 
+        -O2)
+else()
+    message(FATAL_ERROR "Unsupported compiler")
+endif()
 
 # Include the include directory
 target_include_directories(epollix PUBLIC
@@ -37,8 +67,8 @@ target_include_directories(epollix PUBLIC
     $<INSTALL_INTERFACE:include/epollix>
 )
 
-# Configure the target to use the C11 standard
-target_compile_options(epollix PRIVATE -Wall -Wextra -pedantic -Werror)
+# Add the DEFER_IMPL and DEFERDEF_STATIC definitions in defer.h
+target_compile_definitions(epollix PUBLIC DEFER_IMPL DEFERDEF_STATIC)
 
 # Install targets
 install(FILES ${HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/epollix)

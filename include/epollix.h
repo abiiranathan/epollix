@@ -7,6 +7,7 @@ extern "C" {
 
 #define _GNU_SOURCE 1
 
+#include <stdio.h>
 #include "constants.h"
 #include "logging.h"
 #include "method.h"
@@ -14,6 +15,8 @@ extern "C" {
 #include "multipart.h"
 #include "params.h"
 #include "status.h"
+
+#include "../include/defer.h"
 
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)var)
@@ -118,6 +121,15 @@ void set_status(context_t* ctx, http_status status);
 
 // Set content type for the response.
 void set_content_type(context_t* ctx, const char* content_type);
+
+// Enable or disable directory browsing for the server.
+// If the requested path is a directory, the server will list the files in the directory.
+void enable_directory_browsing(bool enable);
+
+// format_file_size returns a human-readable string representation of the file size.
+// The function returns a pointer to a static buffer that is overwritten on each call.
+// This means that it is not thread-safe.
+const char* format_file_size(off_t size);
 
 // ============== Send function variants ==========================
 

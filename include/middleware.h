@@ -22,13 +22,17 @@ extern LogFlag log_flags;
 void set_log_flags(LogFlag flags);
 
 // Get the log flags
-LogFlag get_log_flags();
+LogFlag get_log_flags(void);
 
 // Remove the log flags
 void remove_log_flags(LogFlag flags);
 
 // Append the log flags
 void append_log_flags(LogFlag flags);
+
+// Set the file where the logs will be written
+// Default is stdout
+void set_log_file(FILE* file);
 
 // Logger middleware.
 // You can customize the logger by setting the log flags using set_log_flags or append_log_flags.

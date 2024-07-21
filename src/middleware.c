@@ -1,4 +1,6 @@
 #include "../include/middleware.h"
+#include <unistd.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -12,11 +14,14 @@
 #define COLOR_CYAN "\x1b[36m"
 #define COLOR_WHITE "\x1b[37m"
 
+// File where the logs will be written
+FILE* log_file = NULL;
+
 // Default global log flags
 LogFlag log_flags = LOG_DEFAULT;
 
 // Get the log flags
-LogFlag get_log_flags() {
+LogFlag get_log_flags(void) {
     return log_flags;
 }
 
@@ -30,21 +35,43 @@ void append_log_flags(LogFlag flags) {
     log_flags |= flags;
 }
 
+// Set the file where the logs will be written
+// Default is stdout
+void set_log_file(FILE* file) {
+    log_file = file;
+}
+
+static int running_in_terminal() {
+    return isatty(fileno(log_file));
+}
+
 // Function to print method with color
 static void print_colored_method(const char* method) {
-    printf(COLOR_CYAN "%s" COLOR_RESET " ", method);
+    // Ignore colors if using a file
+    if (!running_in_terminal()) {
+        fprintf(log_file, "%s ", method);
+        return;
+    }
+
+    fprintf(log_file, COLOR_CYAN "%s" COLOR_RESET " ", method);
 }
 
 // Function to print status code with color
 static void print_colored_status(int status) {
+    // Ignore colors if using a file
+    if (!running_in_terminal()) {
+        fprintf(log_file, "%d ", status);
+        return;
+    }
+
     if (status >= 200 && status < 300) {
-        printf(COLOR_GREEN "%d" COLOR_RESET " ", status);
+        fprintf(log_file, COLOR_GREEN "%d" COLOR_RESET " ", status);
     } else if (status >= 400 && status < 500) {
-        printf(COLOR_YELLOW "%d" COLOR_RESET " ", status);
+        fprintf(log_file, COLOR_YELLOW "%d" COLOR_RESET " ", status);
     } else if (status >= 500) {
-        printf(COLOR_RED "%d" COLOR_RESET " ", status);
+        fprintf(log_file, COLOR_RED "%d" COLOR_RESET " ", status);
     } else {
-        printf("%d ", status);  // Default color
+        fprintf(log_file, "%d ", status);  // Default color
     }
 }
 
@@ -52,6 +79,10 @@ void epollix_logger(context_t* ctx, Handler next) {
     if (log_flags == LOG_NONE) {
         next(ctx);
         return;
+    }
+
+    if (log_file == NULL) {
+        log_file = stdout;
     }
 
     // Get the current time before executing the next handler
@@ -65,12 +96,15 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
+    // Lock the mutex for thread-safe printf
+    flockfile(log_file);
+
     if (log_flags & LOG_DATE) {
-        printf("%d-%02d-%02d ", tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday);
+        fprintf(log_file, "%d-%02d-%02d ", tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday);
     }
 
     if (log_flags & LOG_TIME) {
-        printf("%02d:%02d:%02d ", tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+        fprintf(log_file, "%02d:%02d:%02d ", tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
     }
 
     if (log_flags & LOG_METHOD) {
@@ -78,7 +112,7 @@ void epollix_logger(context_t* ctx, Handler next) {
     }
 
     if (log_flags & LOG_PATH) {
-        printf("%s ", get_path(ctx));
+        fprintf(log_file, "%s ", get_path(ctx));
     }
 
     if (log_flags & LOG_STATUS) {
@@ -94,18 +128,18 @@ void epollix_logger(context_t* ctx, Handler next) {
 
         // Print time in microseconds if less than 1 second, otherwise in milliseconds
         if (seconds == 0 && milliseconds == 0) {
-            printf("%ldµs ", microseconds);
+            fprintf(log_file, "%ldµs ", microseconds);
         } else if (seconds >= 1) {
-            printf("%lds ", seconds);
+            fprintf(log_file, "%lds ", seconds);
         } else {
-            printf("%ldms ", milliseconds);
+            fprintf(log_file, "%ldms ", milliseconds);
         }
     }
 
     if (log_flags & LOG_IP) {
         char* ip = get_ip_address(ctx);
         if (ip) {
-            printf("%s ", ip);
+            fprintf(log_file, "%s ", ip);
             free(ip);
         }
     }
@@ -113,9 +147,11 @@ void epollix_logger(context_t* ctx, Handler next) {
     if (log_flags & LOG_USER_AGENT) {
         const char* user_agent = get_header(ctx, "User-Agent");
         if (user_agent) {
-            printf(" %s ", user_agent);
+            fprintf(log_file, " %s", user_agent);
         }
     }
 
-    printf("\n");
+    fprintf(log_file, "\n");
+    fflush(log_file);
+    funlockfile(log_file);
 }

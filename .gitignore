@@ -61,3 +61,4 @@ uploads
 .cache
 node_modules
 build
+*.log
