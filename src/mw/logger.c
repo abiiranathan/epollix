@@ -1,8 +1,9 @@
-#include "../include/middleware.h"
+#include "../../include/mw/logger.h"
+
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/syscall.h>  // For syscall(SYS_gettid)
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -26,16 +27,11 @@ pthread_spinlock_t log_spinlock;
 
 // Buffer for log messages
 #define LOG_BUFFER_SIZE 4096
-char log_buffer[LOG_BUFFER_SIZE];
+char log_buffer[LOG_BUFFER_SIZE] = {0};
 
 // Function to check if running in a terminal
 static inline int running_in_terminal() {
     return isatty(fileno(log_file));
-}
-
-// Function to get the current thread ID
-static inline pid_t get_thread_id() {
-    return syscall(SYS_gettid);
 }
 
 // Optimized logging function
@@ -65,6 +61,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // --- Efficient logging ---
     size_t buffer_offset = 0;
+    memset(log_buffer, 0, sizeof(log_buffer));
 
     // Date and time
     if (log_flags & (LOG_DATE | LOG_TIME)) {
@@ -79,9 +76,6 @@ void epollix_logger(context_t* ctx, Handler next) {
                 strftime(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%H:%M:%S ", tm_info);
         }
     }
-
-    // Thread ID
-    buffer_offset += snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "[%d] ", get_thread_id());
 
     // Method
     if (log_flags & LOG_METHOD) {
@@ -141,7 +135,6 @@ void epollix_logger(context_t* ctx, Handler next) {
 
         // Print time in microseconds if less than 1 second, otherwise in milliseconds
         if (seconds == 0 && milliseconds == 0) {
-            fprintf(log_file, "%ldµs ", microseconds);
             buffer_offset +=
                 snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldµs ", microseconds);
         } else if (seconds >= 1) {

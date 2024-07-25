@@ -16,7 +16,7 @@ extern "C" {
 #include "params.h"
 #include "status.h"
 
-#include "defer.h"
+#include "automem.h"
 
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)var)
@@ -24,7 +24,7 @@ extern "C" {
 #define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
 #define ERR_TOO_MANY_HEADERS "Too many headers\n"
 #define ERR_HEADER_NAME_TOO_LONG "Header name too long\n"
-#define ERR_HEADER_VALUE_TOO_LONG "Header name too long\n"
+#define ERR_HEADER_VALUE_TOO_LONG "Header value too long\n"
 #define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
 #define ERR_INVALID_STATUS_LINE "Invalid http status line\n"
 #define ERR_METHOD_NOT_ALLOWED "Method not allowed\n"
@@ -60,6 +60,19 @@ void use_route_middleware(Route* route, int count, ...);
 
 // Apply middleware(s) to a group of routes.
 void use_group_middleware(RouteGroup* group, int count, ...);
+
+// Set route middleware context or userdata.
+void set_mw_context(Route* route, void* userdata);
+
+// Returns the route middleware context or userdata or NULL if not set
+// for the current route.
+void* get_route_middleware_context(context_t* ctx);
+
+// Set global middleware context or userdata.
+void set_global_mw_context(const char* key, void* userdata);
+
+// Returns the global middleware context or userdata or NULL if not set.
+void* get_global_middleware_context(const char* key);
 
 //  ================== Getters =====================
 
@@ -160,6 +173,9 @@ int send_json_string(context_t* ctx, const char* data);
 // You can override it by calling set_content_type.
 int send_string(context_t* ctx, const char* data);
 
+// Send a formatted string as a response.
+__attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...);
+
 // percent-encode a string for safe use in a URL.
 // Returns an allocated char* that the caller must free after use.
 char* encode_uri(const char* str);
@@ -255,13 +271,16 @@ void set_context_value(context_t* ctx, const char* key, void* value);
 // Returns NULL if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key);
 
+// Callback function will be called atexit.
+typedef void (*cleanup_func)(void);
+
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
 // The route matcher is a function pointer that is passed the request method
 // and path and returns the matching route. It is also for pupulating the Route
 // parameters be4 returning the route.
-int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads);
+int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads, cleanup_func cf);
 
 #ifdef __cplusplus
 }

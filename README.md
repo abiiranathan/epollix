@@ -18,6 +18,11 @@ It's API is going to change. That said, give it a try and report bugs!
 - [x] CMAKE integration
 - [x] Use of `solidc` library for common data structures and utilities.
  
+## Utilities
+- [x] `epollix` comes with a simple and easy to use logger middleware, BasicAuth middleware, and BearerAuth middleware using JWT.
+- [x] `epollix` has a crypto module that supports hashing, encryption, base64 encoding and decoding and decryption using openssl and libsodium.
+- [x] Support for gzip compression and decompression using zlib. Both static files and dynamic responses can be compressed.
+
 > No support for windows yet. Honestly, I don't know how to implement epoll on windows. If you know how to do it, please let me know.
 
 ## Big missing features
@@ -28,7 +33,14 @@ It's API is going to change. That said, give it a try and report bugs!
 - [ ] Websocket support
 - [ ] Tests for all features
 
-## How to install libepollix library
+## Tested modules (see tests directory)
+- [x] crypto
+- [x] gzip
+- [x] mime
+- [x] epollix (web server): header parsing, query and parameter parsing, form processing.
+More tests are added as the library grows.
+
+## Installation
 
 See below for instructions on how to install the solidc dependency.
 
@@ -45,6 +57,40 @@ sudo cmake --install .
 ### Dependencies
 - **solidc**: A personal C library for common data structures and utilities that are cross-platform and easy to use. [Find solidc on Github](https://github.com/abiiranathan/solidc)
 
+### Optional dependencies
+- **openssl**: For HTTPS support and cryptography functions. If you want to use HTTPS, you need to install the openssl library. You can install it using the following command:
+```bash
+sudo apt-get install libssl-dev
+
+# Arch Linux
+sudo pacman -S openssl
+```
+
+-**libsodium**: For cryptography functions. If you want to use the libsodium library, you need to install it using the following command:
+```bash
+sudo apt-get install libsodium-dev
+
+# Arch Linux
+sudo pacman -S libsodium
+```
+
+- **zlib**: For gzip compression support. If you want to use gzip compression, you need to install the zlib library. You can install it using the following command:
+```bash
+sudo apt-get install zlib1g-dev
+
+# Arch Linux
+sudo pacman -S zlib
+```
+
+- **cJSON**: For JSON parsing and serialization and used in JWT generation. You can install it using the following command:
+```bash
+sudo apt-get install libcjson-dev
+
+# Arch Linux
+sudo pacman -S cjson
+```
+
+> In the due course of time, I will try to make these dependencies optional and provide a simple way to install them using the CMake build system or a script.
 
 ## Run the example
 After building the library, you can run the example server by running the following commands:

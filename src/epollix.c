@@ -1,4 +1,5 @@
 #include "../include/epollix.h"
+#include "../include/crypto.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +44,6 @@ typedef struct header {
     char value[MAX_HEADER_VALUE];  // Header value
 } header_t;
 
-#pragma pack(1)
 typedef struct request {
     int client_fd;  // Peer connection file descriptor
     int epoll_fd;   // epoll file descriptor.
@@ -78,7 +78,7 @@ typedef struct epollix_context {
     header_t headers[MAX_RES_HEADERS];  // Response headers
 
     struct MiddlewareContext* mw_ctx;  // Middleware context
-    map* locals;                       // user-data key-value store for sharing data between middleware and handlers.
+    map* locals;                       // user-data key-value store the context.
 } context_t;
 
 // Context for middleware functions.
@@ -100,6 +100,8 @@ typedef struct Route {
 
     Middleware middleware[MAX_ROUTE_MIDDLEWARE];  // Array of middleware functions
     size_t middleware_count;                      // Number of middleware functions
+
+    void* mw_data;  // Middleware data. This is set by the user.
 } Route;
 
 // Route group is a collection of routes that share the same prefix.
@@ -119,6 +121,9 @@ static size_t global_middleware_count = 0;
 volatile sig_atomic_t running = 1;
 static Route* notFoundRoute = NULL;
 static const char* CONTENT_TYPE_HEADER = "Content-Type";
+static map* global_middleware_context = NULL;
+
+static cleanup_func user_cleanup_func = NULL;
 
 // To be cleaned up on exit
 int epoll_fd = -1;
@@ -134,7 +139,6 @@ static bool parse_url_query_params(char* query, map* query_params);
 static void staticFileHandler(context_t* ctx);
 static void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler next);
 static void middleware_next(context_t* ctx);
-static void epollix_cleanup(void);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
@@ -161,36 +165,13 @@ void close_connection(int client_fd, int epoll_fd) {
     close(client_fd);
 }
 
-static void* exit_timer_thread(void* arg) {
-    UNUSED(arg);
-
-    volatile int tick = 0;
-    while (!cleanup_done) {
-        usleep(1000);
-        tick++;
-        if (tick >= SHUTDOWN_TIMEOUT * 1000) {
-            break;
-        }
-    }
-
-    if (!cleanup_done) {
-        epollix_cleanup();
-    }
-    return NULL;
-}
-
 void handle_sigint(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         running = 0;
-        printf("Caught signal %s, exiting within %d seconds\n", strsignal(sig), SHUTDOWN_TIMEOUT);
 
-        // Schedule a thread to cleanup resources after SHUTDOWN_TIMEOUT seconds
-        pthread_create(&shutdown_thread, NULL, exit_timer_thread, NULL);
-
-        // Configure the thread for cancellation
-        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-        pthread_detach(shutdown_thread);
+        // Its okay to call exit because epollix_cleanup will be called
+        // automatically when the program exits.
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -429,6 +410,40 @@ bool set_header(context_t* ctx, const char* name, const char* value) {
 
 const Route* get_current_route(context_t* ctx) {
     return ctx->request->route;
+}
+
+// Set route middleware context or userdata.
+void set_mw_context(Route* route, void* userdata) {
+    route->mw_data = userdata;
+}
+
+void* get_route_middleware_context(context_t* ctx) {
+    return ctx->request->route->mw_data;
+}
+
+// Set route middleware context or userdata.
+void set_global_mw_context(const char* key, void* userdata) {
+    if (global_middleware_context == NULL) {
+        global_middleware_context = map_create(8, key_compare_char_ptr);
+        if (global_middleware_context == NULL) {
+            LOG_ERROR("unable to create map for global middleware context");
+            return;
+        }
+    }
+
+    char* k = strdup(key);
+    if (!k) {
+        LOG_ERROR("unable to allocate memory for key: %s", key);
+        return;
+    }
+    map_set(global_middleware_context, k, userdata);
+}
+
+void* get_global_middleware_context(const char* key) {
+    if (global_middleware_context == NULL) {
+        return NULL;
+    }
+    return map_get(global_middleware_context, (char*)key);
 }
 
 const char* get_route_pattern(Route* route) {
@@ -995,6 +1010,41 @@ int send_string(context_t* ctx, const char* data) {
     return send_response(ctx, data, strlen(data));
 }
 
+__attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    char* buffer = NULL;
+
+    // Determine the required buffer size
+    // See man vsnprintf for more information
+    int len = vsnprintf(buffer, 0, fmt, args);
+    va_end(args);
+
+    if (len < 0) {
+        // there was an error in formatting the string
+        return -1;
+    }
+
+    // Allocate a buffer of the required size
+    buffer = (char*)malloc(len + 1);  // +1 for the null terminator
+    if (!buffer) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return -1;
+    }
+
+    // Format the string into the allocated buffer
+    va_start(args, fmt);
+    vsnprintf(buffer, len + 1, fmt, args);
+    va_end(args);
+
+    // Send the response
+    int result = send_response(ctx, buffer, len);
+
+    // Free the allocated buffer
+    free(buffer);
+    return result;
+}
+
 // Writes chunked data to the client.
 // Returns the number of bytes written.
 // To end the chunked response, call response_end.
@@ -1435,11 +1485,14 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->method = method;
     route->handler = handler;
     route->type = type;
+    route->mw_data = NULL;
+    route->middleware_count = 0;
+    memset(route->middleware, 0, sizeof(route->middleware));
     memset(route->dirname, 0, sizeof(route->dirname));
-    route->pattern = strdup(pattern);
-    LOG_ASSERT(route->pattern, "strdup failed");
 
+    route->pattern = strdup(pattern);
     route->params = malloc(sizeof(PathParams));
+    LOG_ASSERT(route->pattern, "strdup failed");
     LOG_ASSERT(route->params, "malloc failed");
 
     route->params->match_count = 0;
@@ -1453,12 +1506,17 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     return route;
 }
 
-static void free_static_routes(void) {
+void free_static_routes(void) {
     for (size_t i = 0; i < numRoutes; i++) {
         Route route = routeTable[i];
         free(route.pattern);
         if (route.params) {
             free(route.params);
+        }
+
+        // Free the middleware data if it exists
+        if (route.mw_data) {
+            free(route.mw_data);
         }
     }
 }
@@ -2009,11 +2067,24 @@ char* get_ip_address(context_t* ctx) {
     return strdup(ip_addr);
 }
 
+__attribute__((constructor())) void init(void) {
+    global_middleware_context = map_create(10, key_compare_char_ptr);
+    if (!global_middleware_context) {
+        LOG_FATAL("Failed to create global_middleware_context\n");
+    }
+
+    install_signal_handler();
+    init_mime_hashtable();
+    crypto_init();
+}
+
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
-int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads) {
+int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads, cleanup_func cf) {
     LOG_ASSERT(port != NULL, "port is NULL but expected to be a valid port number");
+
+    user_cleanup_func = cf;
 
     int ret;
     struct epoll_event event = {0}, events[MAXEVENTS] = {0};
@@ -2049,9 +2120,6 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
         perror("epoll_ctl");
         LOG_FATAL("Failed to add server socket to epoll\n");
     }
-
-    install_signal_handler();
-    init_mime_hashtable();
 
     int nworkers = get_ncpus();
     if (num_threads > 0) {
@@ -2138,23 +2206,30 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
         }
     }
 
-    epollix_cleanup();
     return EXIT_SUCCESS;
 }
 
-static void epollix_cleanup(void) {
-    if (cleanup_done) {
-        return;
+__attribute__((destructor)) static void epollix_cleanup(void) {
+    if (pool) {
+        threadpool_wait(pool);
+        threadpool_destroy(pool);
     }
-
-    cleanup_done = true;
-    pthread_mutex_lock(&cleanup_mutex);
-    threadpool_wait(pool);
-    threadpool_destroy(pool);
-    close(epoll_fd);
-    close(server_fd);
 
     free_static_routes();
     destroy_mime_hashtable();
-    pthread_mutex_unlock(&cleanup_mutex);
+    crypto_cleanup();
+
+    if (global_middleware_context) {
+        map_destroy(global_middleware_context, true);
+    }
+
+    close(epoll_fd);
+    close(server_fd);
+
+    if (user_cleanup_func) {
+        LOG_INFO("Calling user cleanup function");
+        user_cleanup_func();
+    }
+
+    printf("Server stopped\n");
 }

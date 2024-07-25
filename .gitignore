@@ -62,3 +62,8 @@ uploads
 node_modules
 build
 *.log
+playground
+.idea
+*.sqlite3
+*.sqlite
+*.db

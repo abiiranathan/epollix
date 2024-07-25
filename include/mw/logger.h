@@ -1,7 +1,7 @@
 #ifndef C2347D19_DD48_407D_8CD4_88B812043B24
 #define C2347D19_DD48_407D_8CD4_88B812043B24
 
-#include "epollix.h"
+#include "../epollix.h"
 
 typedef enum {
     LOG_NONE = 0,

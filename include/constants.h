@@ -17,8 +17,9 @@
 #define MAX_HEADER_NAME 64
 #endif
 
+// Something reasonably long to accommodate JWT tokens, :)
 #ifndef MAX_HEADER_VALUE
-#define MAX_HEADER_VALUE 164
+#define MAX_HEADER_VALUE 256
 #endif
 
 #ifndef MAX_REQ_HEADERS
@@ -63,11 +64,6 @@
 
 #ifndef MAX_GROUP_MIDDLEWARE
 #define MAX_GROUP_MIDDLEWARE 4
-#endif
-
-// Time to wait for active connections to close.
-#ifndef SHUTDOWN_TIMEOUT
-#define SHUTDOWN_TIMEOUT 5
 #endif
 
 #endif /* EA56F184_3413_409F_A9D5_E26BBDFC9535 */

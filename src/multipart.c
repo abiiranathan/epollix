@@ -427,6 +427,11 @@ bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
 // Note that this boundary must always be -- shorter than what's in the body, so it's prefixed for you.
 // Returns true if successful, otherwise false(Invalid Content-Type, no boundary).
 bool multipart_parse_boundary_from_header(const char* content_type, char* boundary, size_t size) {
+    if (!content_type || !boundary) {
+        LOG_ERROR("content_type or boundary is NULL");
+        return false;
+    }
+
     const char* prefix = "--";
     size_t prefix_len = strlen(prefix);
     size_t total_length = strlen(content_type);
