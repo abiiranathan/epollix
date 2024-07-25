@@ -2,11 +2,13 @@
 #include "../include/epollix.h"
 #include "../include/mw/basicauth.h"
 #include "../include/mw/logger.h"
+#include "gzip.h"
 #include "jwt.h"
 #include "mw/tokenauth.h"
 
 #include <assert.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -174,6 +176,18 @@ static void api_user_by_id(context_t* ctx) {
     send_json_string(ctx, buffer);
 }
 
+void gzip_route(context_t *ctx){
+    char *data="<h1>Hello there. This is GZIP compressed data</h1>";
+    unsigned char *compressed_data=NULL;
+    size_t compressed_data_len=0;
+    gzip_compress_bytes((uint8_t *)data, strlen(data),  &compressed_data, &compressed_data_len);
+   
+    set_header(ctx, "Content-Encoding", "gzip");
+    send_response(ctx, (void*)compressed_data, compressed_data_len);
+
+    free(compressed_data);
+}
+
 FILE* logFile = NULL;
 
 void cleanup(void) {
@@ -214,6 +228,8 @@ int main(int argc, char** argv) {
     route_get("/", index_page);
     route_get("/movie", serve_movie);
     route_get("/greet/{name}", handle_greet);
+    route_get("/gzip", gzip_route);
+
     Route* pr = route_get("/protected", protected_route);
 
     // Expects a valid secret to be set in the JWT_TOKEN_SECRET environment variable
