@@ -1823,15 +1823,37 @@ const char* format_file_size(off_t size) {
     return buf;
 }
 
+static void send_error_page(context_t* ctx, int status) {
+    const char* status_str = http_status_text(status);
+    char* error_page = NULL;
+    int ret = asprintf(&error_page, "<html><head><title>%d %s</title></head><body><h1>%d %s</h1></body></html>", status,
+                       status_str, status, status_str);
+    if (ret == -1) {
+        LOG_ERROR("Failed to allocate memory for error page\n");
+        return;
+    }
+
+    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    ctx->status = status;
+    send_string(ctx, error_page);
+    free(error_page);
+}
+
+static inline void append_or_error(context_t* ctx, Arena* arena, cstr* response, const char* str) {
+    if (!cstr_append(arena, response, str)) {
+        LOG_ERROR("Failed to append to response\n");
+        send_error_page(ctx, StatusInternalServerError);
+        return;
+    }
+}
+
 static void serve_directory_listing(context_t* ctx, const char* dirname, const char* base_prefix) {
     DIR* dir;
     struct dirent* ent;
-    Arena* arena = arena_create(4096, 8);
+    Arena* arena = arena_create(1 * 1024 * 1024, 8);
     if (!arena) {
         LOG_ERROR("Failed to create arena\n");
-        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
-        ctx->status = StatusInternalServerError;
-        send_string(ctx, "Failed to create arena");
+        send_error_page(ctx, StatusInternalServerError);
         return;
     }
 
@@ -1854,9 +1876,16 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
                                     "<body>"
                                     "<h1>Directory Listing</h1>");
 
+    if (!html_response) {
+        LOG_ERROR("Failed to create cstr\n");
+        send_error_page(ctx, StatusInternalServerError);
+        arena_destroy(arena);
+        return;
+    }
+
     // Create breadcrumbs
-    cstr_append(arena, html_response, "<div class=\"breadcrumbs\">");
-    cstr_append(arena, html_response, "<a href=\"/\">Home</a>");
+    append_or_error(ctx, arena, html_response, "<div class=\"breadcrumbs\">");
+    append_or_error(ctx, arena, html_response, "<a href=\"/\">Home</a>");
 
     char* path = strdup(base_prefix);
     if (!path) {
@@ -1874,31 +1903,35 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     while (token) {
         strcat(breadcrumb_path, "/");
         strcat(breadcrumb_path, token);
-        cstr_append(arena, html_response, " / <a href=\"");
-        cstr_append(arena, html_response, breadcrumb_path);
-        cstr_append(arena, html_response, "\">");
-        cstr_append(arena, html_response, token);
-        cstr_append(arena, html_response, "</a>");
+        append_or_error(ctx, arena, html_response, " / <a href=\"");
+        append_or_error(ctx, arena, html_response, breadcrumb_path);
+        append_or_error(ctx, arena, html_response, "\">");
+        append_or_error(ctx, arena, html_response, token);
+        append_or_error(ctx, arena, html_response, "</a>");
         token = strtok(NULL, "/");
     }
-
     free(path);
-    cstr_append(arena, html_response, "</div>");
 
-    cstr_append(arena, html_response,
-                "<table>"
-                "<tr><th>Name</th><th>Size</th></tr>");
+    append_or_error(ctx, arena, html_response, "</div>");
+
+    append_or_error(ctx, arena, html_response,
+                    "<table>"
+                    "<tr><th>Name</th><th>Size</th></tr>");
 
     if ((dir = opendir(dirname)) != NULL) {
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
-                cstr_append(arena, html_response, "<tr><td><a href=\"");
-                cstr_append(arena, html_response, base_prefix);
-                cstr_append(arena, html_response, "/");
-                cstr_append(arena, html_response, ent->d_name);
-                cstr_append(arena, html_response, "\">");
-                cstr_append(arena, html_response, ent->d_name);
-                cstr_append(arena, html_response, "</a></td>");
+                append_or_error(ctx, arena, html_response, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"");
+                // Add base prefix if we are not using / as static prefix.
+                if (strcmp(base_prefix, "/") != 0) {
+                    append_or_error(ctx, arena, html_response, base_prefix);
+                }
+
+                append_or_error(ctx, arena, html_response, "/");
+                append_or_error(ctx, arena, html_response, ent->d_name);
+                append_or_error(ctx, arena, html_response, "\">");
+                append_or_error(ctx, arena, html_response, ent->d_name);
+                append_or_error(ctx, arena, html_response, "</a></td>");
 
                 char filepath[MAX_PATH_LEN] = {0};
                 snprintf(filepath, MAX_PATH_LEN, "%s/%s", dirname, ent->d_name);
@@ -1906,17 +1939,16 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
                 struct stat st;
                 if (stat(filepath, &st) == 0) {
                     if (S_ISDIR(st.st_mode)) {
-                        cstr_append(arena, html_response, "<td>Directory</td>");
+                        append_or_error(ctx, arena, html_response, "<td>Directory</td>");
                     } else {
-                        cstr_append(arena, html_response, "<td>");
-                        cstr_append(arena, html_response, format_file_size(st.st_size));
-                        cstr_append(arena, html_response, "</td>");
+                        append_or_error(ctx, arena, html_response, "<td>");
+                        append_or_error(ctx, arena, html_response, format_file_size(st.st_size));
+                        append_or_error(ctx, arena, html_response, "</td>");
                     }
                 } else {
-                    cstr_append(arena, html_response, "<td>Unknown</td>");
+                    append_or_error(ctx, arena, html_response, "<td>Unknown</td>");
                 }
-
-                cstr_append(arena, html_response, "</tr>");
+                append_or_error(ctx, arena, html_response, "</tr>");
             }
         }
         closedir(dir);
@@ -1929,11 +1961,10 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         return;
     }
 
-    cstr_append(arena, html_response, "</table></body></html>");
+    append_or_error(ctx, arena, html_response, "</table></body></html>");
     set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->status = StatusOK;
     send_string(ctx, html_response->data);
-
     arena_destroy(arena);
 }
 
@@ -1950,15 +1981,27 @@ static void staticFileHandler(context_t* ctx) {
     request_t* req = ctx->request;
     Route* route = req->route;
 
-    const char* dirname = route->dirname;
+    char* dirname = route->dirname;
+
+    // Replace . and .. with ./ and ../
+    if (strcmp(dirname, ".") == 0) {
+        dirname = "./";
+    } else if (strcmp(dirname, "..") == 0) {
+        dirname = "../";
+    }
 
     // Trim the static pattern from the path
     const char* static_path = req->path + strlen(route->pattern);
 
     // Concatenate the dirname and the static path
     char fullpath[MAX_PATH_LEN] = {0};
+    int n;
+    if (dirname[strlen(dirname) - 1] == '/') {
+        n = snprintf(fullpath, MAX_PATH_LEN, "%s%s", dirname, static_path);
+    } else {
+        n = snprintf(fullpath, MAX_PATH_LEN, "%s/%s", dirname, static_path);
+    }
 
-    int n = snprintf(fullpath, MAX_PATH_LEN, "%s%s", dirname, static_path);
     if (n < 0 || n >= MAX_PATH_LEN) {
         char errmsg[256];
         snprintf(errmsg, 256, "%s %d", "The path exceeds the maximum path size of", MAX_PATH_LEN);
@@ -1967,12 +2010,14 @@ static void staticFileHandler(context_t* ctx) {
         send_response(ctx, errmsg, strlen(errmsg));
         return;
     }
+    LOG_INFO("Joined path: %s\n", fullpath);
 
     // Base64 decode the path such that it can be used to access the file system
     // decoding the path is necessary to handle special characters in the path
     // The buffer is large enough to hold the decoded path.
     char filepath[MAX_PATH_LEN] = {0};
     decode_uri(fullpath, filepath, sizeof(filepath));
+    LOG_INFO("Decoded path: %s\n", fullpath);
 
     // In: solidc/filepath.h
     if (is_dir(filepath)) {
@@ -2009,6 +2054,7 @@ static void staticFileHandler(context_t* ctx) {
         return;
     }
 
+    LOG_ERROR("File not found: %s\n", filepath);
     // Send a 404 response if the file is not found
     char* response = "File Not Found\n";
     set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
@@ -2127,7 +2173,7 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
     }
 
     printf("[PID: %d]\n", get_gid());
-    printf("[Server listening on port %s with %d threads]\n", port, nworkers);
+    printf("[Server listening on port http://0.0.0.0:%s with %d threads]\n", port, nworkers);
 
     // Create a threadpool with n threads
     pool = threadpool_create(nworkers);
@@ -2230,6 +2276,4 @@ __attribute__((destructor)) static void epollix_cleanup(void) {
         LOG_INFO("Calling user cleanup function");
         user_cleanup_func();
     }
-
-    printf("Server stopped\n");
 }

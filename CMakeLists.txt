@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(BUILD_TESTS "Build the tests" ON)
 
+
 # Find the solidc library
 find_package(solidc REQUIRED)
 
@@ -17,6 +18,9 @@ find_package(cJSON REQUIRED)
 include(GNUInstallDirs)
 include(CTest)
 enable_testing()
+
+# Add libbcrypt
+add_subdirectory(deps/libbcrypt)
 
 file(GLOB_RECURSE SOURCES "src/*.c")
 file(GLOB_RECURSE HEADERS "include/*.h")
@@ -28,20 +32,8 @@ add_library(epollix ${SOURCES})
 # Link the math library, pthreads, and the solidc library
 target_link_libraries(epollix PUBLIC m z pthread solidc::solidc cjson)
 target_compile_options(epollix PUBLIC -Wall -Wextra -Werror )
-
-# Link with libbcrypt.a for bcrypt hashing
-# deps/libbcrypt/libbcrypt.a
-# It must be built with the following commands:
-# cd deps/libbcrypt
-# make
-add_library(bcrypt.a STATIC IMPORTED)
-set_target_properties(bcrypt.a PROPERTIES IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/deps/libbcrypt/libbcrypt.a)
-target_link_libraries(epollix PUBLIC bcrypt.a)
-
-# Link to openssl and libsodium
-# You can as well link to static libraries by providing the full path
-# e.g /usr/lib/libssl.a /usr/lib/libcrypto.a
 target_link_libraries(epollix PUBLIC ssl crypto sodium)
+target_link_libraries(epollix PUBLIC bcrypt)
 
 # If using clang, add support for -fblocks
 # sudo pacman -S libdispatch # provides libBlocksRuntime
