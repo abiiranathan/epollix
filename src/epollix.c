@@ -2010,14 +2010,12 @@ static void staticFileHandler(context_t* ctx) {
         send_response(ctx, errmsg, strlen(errmsg));
         return;
     }
-    LOG_INFO("Joined path: %s\n", fullpath);
 
     // Base64 decode the path such that it can be used to access the file system
     // decoding the path is necessary to handle special characters in the path
     // The buffer is large enough to hold the decoded path.
     char filepath[MAX_PATH_LEN] = {0};
     decode_uri(fullpath, filepath, sizeof(filepath));
-    LOG_INFO("Decoded path: %s\n", fullpath);
 
     // In: solidc/filepath.h
     if (is_dir(filepath)) {
@@ -2054,7 +2052,6 @@ static void staticFileHandler(context_t* ctx) {
         return;
     }
 
-    LOG_ERROR("File not found: %s\n", filepath);
     // Send a 404 response if the file is not found
     char* response = "File Not Found\n";
     set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
