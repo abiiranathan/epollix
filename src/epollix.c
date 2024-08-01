@@ -1567,6 +1567,11 @@ static void execute_middleware(context_t* ctx, Middleware* middleware, size_t co
 // ================== End middleware logic ==============
 
 const char* get_query(context_t* ctx, const char* name) {
+    // No queries present.
+    if (ctx->request->query_params == NULL) {
+        return NULL;
+    }
+
     return map_get(ctx->request->query_params, (char*)name);
 }
 
