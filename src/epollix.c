@@ -1243,7 +1243,7 @@ int http_servefile(context_t* ctx, const char* filename) {
         char content_disposition[512] = {0};
         char base_name[256] = {0};
         filepath_basename(filename, base_name, sizeof(base_name));
-        snprintf(content_disposition, sizeof(content_disposition), "attachment; filename=\"%s\"", base_name);
+        snprintf(content_disposition, sizeof(content_disposition), "inline; filename=\"%s\"", base_name);
         set_header(ctx, "Content-Disposition", content_disposition);
     }
 
