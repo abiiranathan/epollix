@@ -1238,12 +1238,15 @@ int http_servefile(context_t* ctx, const char* filename) {
         set_header(ctx, "Content-Length", content_len_str);
     }
 
-    // Set content disposition
-    char content_disposition[128] = {0};
-    char base_name[108] = {0};
-    filepath_basename(filename, base_name, sizeof(base_name));
-    snprintf(content_disposition, 128, "filename=%s", base_name);
-    set_header(ctx, "Content-Disposition", content_disposition);
+    if (!is_range_request) {
+        // Set content disposition
+        char content_disposition[512] = {0};
+        char base_name[256] = {0};
+        filepath_basename(filename, base_name, sizeof(base_name));
+        snprintf(content_disposition, sizeof(content_disposition), "attachment; filename=\"%s\"", base_name);
+        set_header(ctx, "Content-Disposition", content_disposition);
+    }
+
     write_headers(ctx);
 
     ssize_t total_bytes_sent = 0;   // Total bytes sent to the client
