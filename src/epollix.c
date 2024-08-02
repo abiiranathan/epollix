@@ -309,13 +309,13 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
 
         switch (state) {
             case STATE_HEADER_NAME:
-                if (header_name_idx >= MAX_HEADER_NAME) {
-                    LOG_ERROR("header name: %.*s is too long. Max length is %d", (int)header_name_idx, header_name,
-                              MAX_HEADER_NAME);
-                    return http_max_header_name_exceeded;
-                }
-
                 if (ptr[i] == ':') {
+                    if (header_name_idx >= MAX_HEADER_NAME) {
+                        LOG_ERROR("header name: \"%.*s\" is too long. Max length is %d", (int)header_name_idx,
+                                  header_name, MAX_HEADER_NAME);
+                        return http_max_header_name_exceeded;
+                    }
+
                     header_name[header_name_idx] = '\0';
                     header_name_idx = 0;
 
@@ -331,14 +331,14 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
                 break;
 
             case STATE_HEADER_VALUE:
-                if (header_value_idx >= MAX_HEADER_VALUE) {
-                    LOG_ERROR("header value %.*s is too long. Max length is %d", (int)header_value_idx, header_value,
-                              MAX_HEADER_VALUE);
-                    return http_max_header_value_exceeded;
-                }
-
                 // Check for CRLF
                 if (ptr[i] == '\r' && i + 1 < endpos && ptr[i + 1] == '\n') {
+                    if (header_value_idx >= MAX_HEADER_VALUE) {
+                        LOG_ERROR("header value \"%.*s\" is too long. Max length is %d", (int)header_value_idx,
+                                  header_value, MAX_HEADER_VALUE);
+                        return http_max_header_value_exceeded;
+                    }
+
                     header_value[header_value_idx] = '\0';
                     header_value_idx = 0;
 
