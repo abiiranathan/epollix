@@ -62,7 +62,7 @@ target_include_directories(epollix PUBLIC
 target_compile_definitions(epollix PUBLIC AUTOMEM_IMPL)
 
 # Install targets
-install(FILES ${HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/epollix)
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/epollix)
 
 install(TARGETS epollix 
     EXPORT epollix_export
