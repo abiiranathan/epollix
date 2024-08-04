@@ -12,9 +12,6 @@ option(BUILD_TESTS "Build the tests" ON)
 # Find the solidc library
 find_package(solidc REQUIRED)
 
-# Find cJSON
-find_package(cJSON REQUIRED)
-
 include(GNUInstallDirs)
 include(CTest)
 enable_testing()
