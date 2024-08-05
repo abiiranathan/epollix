@@ -10,7 +10,7 @@ extern "C" {
 
 // Define STRICT_SLASH to match the trailing slash in the URL
 #ifndef STRICT_SLASH
-#define STRICT_SLASH 1
+#define STRICT_SLASH 0
 #endif
 
 // Maximum length of a parameter name
