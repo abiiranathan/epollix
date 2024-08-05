@@ -244,7 +244,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns NULL.
-Route* route_notfound(const char* pattern, Handler h);
+Route* route_notfound(Handler h);
 
 // =========================================================================
 

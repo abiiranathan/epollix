@@ -176,12 +176,12 @@ static void api_user_by_id(context_t* ctx) {
     send_json_string(ctx, buffer);
 }
 
-void gzip_route(context_t *ctx){
-    char *data="<h1>Hello there. This is GZIP compressed data</h1>";
-    unsigned char *compressed_data=NULL;
-    size_t compressed_data_len=0;
-    gzip_compress_bytes((uint8_t *)data, strlen(data),  &compressed_data, &compressed_data_len);
-   
+void gzip_route(context_t* ctx) {
+    char* data = "<h1>Hello there. This is GZIP compressed data</h1>";
+    unsigned char* compressed_data = NULL;
+    size_t compressed_data_len = 0;
+    gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
+
     set_header(ctx, "Content-Encoding", "gzip");
     send_response(ctx, (void*)compressed_data, compressed_data_len);
 
@@ -196,9 +196,14 @@ void cleanup(void) {
     }
 }
 
+void spa_route(context_t* ctx) {
+    printf("Serving SPA route\n");
+    http_servefile(ctx, "/home/nabiizy/Code/C/pdfsearch/frontend/build/index.html");
+}
+
 // ======================= END OF ROUTES ========================================
 int main(int argc, char** argv) {
-    char* port = "8000";
+    char* port = "3000";
     if (argc == 2) {
         port = argv[1];
     }
@@ -225,7 +230,7 @@ int main(int argc, char** argv) {
     // If passed to middleware context, its freed automatically
     free(guest);
 
-    route_get("/", index_page);
+    // route_get("/", index_page);
     route_get("/movie", serve_movie);
     route_get("/greet/{name}", handle_greet);
     route_get("/gzip", gzip_route);

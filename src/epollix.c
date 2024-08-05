@@ -719,9 +719,13 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
 
     // Matches the route, populating path params that are part of the route if they exist
     Route* route = matcher(httpMethod, path);
+
     if (route == NULL) {
-        if (notFoundRoute != NULL) {
+        printf("Route not found: %s\n", path);
+        if (notFoundRoute) {
             route = notFoundRoute;
+            LOG_ERROR("Route not found: %s\n", path);
+            LOG_ERROR("Using not found route\n");
         } else {
             fprintf(stderr, "%s - %s %s 404 Not Found\n", method, http_version, path);
             http_error(client_fd, StatusNotFound, "Not Found\n");
@@ -1412,7 +1416,6 @@ static void submit_read_task(struct read_task* task) {
 
 // Default route matcher.
 Route* default_route_matcher(HttpMethod method, const char* path) {
-    Route* bestMatch = NULL;
     bool matches = false;
 
     for (size_t i = 0; i < numRoutes; i++) {
@@ -1420,21 +1423,19 @@ Route* default_route_matcher(HttpMethod method, const char* path) {
             continue;
         }
 
-        if (routeTable[i].type == StaticRoute) {
-            // For static routes, we match only the prefix as an exact match.
-            if (strncmp(routeTable[i].pattern, path, strlen(routeTable[i].pattern)) == 0) {
-                bestMatch = &routeTable[i];
-                break;
-            }
-        } else {
+        if (routeTable[i].type == NormalRoute) {
             matches = match_path_parameters(routeTable[i].pattern, path, routeTable[i].params);
             if (matches) {
-                bestMatch = &routeTable[i];
-                break;
+                return &routeTable[i];
+            }
+        } else {
+            // For static routes, we match only the prefix as an exact match.
+            if (strncmp(routeTable[i].pattern, path, strlen(routeTable[i].pattern)) == 0) {
+                return &routeTable[i];
             }
         }
     }
-    return bestMatch;
+    return NULL;
 }
 
 bool parse_url_query_params(char* query, map* query_params) {
@@ -1798,12 +1799,12 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
 //=======================================
 
 bool not_found_registered = false;
-Route* route_notfound(const char* pattern, Handler h) {
+Route* route_notfound(Handler h) {
     if (not_found_registered) {
         LOG_FATAL("registration of more than one 404 handler\n");
     }
 
-    notFoundRoute = registerRoute(M_GET, pattern, h, NormalRoute);
+    notFoundRoute = registerRoute(M_GET, "__notfound__", h, NormalRoute);
     not_found_registered = true;
     return notFoundRoute;
 }
@@ -2057,6 +2058,11 @@ static void staticFileHandler(context_t* ctx) {
         const char* web_ct = get_mimetype(filepath);
         set_header(ctx, CONTENT_TYPE_HEADER, web_ct);
         http_servefile(ctx, filepath);
+        return;
+    }
+
+    if (notFoundRoute) {
+        notFoundRoute->handler(ctx);
         return;
     }
 
