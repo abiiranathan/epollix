@@ -17,9 +17,9 @@
 #define MAX_HEADER_NAME 64
 #endif
 
-// Something reasonably long to accommodate JWT tokens, :)
+// Something reasonably long to accommodate JWT tokens, and cookies :)
 #ifndef MAX_HEADER_VALUE
-#define MAX_HEADER_VALUE 256
+#define MAX_HEADER_VALUE 1024
 #endif
 
 #ifndef MAX_REQ_HEADERS

@@ -1,11 +1,12 @@
 #ifndef DA10BEC2_4A02_42D1_B171_8EF58E7CDD5B
 #define DA10BEC2_4A02_42D1_B171_8EF58E7CDD5B
 
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum {
+typedef enum : uint16_t {
     StatusContinue = 100,
     StatusSwitchingProtocols = 101,
     StatusProcessing = 102,

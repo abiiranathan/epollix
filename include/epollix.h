@@ -19,7 +19,7 @@ extern "C" {
 #include "automem.h"
 
 // Macro to silence unused variable errors.
-#define UNUSED(var) ((void)var)
+#define UNUSED(var) ((void)(var))
 
 #define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
 #define ERR_TOO_MANY_HEADERS "Too many headers\n"

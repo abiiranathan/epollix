@@ -19,7 +19,7 @@ extern "C" {
 
 // 10MB is the default maximum file size.
 #ifndef MAX_FILE_SIZE
-#define MAX_FILE_SIZE 10 * 1024 * 1024
+#define MAX_FILE_SIZE (10 * 1024 * 1024)
 #endif
 
 // Define maximum values for field_name, filename and mimetype and value.
