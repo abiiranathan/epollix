@@ -27,7 +27,7 @@ add_library(epollix ${SOURCES})
 
 # Link the math library, pthreads, and the solidc library
 target_link_libraries(epollix PUBLIC m z pthread solidc::solidc cjson)
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror )
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
 target_link_libraries(epollix PUBLIC ssl crypto sodium)
 target_link_libraries(epollix PUBLIC bcrypt)
 

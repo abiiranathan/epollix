@@ -67,3 +67,4 @@ playground
 *.sqlite3
 *.sqlite
 *.db
+*.log

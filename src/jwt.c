@@ -83,7 +83,8 @@ bool jwt_parse_payload(const char* payload, JWTPayload* p) {
     }
 
     if (sub) {
-        strncpy(p->sub, sub->valuestring, sizeof(p->sub));
+        strncpy(p->sub, sub->valuestring, sizeof(p->sub) - 1);
+        p->sub[sizeof(p->sub) - 1] = '\0';
     }
 
     if (exp) {
@@ -92,7 +93,8 @@ bool jwt_parse_payload(const char* payload, JWTPayload* p) {
     }
 
     if (data) {
-        strncpy(p->data, data->valuestring, sizeof(p->data));
+        strncpy(p->data, data->valuestring, sizeof(p->data) - 1);
+        p->data[sizeof(p->data) - 1] = '\0';
     }
 
     cJSON_Delete(json);

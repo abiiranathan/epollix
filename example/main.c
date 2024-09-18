@@ -76,9 +76,12 @@ void handle_create_user(context_t* ctx) {
     char* sub = (char*)username;
 
     JWTPayload payload = {0};
-    strncpy(payload.sub, sub, sizeof(payload.sub));
+    strncpy(payload.sub, sub, sizeof(payload.sub) - 1);
+    payload.sub[sizeof(payload.sub) - 1] = '\0';
+
     payload.exp = expiry;
-    strncpy(payload.data, email, sizeof(payload.data));
+    strncpy(payload.data, email, sizeof(payload.data) - 1);
+    payload.data[sizeof(payload.data) - 1] = '\0';
 
     const char* secret = getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
@@ -230,7 +233,7 @@ int main(int argc, char** argv) {
     // If passed to middleware context, its freed automatically
     free(guest);
 
-    // route_get("/", index_page);
+    route_get("/", index_page);
     route_get("/movie", serve_movie);
     route_get("/greet/{name}", handle_greet);
     route_get("/gzip", gzip_route);
@@ -249,6 +252,8 @@ int main(int argc, char** argv) {
 
     // Enable directory browsing
     enable_directory_browsing(true);
+
+    // Serve static files
     route_static("/static", "./assets");
 
     // Create a route group

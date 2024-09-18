@@ -1,10 +1,10 @@
-#include "../include/epollix.h"
-#include "../include/crypto.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include "../include/epollix.h"
+#include <arpa/inet.h>
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -20,6 +20,7 @@ extern "C" {
 #include <solidc/threadpool.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,9 +30,9 @@ extern "C" {
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-
-// for inet_ntop and inet_pton
-#include <arpa/inet.h>
+#include "../include/crypto.h"
+#include "../include/logging.h"
+#include "../include/method.h"
 
 #ifdef __cplusplus
 }
@@ -40,28 +41,22 @@ extern "C" {
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
 typedef struct header {
-    char name[MAX_HEADER_NAME];    // Header key
-    char value[MAX_HEADER_VALUE];  // Header value
+    char* name;   // dynamically allocated header key
+    char* value;  // dynamically allocated header value
 } header_t;
 
 typedef struct request {
-    int client_fd;  // Peer connection file descriptor
-    int epoll_fd;   // epoll file descriptor.
-
-    HttpMethod method;    // Http request method as an integer enum;
-    char method_str[16];  // Http request method
-
-    map* query_params;    // Query parameters
-    struct Route* route;  // Matching route
-
-    char path[MAX_PATH_LEN];  // Request path and query string
-    char http_version[16];    // Http version
-
-    size_t header_count;                // Number of headers
-    header_t headers[MAX_REQ_HEADERS];  // Request headers
-
+    int client_fd;          // Peer connection file descriptor
+    int epoll_fd;           // epoll file descriptor
+    char* path;             // Request path and query string (dynamically allocated)
+    HttpMethod method;      // Http request method as an integer enum
+    struct Route* route;    // Matching route
     size_t content_length;  // Content length or size of body
-    uint8_t* body;          // Body of the request.
+    uint8_t* body;          // Body of the request (dynamically allocated)
+    char http_version[12];  // Http version (e.g., "HTTP/1.1")
+    uint8_t header_count;   // Number of headers
+    header_t** headers;     // Request headers (dynamically allocated)
+    map* query_params;      // Query parameters (consider replacing with a more efficient structure)
 } request_t;
 
 // epollix context containing response primitives and request state.
@@ -74,8 +69,8 @@ typedef struct epollix_context {
     bool headers_sent;   // Headers already sent
     bool chunked;        // Is a chunked transfer
 
-    size_t header_count;                // Number of headers set.
-    header_t headers[MAX_RES_HEADERS];  // Response headers
+    size_t header_count;  // Number of headers set.
+    header_t** headers;   // Response headers
 
     struct MiddlewareContext* mw_ctx;  // Middleware context
     map* locals;                       // user-data key-value store the context.
@@ -83,68 +78,72 @@ typedef struct epollix_context {
 
 // Context for middleware functions.
 typedef struct MiddlewareContext {
+    uint8_t count;                    // Number of middleware functions
+    uint8_t index;                    // Current index in the middleware array
     Middleware* middleware;           // Array of middleware functions
-    size_t count;                     // Number of middleware functions
-    size_t index;                     // Current index in the middleware array
     void (*handler)(context_t* ctx);  // Handler function
 } MiddlewareContext;
 
 // Route is a struct that contains the route pattern, handler, and middleware.
 typedef struct Route {
-    HttpMethod method;          // HTTP Method.
-    RouteType type;             // Type of Route (Normal or Static)
-    char* pattern;              // Pattern to match
-    Handler handler;            // Handler for the route
-    char dirname[MAX_DIRNAME];  // Dirname for static route.
-    PathParams* params;         // Parameters extracted from the URL
-
-    Middleware middleware[MAX_ROUTE_MIDDLEWARE];  // Array of middleware functions
-    size_t middleware_count;                      // Number of middleware functions
-
-    void* mw_data;  // Middleware data. This is set by the user.
+    HttpMethod method;         // HTTP Method.
+    RouteType type;            // Type of Route (Normal or Static)
+    char* pattern;             // Pattern to match
+    Handler handler;           // Handler for the route
+    PathParams* params;        // Parameters extracted from the URL
+    char* dirname;             // Dirname for static route(dynamic memory)
+    Middleware* middleware;    // Array of middleware functions(allocated dynamically)
+    uint8_t middleware_count;  // Number of middleware functions
+    void* mw_data;             // Middleware data. This is set by the user.
 } Route;
 
 // Route group is a collection of routes that share the same prefix.
 typedef struct RouteGroup {
-    char* prefix;                                 // Prefix for the group
-    Route* routes[MAX_GROUP_ROUTES];              // Array of routes
-    size_t count;                                 // Number of routes in the group
-    Middleware middleware[MAX_ROUTE_MIDDLEWARE];  // Middleware for the group
-    size_t middleware_count;                      // Number of middleware functions
+    char* prefix;              // Prefix for the group
+    Route** routes;            // Array of routes(dynamic memory)
+    uint8_t count;             // Number of routes in the group
+    Middleware* middleware;    // Middleware for the group
+    uint8_t middleware_count;  // Number of middleware functions
 } RouteGroup;
 
 // =================== STATIC GLOBALS ================================================
-static Route routeTable[MAX_ROUTES] = {0};
-static size_t numRoutes = 0;
-static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE];
-static size_t global_middleware_count = 0;
-volatile sig_atomic_t running = 1;
-static Route* notFoundRoute = NULL;
-static const char* CONTENT_TYPE_HEADER = "Content-Type";
-static map* global_middleware_context = NULL;
+static Route routeTable[MAX_ROUTES] = {0};                   // static Route table
+static size_t numRoutes = 0;                                 // number of routes in the route table
+static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE];  // Global middleware
+static size_t global_middleware_count = 0;                   // Number of global middleware functions
+volatile sig_atomic_t running = 1;                           // Flag to indicate if the server is running
+static Route* notFoundRoute = NULL;                          // Route to use when a route is not found
+static map* global_middleware_context = NULL;                // Global middleware context
 
-static cleanup_func user_cleanup_func = NULL;
+static const char* CONTENT_TYPE_HEADER = "Content-Type";  // Content-Type header name
+static cleanup_func user_cleanup_func = NULL;             // User-defined cleanup function
 
-// To be cleaned up on exit
-int epoll_fd = -1;
-int server_fd = -1;
-volatile sig_atomic_t cleanup_done = false;
-
-ThreadPool pool = NULL;
-pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_t shutdown_thread = 0;
+// ======================================================================================
+// These are global variables that need to be cleaned up on exit.
+int epoll_fd = -1;                                          // epoll file descriptor
+int server_fd = -1;                                         // server file descriptor
+volatile sig_atomic_t cleanup_done = false;                 // atomic flag to indicate cleanup is done
+ThreadPool pool = NULL;                                     // Thread pool for handling requests
+pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;  // Mutex for cleanup
+pthread_t shutdown_thread = 0;                              // Thread for cleanup
 
 // =================== STATIC DECLARATIONS ================================================
+
+// parse the query parameters from the query string.
 static bool parse_url_query_params(char* query, map* query_params);
+
+// Default handler for all static routes.
 static void staticFileHandler(context_t* ctx);
+
+// Helper function to execute the middleware in a chain.
 static void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler next);
+
+// Advance to the next middleware in the chain.
 static void middleware_next(context_t* ctx);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
 ssize_t sendall(int fd, const void* buf, size_t n);
-
-// ==================== END =================================================================
 
 // Send error back to client as html with a status code.
 void http_error(int client_fd, http_status status, const char* message) {
@@ -290,10 +289,84 @@ const char* http_error_string(http_error_t code) {
     return "success";
 }
 
+header_t* header_new(const char* name, const char* value) {
+    header_t* header = malloc(sizeof(header_t));
+    if (header == NULL) {
+        LOG_ERROR("malloc header_t failed");
+        return NULL;
+    }
+
+    header->name = strdup(name);
+    header->value = strdup(value);
+    return header;
+}
+
+header_t* header_fromstring(const char* str) {
+    size_t n = 0;
+
+    // find the index the first colon in the string.
+    while (str[n] != ':' && str[n] != '\0') {
+        n++;
+    }
+
+    // if the string is empty or the colon is the last character, return an empty header.
+    // verify that the header is empty by checking if the name is empty.
+    // i.e header.name[0] == '\0'
+    if (str[n] == '\0' || n == 0) {
+        LOG_ERROR("Header name is empty");
+        return NULL;
+    }
+
+    header_t* header = malloc(sizeof(header_t));
+    if (header == NULL) {
+        LOG_ERROR("malloc header_t failed");
+        return NULL;
+    }
+    // Copy header name
+    header->name = malloc(n + 1);
+    if (header->name == NULL) {
+        LOG_ERROR("malloc header name failed");
+        free(header);
+        return NULL;
+    }
+
+    strncpy(header->name, str, n);
+    header->name[n] = '\0';
+
+    // skip the colon and any leading spaces.
+    n++;
+    while (str[n] == ' ') {
+        n++;
+    }
+
+    // copy header value
+    header->value = strdup(str + n);
+    return header;
+}
+
+void header_free(header_t* header) {
+    if (!header)
+        return;
+
+    free(header->name);
+    free(header->value);
+    free(header);
+    header = NULL;
+}
+
 http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length) {
     HeaderState state = STATE_HEADER_NAME;
     const char* ptr = header_text;
     size_t start_pos = 0, endpos = length;
+
+    // allocate memory for headers
+    req->headers = (header_t**)malloc(MAX_REQ_HEADERS * sizeof(header_t*));
+    if (req->headers == NULL) {
+        LOG_ERROR("malloc headers failed");
+        return http_memory_alloc_failed;
+    }
+    memset(req->headers, 0, MAX_REQ_HEADERS * sizeof(header_t*));
+    req->header_count = 0;
 
     size_t header_name_idx = 0;
     size_t header_value_idx = 0;
@@ -316,7 +389,6 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
                 }
 
                 if (ptr[i] == ':') {
-
                     header_name[header_name_idx] = '\0';
                     header_name_idx = 0;
 
@@ -340,15 +412,24 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
                 }
 
                 if (ptr[i] == '\r' && i + 1 < endpos && ptr[i + 1] == '\n') {
-
                     header_value[header_value_idx] = '\0';
                     header_value_idx = 0;
 
-                    header_t h = {0};
-                    strncpy(h.name, header_name, MAX_HEADER_NAME);
-                    strncpy(h.value, header_value, MAX_HEADER_VALUE);
-
+                    header_t* h = header_new(header_name, header_value);
+                    if (h == NULL) {
+                        LOG_ERROR("header_new() failed");
+                        // free headers
+                        for (size_t j = 0; j < req->header_count; j++) {
+                            header_free(req->headers[j]);
+                        }
+                        free(req->headers);
+                        req->headers = NULL;
+                        return http_memory_alloc_failed;
+                    }
+                    // add header to headers
                     req->headers[req->header_count++] = h;
+
+                    // Move to the next header
                     state = STATE_HEADER_END;
                 } else {
                     header_value[header_value_idx++] = ptr[i];
@@ -365,18 +446,18 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
     return http_ok;
 }
 
-const char* find_header(const header_t* headers, size_t count, const char* name) {
+char* find_header(header_t** headers, size_t count, const char* name) {
     for (size_t i = 0; i < count; i++) {
-        if (strcasecmp(headers[i].name, name) == 0) {
-            return headers[i].value;
+        if (strcasecmp(headers[i]->name, name) == 0) {
+            return headers[i]->value;
         }
     }
     return NULL;
 }
 
-int find_header_index(header_t* headers, size_t count, const char* name) {
+int find_header_index(header_t** headers, size_t count, const char* name) {
     for (size_t i = 0; i < count; i++) {
-        if (strcasecmp(headers[i].name, name) == 0) {
+        if (strcasecmp(headers[i]->name, name) == 0) {
             return i;
         }
     }
@@ -384,28 +465,21 @@ int find_header_index(header_t* headers, size_t count, const char* name) {
 }
 
 bool set_header(context_t* ctx, const char* name, const char* value) {
-    if (ctx->header_count >= MAX_RES_HEADERS) {
-        LOG_ERROR("Exceeded max response headers: %d", MAX_RES_HEADERS);
-        return false;
-    }
-
-    size_t name_len = strlen(name);
-    size_t value_len = strlen(value);
-    if (name_len >= MAX_HEADER_NAME || value_len >= MAX_HEADER_VALUE) {
-        LOG_ERROR("Header name or value exceeds max lengths: (%d, %d)", MAX_HEADER_NAME, MAX_HEADER_VALUE);
-        return false;
-    }
-
     // Check if this header already exists
     int index = find_header_index(ctx->headers, ctx->header_count, name);
     if (index == -1) {
-        header_t header = {0};
-        snprintf(header.name, MAX_HEADER_NAME, "%s", name);
-        snprintf(header.value, MAX_HEADER_VALUE, "%s", value);
+        header_t* header = header_new(name, value);
+        if (header == NULL) {
+            LOG_ERROR("header_new() failed");
+            return false;
+        }
         ctx->headers[ctx->header_count++] = header;
     } else {
         // Replace header value
-        snprintf(ctx->headers[index].value, MAX_HEADER_VALUE, "%s", value);
+        header_t* h = ctx->headers[index];
+        free(h->value);
+        h->value = strdup(value);
+        // we don't need to free the header name because it is a constant string.
     }
     return true;
 }
@@ -469,47 +543,18 @@ bool header_valid(const header_t* h) {
     return h->name[0] != '\0';
 }
 
-// Create a header into buffer.
-void header_tostring(const header_t* h, char* buffer, size_t buffer_size) {
-    int ret = snprintf(buffer, buffer_size, "%s: %s", h->name, h->value);
-    if (ret >= (int)buffer_size) {
-        LOG_ERROR("buffer too small to fit header, \"%s: %s\". header has been trucated", h->name, h->value);
+// Convert a header to a string, appending CRLF after the value.
+// Returns a dynamically allocated string that the caller must free.
+char* header_tostring(const header_t* h) {
+    size_t len = strlen(h->name) + strlen(h->value) + 5;  // 5 is for ": " and "\r\n" and null terminator
+    char* buf = malloc(len);
+    if (buf == NULL) {
+        LOG_ERROR("malloc failed");
+        return NULL;
     }
-}
-
-header_t header_fromstring(const char* str) {
-    size_t n = 0;
-
-    // find the index the first colon in the string.
-    while (str[n] != ':' && str[n] != '\0') {
-        n++;
-    }
-
-    // if the string is empty or the colon is the last character, return an empty header.
-    // verify that the header is empty by checking if the name is empty.
-    // i.e header.name[0] == '\0'
-    if (str[n] == '\0' || n == 0 || n >= MAX_HEADER_NAME) {
-        LOG_ERROR("header name too long: %s", str);
-        return (header_t){0};
-    }
-
-    header_t header = {0};
-
-    // this will copy the name of the header. This will truncate the name if it is too long.
-    snprintf(header.name, MAX_HEADER_NAME, "%s", str);
-    header.name[n] = '\0';
-
-    // skip the colon and any leading spaces.
-    n++;
-    while (str[n] == ' ') {
-        n++;
-    }
-
-    snprintf(header.value, MAX_HEADER_VALUE, "%s", str + n);
-    header.value[MAX_HEADER_VALUE - 1] = '\0';
-
-    // We can return local header because it will be copied since its size is known.
-    return header;
+    snprintf(buf, len, "%s: %s\r\n", h->name, h->value);
+    buf[len - 1] = '\0';
+    return buf;
 }
 
 static void free_request(request_t* req) {
@@ -520,12 +565,29 @@ static void free_request(request_t* req) {
     // Close the connection after sending the response
     close_connection(req->client_fd, req->epoll_fd);
 
+    // Free memory for the request path
+    if (req->path) {
+        free(req->path);
+        req->path = NULL;
+    }
+
+    // Free memory for the request headers
+    if (req->headers) {
+        for (size_t i = 0; i < req->header_count; i++) {
+            header_free(req->headers[i]);
+        }
+
+        free(req->headers);
+        req->headers = NULL;
+    }
+
     // Free memory for the request body
     if (req->body) {
         free(req->body);
         req->body = NULL;
     }
 
+    // Free the query parameters
     if (req->query_params) {
         map_destroy(req->query_params, true);
     }
@@ -534,6 +596,31 @@ static void free_request(request_t* req) {
     free(req);
 
     req = NULL;
+}
+
+// Free epollix context resources.
+void free_context(context_t* ctx) {
+    if (!ctx) {
+        return;
+    }
+
+    // Free the response headers
+    if (ctx->headers) {
+        for (size_t i = 0; i < ctx->header_count; i++) {
+            header_free(ctx->headers[i]);
+        }
+        free(ctx->headers);
+        ctx->headers = NULL;
+    }
+
+    // free the request
+    free_request(ctx->request);
+
+    // Free the locals map
+    if (ctx->locals) {
+        map_destroy(ctx->locals, true);
+        ctx->locals = NULL;
+    }
 }
 
 // Add a value to the context. This is useful for sharing data between middleware.
@@ -551,17 +638,37 @@ void* get_context_value(context_t* ctx, const char* key) {
     return map_get(ctx->locals, (char*)key);
 }
 
+// Allocate response headers.
+bool allocate_headers(context_t* ctx) {
+    ctx->headers = (header_t**)malloc(MAX_RES_HEADERS * sizeof(header_t*));
+    if (ctx->headers == NULL) {
+        LOG_ERROR("malloc headers failed");
+        return false;
+    }
+    memset(ctx->headers, 0, MAX_RES_HEADERS * sizeof(header_t*));
+    ctx->header_count = 0;
+    ctx->headers_sent = false;
+    return true;
+}
+
 static void handle_write(request_t* req, Route* route) {
     // Initialize response
-    context_t res = {0};
-    res.request = req;
-    res.status = StatusOK;
-    res.headers_sent = false;
-    res.chunked = false;
+    context_t ctx = {0};
+    ctx.request = req;
+    ctx.status = StatusOK;
+    ctx.headers_sent = false;
+    ctx.chunked = false;
+
+    // Initialize response headers
+    if (!allocate_headers(&ctx)) {
+        http_error(req->client_fd, StatusInternalServerError, "error allocating response headers");
+        free_request(req);
+        return;
+    }
 
     // Initialize locals map with a capacity of 8
-    res.locals = map_create(8, key_compare_char_ptr);
-    if (!res.locals) {
+    ctx.locals = map_create(8, key_compare_char_ptr);
+    if (!ctx.locals) {
         LOG_ERROR("unable to create map for locals");
         http_error(req->client_fd, StatusInternalServerError, "error creating locals map");
         free_request(req);
@@ -570,20 +677,25 @@ static void handle_write(request_t* req, Route* route) {
 
     // Define middleware context
     MiddlewareContext mw_ctx = {0};
-    res.mw_ctx = &mw_ctx;
+    ctx.mw_ctx = &mw_ctx;
 
     // Combine global and route-specific middleware
-    Middleware combined_middleware[MAX_GLOBAL_MIDDLEWARE + MAX_ROUTE_MIDDLEWARE] = {0};
-    size_t combined_count = 0;
-
-    if (global_middleware_count > 0) {
-        memcpy(combined_middleware, global_middleware, sizeof(Middleware) * global_middleware_count);
-        combined_count += global_middleware_count;
+    Middleware* combined_middleware = malloc(sizeof(Middleware) * (global_middleware_count + route->middleware_count));
+    if (combined_middleware == NULL) {
+        LOG_ERROR("malloc failed");
+        http_error(req->client_fd, StatusInternalServerError, "error allocating middleware");
+        free_request(req);
+        return;
     }
 
-    if (route->middleware_count > 0) {
-        memcpy(combined_middleware + combined_count, route->middleware, sizeof(Middleware) * route->middleware_count);
-        combined_count += route->middleware_count;
+    // Combine global and route-specific middleware
+    uint8_t combined_count = 0;
+    for (size_t i = 0; i < (size_t)global_middleware_count; i++) {
+        combined_middleware[combined_count++] = global_middleware[i];
+    }
+
+    for (size_t i = 0; i < (size_t)route->middleware_count; i++) {
+        combined_middleware[combined_count++] = route->middleware[i];
     }
 
     mw_ctx.middleware = combined_middleware;
@@ -592,12 +704,12 @@ static void handle_write(request_t* req, Route* route) {
     mw_ctx.handler = route->handler;
 
     // Execute middleware chain
-    execute_middleware(&res, combined_middleware, combined_count, 0, route->handler);
+    execute_middleware(&ctx, combined_middleware, combined_count, 0, route->handler);
 
-    free_request(req);
+    // Free combined middleware
+    free(combined_middleware);
 
-    // Free the locals map
-    map_destroy(res.locals, true);
+    free_context(&ctx);
 }
 
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
@@ -607,7 +719,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
     char headers[4096] = {0};
     char method[16] = {0};
     char uri[1024] = {0};  // undecoded path, query.
-    char http_version[16];
+    char http_version[12];
 
     // Read the headers to get the content length
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers), MSG_WAITALL);
@@ -618,7 +730,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
     headers[inital_size] = '\0';
 
     // extract http method, path(uri) and http version.
-    int count = sscanf(headers, "%15s %1023s %15s", method, uri, http_version);
+    int count = sscanf(headers, "%15s %1023s %11s", method, uri, http_version);
     if (count != 3) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
         close_connection(client_fd, epoll_fd);
@@ -848,25 +960,19 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
     req->content_length = total_read;
     req->query_params = query_params;
     req->route = route;
-
-    strncpy(req->method_str, method, sizeof req->method_str);
-    req->method_str[strlen(method)] = '\0';
-
+    req->header_count = 0;
     req->method = httpMethod;
 
     strncpy(req->http_version, http_version, sizeof(req->http_version));
+
     req->http_version[strlen(method)] = '\0';
-
-    strncpy(req->path, path, sizeof req->path);
-    req->path[strlen(path)] = '\0';
-
-    // Initialize request headers
-    req->header_count = 0;
-    memset(req->headers, 0, sizeof req->headers);
+    req->path = (char*)malloc(strlen(path) + 1);
+    LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
+    strncpy(req->path, path, strlen(path) + 1);
 
     http_error_t code = http_ok;
 
-    // Parse headers and add them to request, skipping status line and \r\n
+    // Allocate and parse request headers
     code = parse_request_headers(req, header_start + 2, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
@@ -953,21 +1059,17 @@ static void write_headers(context_t* ctx) {
 
     // Add headers
     for (size_t i = 0; i < ctx->header_count; i++) {
-        char header[MAX_HEADER_NAME + MAX_HEADER_VALUE + 4] = {0};
-        header_tostring(&ctx->headers[i], header, sizeof(header));
-
-        // append \r\n to the end of header
-        strncat(header, "\r\n", sizeof(header) - strlen(header) - 1);
-
-        size_t header_len = strlen(header);
-        if (written + header_len >= MAX_RES_HEADER_SIZE - 4) {  // 4 is for the \r\n\r\n
-            LOG_ERROR("Exceeded max header size: %d", MAX_RES_HEADER_SIZE);
+        // Convert the header to a string with \r\n at the end
+        char* header = header_tostring(ctx->headers[i]);
+        if (header == NULL) {
+            LOG_ERROR("header_tostring() failed");
             return;
         }
 
         // Append the header to the response headers
         strncat(header_res, header, sizeof(header_res) - written);
-        written += header_len;
+        written += strlen(header);
+        free(header);
     }
 
     // Append the end of the headers
@@ -1493,8 +1595,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->type = type;
     route->mw_data = NULL;
     route->middleware_count = 0;
-    memset(route->middleware, 0, sizeof(route->middleware));
-    memset(route->dirname, 0, sizeof(route->dirname));
+    route->middleware = NULL;  // No middleware by default
 
     route->pattern = strdup(pattern);
     route->params = malloc(sizeof(PathParams));
@@ -1516,6 +1617,7 @@ void free_static_routes(void) {
     for (size_t i = 0; i < numRoutes; i++) {
         Route route = routeTable[i];
         free(route.pattern);
+
         if (route.params) {
             free(route.params);
         }
@@ -1523,6 +1625,16 @@ void free_static_routes(void) {
         // Free the middleware data if it exists
         if (route.mw_data) {
             free(route.mw_data);
+        }
+
+        // Free the middleware array
+        if (route.middleware) {
+            free(route.middleware);
+        }
+
+        // Free the dirname for static routes
+        if (route.dirname) {
+            free(route.dirname);
         }
     }
 }
@@ -1542,16 +1654,30 @@ void use_global_middleware(int count, ...) {
     va_end(args);
 }
 
+// Register middleware for a route
 void use_route_middleware(Route* route, int count, ...) {
-    if (route->middleware_count + count > MAX_ROUTE_MIDDLEWARE) {
-        LOG_FATAL("Exceeded maximum route middleware count\n");
+    if (count <= 0) {
+        return;
     }
+
+    size_t new_count = route->middleware_count + count;
+    Middleware* new_middleware = realloc(route->middleware, sizeof(Middleware) * new_count);
+    if (!new_middleware) {
+        perror("realloc");
+        LOG_FATAL("Failed to allocate memory for route middleware\n");
+    }
+
+    // Update the route middleware
+    route->middleware = new_middleware;
 
     va_list args;
     va_start(args, count);
-    for (int i = 0; i < count && route->middleware_count < MAX_ROUTE_MIDDLEWARE; i++) {
-        route->middleware[route->middleware_count++] = va_arg(args, Middleware);
+
+    // Append the new middleware to the route middleware
+    for (size_t i = route->middleware_count; i < new_count; i++) {
+        route->middleware[i] = va_arg(args, Middleware);
     }
+    route->middleware_count = new_count;
     va_end(args);
 }
 
@@ -1602,11 +1728,11 @@ const char* get_header(context_t* ctx, const char* name) {
 }
 
 const char* get_response_header(context_t* ctx, const char* name) {
-    return find_header(ctx->headers, ctx->header_count, name);
+    return (const char*)find_header(ctx->headers, ctx->header_count, name);
 }
 
 const char* get_method_str(context_t* ctx) {
-    return ctx->request->method_str;
+    return method_tostring(ctx->request->method);
 }
 
 HttpMethod get_method(context_t* ctx) {
@@ -1669,9 +1795,7 @@ Route* route_static(const char* pattern, const char* dir) {
     LOG_ASSERT(route, "registerRoute failed");
 
     route->type = StaticRoute;
-    snprintf(route->dirname, MAX_DIRNAME, "%s", dirname);
-    free(dirname);
-
+    route->dirname = dirname;
     return route;
 }
 
@@ -1691,27 +1815,47 @@ RouteGroup* route_group(const char* pattern) {
 
     group->middleware_count = 0;
     group->count = 0;
-    memset(group->routes, 0, sizeof(group->routes));
-    memset(group->middleware, 0, sizeof(group->middleware));
+    group->middleware = NULL;
+    group->middleware_count = 0;
+    group->routes = NULL;
     return group;
 }
 
 void route_group_free(RouteGroup* group) {
+    // Free the group prefix
     free(group->prefix);
+    if (group->middleware) {
+        free(group->middleware);
+    }
+
+    if (group->routes) {
+        // The individual routes are freed in free_static_routes
+        free(group->routes);
+        group->routes = NULL;
+    }
     free(group);
 }
 
 // Attach route group middleware.
 void use_group_middleware(RouteGroup* group, int count, ...) {
-    if (group->middleware_count + count > MAX_GROUP_MIDDLEWARE) {
-        LOG_FATAL("Exceeded maximum group middleware count\n");
+    if (count <= 0) {
+        return;
     }
+
+    uint8_t new_count = group->middleware_count + (uint8_t)count;
+    Middleware* new_middleware = realloc(group->middleware, sizeof(Middleware) * (size_t)new_count);
+    if (!new_middleware) {
+        LOG_FATAL("Failed to allocate memory for group middleware\n");
+    }
+
+    group->middleware = new_middleware;
 
     va_list args;
     va_start(args, count);
-    for (int i = 0; i < count && group->middleware_count < MAX_GROUP_MIDDLEWARE; i++) {
-        group->middleware[group->middleware_count++] = va_arg(args, Middleware);
+    for (size_t i = group->middleware_count; i < new_count; i++) {
+        group->middleware[i] = va_arg(args, Middleware);
     }
+    group->middleware_count = new_count;
     va_end(args);
 }
 
@@ -1727,8 +1871,20 @@ static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const cha
         LOG_FATAL("Failed to concatenate route pattern\n");
     }
 
+    // realloc the routes array, may be null if this is the first route
+    Route** new_routes = realloc(group->routes, sizeof(Route*) * (group->count + 1));
+    if (!new_routes) {
+        LOG_FATAL("Failed to allocate memory for group routes\n");
+    }
+
+    // Update the routes array
+    group->routes = new_routes;
+
+    // This is allocated in static memory. Freed when the server exits.
+    // Should not be freed in route_group_free.
     Route* route = registerRoute(method, route_pattern, handler, type);
     group->routes[group->count++] = route;
+
     free(route_pattern);
     return route;
 }
@@ -1793,8 +1949,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     LOG_ASSERT(route != NULL, "registerGroupRoute failed");
 
     route->type = StaticRoute;
-    snprintf(route->dirname, MAX_DIRNAME, "%s", fullpath);
-    free(fullpath);
+    route->dirname = fullpath;
     return route;
 }
 
@@ -2282,11 +2437,13 @@ __attribute__((destructor)) static void epollix_cleanup(void) {
         map_destroy(global_middleware_context, true);
     }
 
-    close(epoll_fd);
-    close(server_fd);
+    if (epoll_fd != -1)
+        close(epoll_fd);
+
+    if (server_fd != -1)
+        close(server_fd);
 
     if (user_cleanup_func) {
-        LOG_INFO("Calling user cleanup function");
         user_cleanup_func();
     }
 }

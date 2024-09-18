@@ -1,6 +1,8 @@
 #ifndef EA56F184_3413_409F_A9D5_E26BBDFC9535
 #define EA56F184_3413_409F_A9D5_E26BBDFC9535
 
+#include <stdint.h>
+
 #ifndef MAXEVENTS
 #define MAXEVENTS 2048
 #endif
@@ -46,20 +48,12 @@
 #define MAX_ROUTES 48
 #endif
 
-#ifndef MAX_GROUP_ROUTES
-#define MAX_GROUP_ROUTES 8
-#endif
-
 #ifndef MAX_PATH_LEN
 #define MAX_PATH_LEN 1024
 #endif
 
-#ifndef MAX_ROUTE_MIDDLEWARE
-#define MAX_ROUTE_MIDDLEWARE 4
-#endif
-
 #ifndef MAX_GLOBAL_MIDDLEWARE
-#define MAX_GLOBAL_MIDDLEWARE 8
+#define MAX_GLOBAL_MIDDLEWARE (uint8_t)8
 #endif
 
 #ifndef MAX_GROUP_MIDDLEWARE

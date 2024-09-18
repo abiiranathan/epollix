@@ -1,5 +1,6 @@
 #include "../src/epollix.c"
 #include "../include/logging.h"
+#include "constants.h"
 
 // test parse request headers
 // http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length)
@@ -13,25 +14,23 @@ void test_parse_request_headers(void) {
     req->route = NULL;
     req->query_params = map_create(10, key_compare_char_ptr);
     req->header_count = 0;
+    req->path = NULL;
+    req->method = M_GET;
     LOG_ASSERT(req->query_params != NULL, "Failed to create map for query_params");
-
-    // Initialize request headers
-    req->header_count = 0;
-    memset(req->headers, 0, sizeof req->headers);
 
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
     http_error_t result = parse_request_headers(req, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
 
-    LOG_ASSERT(strcmp(req->headers[0].name, "Host") == 0, "Expected Host header");
-    LOG_ASSERT(strcmp(req->headers[0].value, "localhost:8080") == 0, "Expected localhost:8080");
-    LOG_ASSERT(strcmp(req->headers[1].name, "User-Agent") == 0, "Expected User-Agent header");
-    LOG_ASSERT(strcmp(req->headers[1].value, "curl/7.68.0") == 0, "Expected curl/7.68.0");
-    LOG_ASSERT(strcmp(req->headers[2].name, "Accept") == 0, "Expected Accept header");
-    LOG_ASSERT(strcmp(req->headers[2].value, "*/*") == 0, "Expected */*");
+    LOG_ASSERT(strcmp(req->headers[0]->name, "Host") == 0, "Expected Host header");
+    LOG_ASSERT(strcmp(req->headers[0]->value, "localhost:8080") == 0, "Expected localhost:8080");
+    LOG_ASSERT(strcmp(req->headers[1]->name, "User-Agent") == 0, "Expected User-Agent header");
+    LOG_ASSERT(strcmp(req->headers[1]->value, "curl/7.68.0") == 0, "Expected curl/7.68.0");
+    LOG_ASSERT(strcmp(req->headers[2]->name, "Accept") == 0, "Expected Accept header");
+    LOG_ASSERT(strcmp(req->headers[2]->value, "*/*") == 0, "Expected */*");
 
-    free(req);
+    free_request(req);
 
     LOG_INFO("test_parse_request_headers passed");
 }
@@ -62,15 +61,13 @@ void test_header_setter_and_getters(void) {
     context_t* ctx = (context_t*)malloc(sizeof(context_t));
     LOG_ASSERT(ctx != NULL, "Failed to allocate memory for context_t");
 
-    // Initialize response headers
-    ctx->header_count = 0;
-    memset(ctx->headers, 0, sizeof ctx->headers);
-
+    bool ok = allocate_headers(ctx);
+    LOG_ASSERT(ok, "Failed to allocate headers");
     bool result = set_header(ctx, "Content-Type", "text/html");
     LOG_ASSERT(result, "Failed to set header");
 
-    LOG_ASSERT(strcmp(ctx->headers[0].name, "Content-Type") == 0, "Expected Content-Type header");
-    LOG_ASSERT(strcmp(ctx->headers[0].value, "text/html") == 0, "Expected text/html");
+    LOG_ASSERT(strcmp(ctx->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");
+    LOG_ASSERT(strcmp(ctx->headers[0]->value, "text/html") == 0, "Expected text/html");
 
     const char* value = find_header(ctx->headers, ctx->header_count, "Content-Type");
     LOG_ASSERT(value != NULL, "Failed to find header");
@@ -86,10 +83,11 @@ void test_header_setter_and_getters(void) {
 // header_t header_fromstring(const char* str)
 void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
-    header_t header = header_fromstring(header_text);
-    LOG_ASSERT(strcmp(header.name, "Content-Type") == 0, "Expected Content-Type header");
-    LOG_ASSERT(strcmp(header.value, "text/html") == 0, "Expected text/html");
+    header_t* header = header_fromstring(header_text);
+    LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
+    LOG_ASSERT(strcmp(header->value, "text/html") == 0, "Expected text/html, got %s", header->value);
 
+    header_free(header);
     LOG_INFO("test_header_fromstring passed");
 }
 
