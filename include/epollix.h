@@ -248,13 +248,6 @@ Route* route_notfound(Handler h);
 
 // =========================================================================
 
-// Default route matcher. It matches the request method and path
-// to the correct Route with support for path parameters, specified
-// by curry-braces: e.g /users/{username}. This matcher will popolate the
-// path parameters before returning the matched route or NULL if not found.
-// No support for 405 codes. (right path for wrong method)
-Route* default_route_matcher(HttpMethod method, const char* path);
-
 // serve a file with support for partial content specified by the "Range" header.
 // Uses sendfile to copy content from file directly into the kernel space.
 // See man(2) sendfile for more information.
@@ -276,11 +269,11 @@ typedef void (*cleanup_func)(void);
 
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
-// If num_threads is 0, we use the num_cpus on the target machine.
+// If num_workers is 0, we use the num_cpus on the target machine.
 // The route matcher is a function pointer that is passed the request method
 // and path and returns the matching route. It is also for pupulating the Route
 // parameters be4 returning the route.
-int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads, cleanup_func cf);
+int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf);
 
 #ifdef __cplusplus
 }

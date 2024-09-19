@@ -141,6 +141,8 @@ static void execute_middleware(context_t* ctx, Middleware* middleware, size_t co
 // Advance to the next middleware in the chain.
 static void middleware_next(context_t* ctx);
 
+static Route* default_route_matcher(HttpMethod method, const char* path);
+
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
 ssize_t sendall(int fd, const void* buf, size_t n);
@@ -714,7 +716,7 @@ static void handle_write(request_t* req, Route* route) {
 
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
 completely, as we are running in edge-triggered mode and won't get a notification again for the same data. */
-static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
+static void handle_read(int client_fd, int epoll_fd) {
     // Read headers
     char headers[4096] = {0};
     char method[16] = {0};
@@ -832,7 +834,7 @@ static void handle_read(int client_fd, int epoll_fd, RouteMatcher matcher) {
     }
 
     // Matches the route, populating path params that are part of the route if they exist
-    Route* route = matcher(httpMethod, path);
+    Route* route = default_route_matcher(httpMethod, path);
 
     if (route == NULL) {
         printf("Route not found: %s\n", path);
@@ -1510,16 +1512,15 @@ static int setup_server_socket(const char* port) {
 typedef struct read_task {
     int epoll_fd;
     int client_fd;
-    RouteMatcher matcher;
 } read_task;
 
 static void submit_read_task(struct read_task* task) {
-    handle_read(task->client_fd, task->epoll_fd, task->matcher);
+    handle_read(task->client_fd, task->epoll_fd);
     free(task);
 }
 
 // Default route matcher.
-Route* default_route_matcher(HttpMethod method, const char* path) {
+static Route* default_route_matcher(HttpMethod method, const char* path) {
     bool matches = false;
 
     for (size_t i = 0; i < numRoutes; i++) {
@@ -2295,7 +2296,7 @@ __attribute__((constructor())) void init(void) {
 // Server request on given port. This blocks forever.
 // port is provided as "8000" or "8080" etc.
 // If num_threads is 0, we use the num_cpus on the target machine.
-int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_threads, cleanup_func cf) {
+int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
     LOG_ASSERT(port != NULL, "port is NULL but expected to be a valid port number");
 
     user_cleanup_func = cf;
@@ -2336,8 +2337,8 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
     }
 
     int nworkers = get_ncpus();
-    if (num_threads > 0) {
-        nworkers = num_threads;
+    if (num_workers > 0) {
+        nworkers = num_workers;
     }
 
     printf("[PID: %d]\n", get_gid());
@@ -2409,7 +2410,6 @@ int listen_and_serve(const char* port, RouteMatcher route_matcher, size_t num_th
 
                     task->client_fd = events[i].data.fd;
                     task->epoll_fd = epoll_fd;
-                    task->matcher = route_matcher;
                     threadpool_add_task(pool, (void (*)(void*))submit_read_task, task);
 
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {

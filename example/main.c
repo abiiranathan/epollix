@@ -270,5 +270,5 @@ int main(int argc, char** argv) {
     LOG_ASSERT(logFile != NULL, "Failed to open log file");
     set_log_file(logFile);
 
-    listen_and_serve(port, default_route_matcher, 2, cleanup);
+    listen_and_serve(port, 2, cleanup);
 }
