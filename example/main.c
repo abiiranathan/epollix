@@ -1,12 +1,8 @@
-#include <cjson/cJSON.h>
-#include "../include/epollix.h"
-#include "../include/mw/basicauth.h"
-#include "../include/mw/logger.h"
-#include "gzip.h"
-#include "jwt.h"
-#include "mw/tokenauth.h"
+#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE 1
 
 #include <assert.h>
+#include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,12 +11,22 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../include/crypto.h"
+#include "../include/epollix.h"
+#include "../include/gzip.h"
+#include "../include/jwt.h"
+#include "../include/mw/basicauth.h"
+#include "../include/mw/logger.h"
+#include "../include/mw/tokenauth.h"
+
 // ======================= Routes =======================
 void index_page(context_t* ctx) {
+    set_content_type(ctx, "text/html");
     http_servefile(ctx, "assets/index.html");
 }
 
 void serve_movie(context_t* ctx) {
+    set_content_type(ctx, "video/mp4");
     http_servefile(ctx, "assets/BigBuckBunny.mp4");
 }
 
@@ -115,6 +121,7 @@ void handle_create_user(context_t* ctx) {
 
 // GET /users/register
 void render_register_form(context_t* ctx) {
+    set_content_type(ctx, "text/html");
     http_servefile(ctx, "./assets/register_user.html");
 }
 
@@ -228,7 +235,9 @@ void gzip_route(context_t* ctx) {
     free(compressed_data);
 }
 
-void cleanup(void) {}
+void cleanup(void) {
+    crypto_cleanup();
+}
 
 void spa_route(context_t* ctx) {
     printf("Serving SPA route\n");
@@ -241,6 +250,8 @@ int main(int argc, char** argv) {
     if (argc == 2) {
         port = argv[1];
     }
+
+    crypto_init();
 
     BasicAuthData *guest = NULL, *admin = NULL;
 

@@ -30,7 +30,6 @@ extern "C" {
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include "../include/crypto.h"
 #include "../include/logging.h"
 #include "../include/method.h"
 
@@ -105,6 +104,11 @@ typedef struct RouteGroup {
     Middleware* middleware;    // Middleware for the group
     uint8_t middleware_count;  // Number of middleware functions
 } RouteGroup;
+
+typedef struct read_result {
+    request_t* req;  // Request object
+    Route* route;    // Matched route
+} read_result;
 
 // =================== STATIC GLOBALS ================================================
 static Route routeTable[MAX_ROUTES] = {0};                   // static Route table
@@ -367,6 +371,7 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
         LOG_ERROR("malloc headers failed");
         return http_memory_alloc_failed;
     }
+
     memset(req->headers, 0, MAX_REQ_HEADERS * sizeof(header_t*));
     req->header_count = 0;
 
@@ -716,12 +721,15 @@ static void handle_write(request_t* req, Route* route) {
 
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
 completely, as we are running in edge-triggered mode and won't get a notification again for the same data. */
-static void handle_read(int client_fd, int epoll_fd) {
+static void handle_read(int client_fd, int epoll_fd, read_result* result) {
     // Read headers
     char headers[4096] = {0};
     char method[16] = {0};
     char uri[1024] = {0};  // undecoded path, query.
     char http_version[12];
+
+    result->req = NULL;
+    result->route = NULL;
 
     // Read the headers to get the content length
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers), MSG_WAITALL);
@@ -991,7 +999,8 @@ static void handle_read(int client_fd, int epoll_fd) {
         return;
     }
 
-    handle_write(req, route);
+    result->req = req;
+    result->route = route;
 }
 
 // Like send(2) but sends the request in chunks if larger than 4K.
@@ -1001,8 +1010,10 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
     int flag = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 
-    if (n <= 64)
+    // If the data is less than 64 bytes, send it in one go
+    if (n <= 64) {
         return send(fd, buf, n, MSG_NOSIGNAL);
+    }
 
     size_t sent = 0, remaining = n;
     size_t chunk_size = 4096;
@@ -1028,7 +1039,6 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
                 return -1;
             }
         }
-
         sent += (size_t)bytes_sent;
         remaining -= bytes_sent;
     }
@@ -1091,7 +1101,7 @@ static void write_headers(context_t* ctx) {
 }
 
 // Send the response to the client.
-// Returns the number of bytes sent.
+// Returns the number of bytes sent or -1 on error.
 int send_response(context_t* ctx, const char* data, size_t len) {
     char content_len[24];
     int ret = snprintf(content_len, sizeof(content_len), "%ld", len);
@@ -1510,14 +1520,10 @@ static int setup_server_socket(const char* port) {
 
 // ================== Main program ===========================
 typedef struct read_task {
-    int epoll_fd;
-    int client_fd;
+    int epoll_fd;   // Epoll file descriptor
+    int client_fd;  // Client file descriptor
+    int index;      // Index of the task in the tasks array. -1 means task if free.
 } read_task;
-
-static void submit_read_task(struct read_task* task) {
-    handle_read(task->client_fd, task->epoll_fd);
-    free(task);
-}
 
 // Default route matcher.
 static Route* default_route_matcher(HttpMethod method, const char* path) {
@@ -1596,7 +1602,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->type = type;
     route->mw_data = NULL;
     route->middleware_count = 0;
-    route->middleware = NULL;  // No middleware by default
+    route->middleware = NULL;
 
     route->pattern = strdup(pattern);
     route->params = malloc(sizeof(PathParams));
@@ -2282,6 +2288,46 @@ char* get_ip_address(context_t* ctx) {
     return strdup(ip_addr);
 }
 
+// Pool of read tasks to avoid malloc/free overhead
+#define MAX_READ_TASKS (MAXEVENTS * 2)
+static read_task read_tasks[MAX_READ_TASKS] = {0};
+pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void init_read_tasks(void) {
+    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
+        memset(&read_tasks[i], -1, sizeof(read_task));
+    }
+}
+
+static read_task* get_read_task(void) {
+    pthread_mutex_lock(&read_tasks_mutex);
+    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
+        if (read_tasks[i].index == -1) {
+            read_tasks[i].index = i;
+            pthread_mutex_unlock(&read_tasks_mutex);
+            return &read_tasks[i];
+        }
+    }
+    pthread_mutex_unlock(&read_tasks_mutex);
+    return NULL;
+}
+
+static void put_read_task(read_task* task) {
+    pthread_mutex_lock(&read_tasks_mutex);
+    memset(task, -1, sizeof(read_task));
+    pthread_mutex_unlock(&read_tasks_mutex);
+}
+
+static void submit_read_task(void* arg) {
+    read_task* task = (read_task*)arg;
+    read_result result = {0};
+    handle_read(task->client_fd, task->epoll_fd, &result);
+    if (result.req && result.route) {
+        handle_write(result.req, result.route);
+    }
+    put_read_task(task);
+}
+
 __attribute__((constructor())) void init(void) {
     global_middleware_context = map_create(10, key_compare_char_ptr);
     if (!global_middleware_context) {
@@ -2290,7 +2336,6 @@ __attribute__((constructor())) void init(void) {
 
     install_signal_handler();
     init_mime_hashtable();
-    crypto_init();
 }
 
 // Server request on given port. This blocks forever.
@@ -2299,6 +2344,7 @@ __attribute__((constructor())) void init(void) {
 int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
     LOG_ASSERT(port != NULL, "port is NULL but expected to be a valid port number");
 
+    init_read_tasks();
     user_cleanup_func = cf;
 
     int ret;
@@ -2378,13 +2424,6 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
                         }
                     }
 
-                    // char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
-                    // ret = getnameinfo(&internetAddress, client_len, hostbuf, sizeof hostbuf, portbuf, sizeof portbuf,
-                    //                   NI_NUMERICHOST | NI_NUMERICSERV);
-                    // if (ret == 0) {
-                    //     printf("new connection on fd %d (host=%s, port=%s)\n", client_fd, hostbuf, portbuf);
-                    // }
-
                     ret = set_nonblocking(client_fd);
                     if (ret == -1) {
                         LOG_FATAL("Failed to set non-blocking\n");
@@ -2400,17 +2439,18 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
                 }
             } else {
                 if (events[i].events & EPOLLIN) {
-                    // read event
-                    read_task* task = malloc(sizeof(read_task));
+                    // Get a free read task from the pool
+                    read_task* task = get_read_task();
                     if (!task) {
-                        http_error(events[i].data.fd, StatusInternalServerError, ERR_MEMORY_ALLOC_FAILED);
+                        http_error(events[i].data.fd, StatusInternalServerError,
+                                   "Failed to allocate memory for read task");
                         close_connection(events[i].data.fd, epoll_fd);
                         continue;
                     }
 
                     task->client_fd = events[i].data.fd;
                     task->epoll_fd = epoll_fd;
-                    threadpool_add_task(pool, (void (*)(void*))submit_read_task, task);
+                    threadpool_add_task(pool, submit_read_task, task);
 
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
                     LOG_ERROR("error on fd %d", events[i].data.fd);
@@ -2431,7 +2471,6 @@ __attribute__((destructor)) static void epollix_cleanup(void) {
 
     free_static_routes();
     destroy_mime_hashtable();
-    crypto_cleanup();
 
     if (global_middleware_context) {
         map_destroy(global_middleware_context, true);
