@@ -13,7 +13,7 @@ typedef enum {
     LOG_LATENCY = 1 << 5,
     LOG_USER_AGENT = 1 << 6,
     LOG_IP = 1 << 7,
-    LOG_DEFAULT = LOG_DATE | LOG_TIME | LOG_METHOD | LOG_PATH | LOG_STATUS | LOG_LATENCY | LOG_USER_AGENT
+    LOG_DEFAULT = LOG_DATE | LOG_TIME | LOG_METHOD | LOG_PATH | LOG_STATUS | LOG_LATENCY
 } LogFlag;
 
 extern LogFlag log_flags;

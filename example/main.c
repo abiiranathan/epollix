@@ -165,9 +165,42 @@ static void api_index(context_t* ctx) {
     send_json(ctx, data, strlen(data));
 }
 
+typedef struct User {
+    char* username;
+    char* email;
+    char* password;
+} User;
+
 static void api_users(context_t* ctx) {
-    char* data = "{\"users\": [\"Alice\", \"Bob\", \"Charlie\"]}";
+    User* users = (User*)malloc(sizeof(User) * 10);
+    if (users == NULL) {
+        send_string(ctx, "Failed to allocate memory for users");
+        return;
+    }
+
+    for (int i = 0; i < 10; i++) {
+        users[i].username = "user";
+        users[i].email = "randomemail@gmail.com";
+        users[i].password = "password";
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON* users_array = cJSON_CreateArray();
+
+    for (int i = 0; i < 10; i++) {
+        cJSON* user = cJSON_CreateObject();
+        cJSON_AddStringToObject(user, "username", users[i].username);
+        cJSON_AddStringToObject(user, "email", users[i].email);
+        cJSON_AddStringToObject(user, "password", users[i].password);
+        cJSON_AddItemToArray(users_array, user);
+    }
+
+    cJSON_AddItemToObject(root, "users", users_array);
+    char* data = cJSON_Print(root);
     send_json_string(ctx, data);
+
+    cJSON_Delete(root);
+    free(users);
 }
 
 static void api_user_by_id(context_t* ctx) {
@@ -191,13 +224,7 @@ void gzip_route(context_t* ctx) {
     free(compressed_data);
 }
 
-FILE* logFile = NULL;
-
-void cleanup(void) {
-    if (logFile) {
-        fclose(logFile);
-    }
-}
+void cleanup(void) {}
 
 void spa_route(context_t* ctx) {
     printf("Serving SPA route\n");
@@ -216,6 +243,8 @@ int main(int argc, char** argv) {
     // Set the JWT token secret used to sign the token for Bearer authentication
     setenv(JWT_TOKEN_SECRET, "super_jwt_token_secret", 1);
 
+    // Logging middleware
+    set_log_file(stdout);
     use_global_middleware(1, epollix_logger);
 
     // We need a way to associate the BasicAuthData to a route since C has no support for closures.
@@ -244,7 +273,7 @@ int main(int argc, char** argv) {
     use_route_middleware(pr, 1, BearerAuthMiddleware);
 
     Route* reg = route_get("/users/register", render_register_form);
-    set_mw_context(reg, admin);
+    set_middleware_context(reg, admin);
     use_route_middleware(reg, 1, route_basic_auth);
 
     route_post("/users/create", handle_create_user);
@@ -263,12 +292,5 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    // Add middleware
-    append_log_flags(LOG_IP);
-
-    logFile = fopen("server.log", "w");
-    LOG_ASSERT(logFile != NULL, "Failed to open log file");
-    set_log_file(logFile);
-
-    listen_and_serve(port, 2, cleanup);
+    listen_and_serve(port, 8, cleanup);
 }

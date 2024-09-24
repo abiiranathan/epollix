@@ -22,12 +22,11 @@ FILE* log_file = NULL;
 // Default global log flags
 LogFlag log_flags = LOG_DEFAULT;
 
-_Atomic int spinlock_initialized = false;
-pthread_spinlock_t log_spinlock;
-
-// Buffer for log messages
+// Thread-local buffer for each thread
 #define LOG_BUFFER_SIZE 4096
-char log_buffer[LOG_BUFFER_SIZE] = {0};
+__thread char log_buffer[LOG_BUFFER_SIZE] = {0};  // thread-local storage for logging
+
+pthread_mutex_t file_write_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Function to check if running in a terminal
 static inline int running_in_terminal() {
@@ -45,13 +44,6 @@ void epollix_logger(context_t* ctx, Handler next) {
         log_file = stdout;
     }
 
-    if (!spinlock_initialized) {
-        pthread_spin_init(&log_spinlock, PTHREAD_PROCESS_PRIVATE);
-        spinlock_initialized = true;
-    }
-
-    pthread_spin_lock(&log_spinlock);
-
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -59,7 +51,6 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     clock_gettime(CLOCK_MONOTONIC, &end);
 
-    // --- Efficient logging ---
     size_t buffer_offset = 0;
     memset(log_buffer, 0, sizeof(log_buffer));
 
@@ -127,13 +118,11 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Latency
     if (log_flags & LOG_LATENCY) {
-        // Calculate the elapsed time in microseconds
         long seconds = end.tv_sec - start.tv_sec;
         long nanoseconds = end.tv_nsec - start.tv_nsec;
         long microseconds = seconds * 1000000 + nanoseconds / 1000;
         long milliseconds = microseconds / 1000;
 
-        // Print time in microseconds if less than 1 second, otherwise in milliseconds
         if (seconds == 0 && milliseconds == 0) {
             buffer_offset +=
                 snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldµs ", microseconds);
@@ -163,15 +152,17 @@ void epollix_logger(context_t* ctx, Handler next) {
         }
     }
 
-    // Add newline and write to log file
+    // Add newline
     if (buffer_offset < sizeof(log_buffer) - 1) {
         log_buffer[buffer_offset++] = '\n';
         log_buffer[buffer_offset] = '\0';
-        fwrite(log_buffer, 1, buffer_offset, log_file);
-        fflush(log_file);
     }
 
-    pthread_spin_unlock(&log_spinlock);
+    // Write the accumulated log to the file safely
+    pthread_mutex_lock(&file_write_mutex);
+    fwrite(log_buffer, 1, buffer_offset, log_file);
+    fflush(log_file);
+    pthread_mutex_unlock(&file_write_mutex);
 }
 
 // Get the log flags

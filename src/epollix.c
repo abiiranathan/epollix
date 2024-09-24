@@ -491,7 +491,7 @@ const Route* get_current_route(context_t* ctx) {
 }
 
 // Set route middleware context or userdata.
-void set_mw_context(Route* route, void* userdata) {
+void set_middleware_context(Route* route, void* userdata) {
     route->mw_data = userdata;
 }
 

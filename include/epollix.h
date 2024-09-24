@@ -62,7 +62,7 @@ void use_route_middleware(Route* route, int count, ...);
 void use_group_middleware(RouteGroup* group, int count, ...);
 
 // Set route middleware context or userdata.
-void set_mw_context(Route* route, void* userdata);
+void set_middleware_context(Route* route, void* userdata);
 
 // Returns the route middleware context or userdata or NULL if not set
 // for the current route.
