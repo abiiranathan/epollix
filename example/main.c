@@ -66,7 +66,11 @@ void handle_create_user(context_t* ctx) {
 
     for (size_t i = 0; i < form.num_files; i++) {
         bool saved = multipart_save_file(form.files[i], body, form.files[i]->filename);
-        assert(saved);
+        if (!saved) {
+            printf("Failed to save file %s\n", form.files[i]->filename);
+            continue;
+        }
+
         printf("Saved file %s\n", form.files[i]->filename);
     }
 
@@ -292,5 +296,5 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    listen_and_serve(port, 8, cleanup);
+    listen_and_serve(port, 4, cleanup);
 }

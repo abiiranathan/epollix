@@ -6,7 +6,20 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-option(BUILD_TESTS "Build the tests" ON)
+
+option(BUILD_TESTS "Build the tests" OFF)
+
+# This allows the user to enable or disable the crypto libraries and middleware
+# and tests that depend on it.
+option(CRYPTO_ENABLED "Build with ssl, crypto, and sodium, cjson" ON)
+
+set(OPTIONAL_LIBS "")
+if(CRYPTO_ENABLED)
+    find_package(OpenSSL REQUIRED)
+    find_package(cJSON REQUIRED)
+    list(APPEND OPTIONAL_LIBS "-lcrypto -lssl -lsodium -lcjson -lz")
+
+endif()
 
 # Find the solidc library
 find_package(solidc REQUIRED)
@@ -18,18 +31,68 @@ enable_testing()
 # Add libbcrypt
 add_subdirectory(deps/libbcrypt)
 
-file(GLOB_RECURSE SOURCES "src/*.c")
-file(GLOB_RECURSE HEADERS "include/*.h")
+# file(GLOB_RECURSE SOURCES "src/*.c")
+# file(GLOB_RECURSE HEADERS "include/*.h")
+# Explicitly list the source files
+
+set(SOURCES
+    src/epollix.c
+    src/method.c
+    src/mime.c
+    src/params.c
+    src/multipart.c
+    src/status.c
+)
+
+# Add the middleware sources
+if(CRYPTO_ENABLED)
+    list(APPEND SOURCES
+        # Libraries
+        src/gzip.c
+        src/jwt.c
+        src/crypto.c
+
+        # Middleware implementations
+        src/mw/logger.c
+        src/mw/tokenauth.c
+        src/mw/basicauth.c
+    )
+endif()
+
+# Headers
+set(HEADERS
+    include/automem.h
+    include/constants.h
+    include/defer.h
+    include/epollix.h
+    include/logging.h
+    include/method.h
+    include/mime.h
+    include/multipart.h
+    include/params.h
+    include/status.h
+)
+
+# Add the middleware headers
+if(CRYPTO_ENABLED)
+    list(APPEND HEADERS
+        include/mw/basicauth.h
+        include/mw/logger.h
+        include/mw/tokenauth.h
+    )
+endif()
 
 # Build the epollix static library
 # Can pass -DBUILD_SHARED_LIB to build a shared library
 add_library(epollix ${SOURCES})
+target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
 
-# Link the math library, pthreads, and the solidc library
-target_link_libraries(epollix PUBLIC m z pthread solidc::solidc cjson atomic)
+# Link the middleware libraries
+if(CRYPTO_ENABLED)
+    target_link_libraries(epollix PUBLIC OpenSSL::SSL OpenSSL::Crypto sodium cjson)
+endif()
+
 target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
-target_link_libraries(epollix PUBLIC ssl crypto sodium)
-target_link_libraries(epollix PUBLIC bcrypt)
 
 # If using clang, add support for -fblocks
 # sudo pacman -S libdispatch # provides libBlocksRuntime
@@ -69,12 +132,14 @@ install(TARGETS epollix
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-# Add the tests
-if(BUILD_TESTS)
+# Add the tests and build middleware
+if(BUILD_TESTS AND CRYPTO_ENABLED)
     add_subdirectory(tests)
 endif()
 
-add_subdirectory(example)
+if (CRYPTO_ENABLED)
+    add_subdirectory(example)
+endif()
 
 # Install export targets
 install(EXPORT epollix_export

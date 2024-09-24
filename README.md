@@ -13,7 +13,7 @@ It's API is going to change. That said, give it a try and report bugs!
 - [x] Form processing(application/x-www-form-urlencoded + multipart/form-data that supports multiple file uploads).
 - [x] Support for binary files in multipart/form-data
 - [x] Support for range requests( making it easy to stream videos and audio files)
-- [x] Very fast and efficient, uses epoll for event handling. Consumes ~= 5 MB of memory for > 1,000,000 concurrent connections and < 15% CPU usage.
+- [x] Very fast (30K - 40K req/sec on 2 threads) and efficient, uses epoll for event handling. Consumes ~= 5 MB of memory for > 1,000,000 concurrent connections and < 15% CPU usage.
 - [x] Robust Middleware support at route, group, and application level.
 - [x] CMAKE integration
 - [x] Use of `solidc` library for common data structures and utilities.
@@ -47,18 +47,20 @@ See below for instructions on how to install the solidc dependency.
 ```bash
 git clone https://github.com/abiiranathan/epollix.git
 cd epollix
-mkdir -p build
-cd build
-cmake ..
 make
-sudo cmake --install .
 ```
 
 ### Dependencies
 - **solidc**: A personal C library for common data structures and utilities that are cross-platform and easy to use. [Find solidc on Github](https://github.com/abiiranathan/solidc)
 
 ### Optional dependencies
-- **openssl**: For HTTPS support and cryptography functions. If you want to use HTTPS, you need to install the openssl library. You can install it using the following command:
+> You can disable these dependencies by setting the corresponding CMake options to `OFF`.
+```bash
+-DCRYPTO_ENABLED=OFF
+```
+
+- **openssl**: For future HTTPS support and cryptography functions. 
+  If you want to use HTTPS, you need to install the openssl library. You can install it using the following command:
 ```bash
 sudo apt-get install libssl-dev
 
@@ -90,8 +92,6 @@ sudo apt-get install libcjson-dev
 sudo pacman -S cjson
 ```
 
-> In the due course of time, I will try to make these dependencies optional and provide a simple way to install them using the CMake build system or a script.
-
 ## Run the example
 After building the library, you can run the example server by running the following commands:
 
@@ -99,11 +99,10 @@ After building the library, you can run the example server by running the follow
 cd example
 
 # We go into the example directory for the server to locate the static files.
+# if the port number is not passed, the server will listen on port 3000.
 ../build/example/example 8000
 
 ```
-
-We need to pass the port number as an argument to the server. The server will start listening on port 8000.
 
 ## Public API Reference
 

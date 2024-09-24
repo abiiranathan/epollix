@@ -47,10 +47,16 @@ void test_gzip_file_compression_and_decompression() {
 
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
+    if (file_size == -1) {
+        fclose(file);
+        LOG_ERROR("Failed to get file size");
+    }
+
     fseek(file, 0, SEEK_SET);
 
     autofree char* buffer = malloc(file_size);
-    fread(buffer, 1, file_size, file);
+    size_t n = fread(buffer, 1, file_size, file);
+    LOG_ASSERT(n == (size_t)file_size, "Failed to read decompressed file");
     fclose(file);
 
     LOG_ASSERT(strcmp(data, buffer) == 0, "Decompressed data does not match original data");
@@ -90,5 +96,3 @@ int main() {
     test_gzip_bytes_compression_and_decompression();
     return 0;
 }
-
-

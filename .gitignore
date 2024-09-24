@@ -68,3 +68,8 @@ playground
 *.sqlite
 *.db
 *.log
+perf.data*
+*.swp
+*.pdf
+*.docx
+*.doc

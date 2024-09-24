@@ -6,5 +6,7 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: epollix
 Description: An epoll web server library written in C
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -lepollix -lsolidc -lssl -lcrypto -lsodium -lz -lbcrypt
+
+Requires: solidc
+Libs: -L${libdir} -lepollix -lsolidc @OPTIONAL_LIBS@
 Cflags: -I${includedir}
