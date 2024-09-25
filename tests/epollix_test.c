@@ -18,6 +18,14 @@ void test_parse_request_headers(void) {
     req->method = M_GET;
     LOG_ASSERT(req->query_params != NULL, "Failed to create map for query_params");
 
+    req->headers = (header_t**)malloc(sizeof(header_t*) * MAX_REQ_HEADERS);
+    LOG_ASSERT(req->headers != NULL, "Failed to allocate memory for headers");
+
+    for (int i = 0; i < MAX_REQ_HEADERS; i++) {
+        req->headers[i] = (header_t*)malloc(sizeof(header_t));
+        LOG_ASSERT(req->headers[i] != NULL, "Failed to allocate memory for header_t");
+    }
+
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
     http_error_t result = parse_request_headers(req, header_text, length);

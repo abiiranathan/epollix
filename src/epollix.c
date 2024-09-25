@@ -359,82 +359,54 @@ header_t* header_fromstring(const char* str) {
 }
 
 http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length) {
-    HeaderState state = STATE_HEADER_NAME;
     const char* ptr = header_text;
-    size_t start_pos = 0, endpos = length;
+    const char* end = ptr + length;
 
-    // Headers are already allocated and initialized inside init_read_tasks.
-    req->header_count = 0;
-    size_t header_name_idx = 0;
-    size_t header_value_idx = 0;
+    char* name_ptr = req->headers[0]->name;
+    char* value_ptr = req->headers[0]->value;
 
-    char header_name[MAX_HEADER_NAME] = {0};
-    char header_value[MAX_HEADER_VALUE] = {0};
-
-    for (size_t i = start_pos; i <= endpos; i++) {
+    while (ptr < end) {
         if (req->header_count >= MAX_REQ_HEADERS) {
-            LOG_ERROR("header_idx is too large. Max headers is %d", MAX_REQ_HEADERS);
             return http_max_headers_exceeded;
         }
 
-        switch (state) {
-            case STATE_HEADER_NAME:
-                if (header_name_idx >= MAX_HEADER_NAME) {
-                    LOG_ERROR("header name: \"%.*s\" is too long. Max length is %d", (int)header_name_idx, header_name,
-                              MAX_HEADER_NAME);
-                    return http_max_header_name_exceeded;
-                }
+        // Parse header name
+        const char* colon = memchr(ptr, ':', end - ptr);
+        if (!colon)
+            break;
 
-                if (ptr[i] == ':') {
-                    header_name[header_name_idx] = '\0';
-                    header_name_idx = 0;
-
-                    while (ptr[++i] == ' ' && i < endpos)
-                        ;
-
-                    i--;  // Move back to the first character of the value
-
-                    state = STATE_HEADER_VALUE;
-                } else {
-                    header_name[header_name_idx++] = ptr[i];
-                }
-                break;
-
-            case STATE_HEADER_VALUE:
-                // Check for CRLF
-                if (header_value_idx >= MAX_HEADER_VALUE) {
-                    LOG_ERROR("header: %s, value \"%.*s\" is too long. Max length is %d", header_name,
-                              (int)header_value_idx, header_value, MAX_HEADER_VALUE);
-                    return http_max_header_value_exceeded;
-                }
-
-                if (ptr[i] == '\r' && i + 1 < endpos && ptr[i + 1] == '\n') {
-                    header_value[header_value_idx] = '\0';
-                    header_value_idx = 0;
-
-                    header_t* h = header_new(header_name, header_value);
-                    if (h == NULL) {
-                        LOG_ERROR("header_new() failed");
-                        return http_memory_alloc_failed;
-                    }
-
-                    // add header to headers
-                    req->headers[req->header_count++] = h;
-
-                    // Move to the next header
-                    state = STATE_HEADER_END;
-                } else {
-                    header_value[header_value_idx++] = ptr[i];
-                }
-                break;
-
-            case STATE_HEADER_END:
-                if (ptr[i] == '\n') {
-                    state = STATE_HEADER_NAME;
-                }
-                break;
+        size_t name_len = colon - ptr;
+        if (name_len >= MAX_HEADER_NAME) {
+            return http_max_header_name_exceeded;
         }
+        memcpy(name_ptr, ptr, name_len);
+        name_ptr[name_len] = '\0';
+
+        // Move to header value
+        ptr = colon + 1;
+        while (ptr < end && *ptr == ' ')
+            ptr++;
+
+        // Parse header value
+        const char* eol = memchr(ptr, '\r', end - ptr);
+        if (!eol || eol + 1 >= end || eol[1] != '\n')
+            break;
+
+        size_t value_len = eol - ptr;
+        if (value_len >= MAX_HEADER_VALUE) {
+            return http_max_header_value_exceeded;
+        }
+
+        memcpy(value_ptr, ptr, value_len);
+        value_ptr[value_len] = '\0';
+
+        req->header_count++;
+        name_ptr = req->headers[req->header_count]->name;
+        value_ptr = req->headers[req->header_count]->value;
+
+        ptr = eol + 2;  // Skip CRLF
     }
+
     return http_ok;
 }
 
@@ -690,32 +662,166 @@ static void handle_write(request_t* req) {
     free_context(&ctx);
 }
 
-/* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
-completely, as we are running in edge-triggered mode and won't get a notification again for the same data. */
-static void handle_read(request_t* req, int client_fd, int epoll_fd) {
-    // Read headers
-    char headers[4096] = {0};
-    char method[16] = {0};
-    char uri[1024] = {0};  // undecoded path, query.
-    char http_version[12];
+// Parse the request line (first line of the HTTP request)
+bool parse_request_line(char* headers, char** method, char** uri, char** http_version, char** header_start) {
+    *method = headers;
+    *uri = strchr(headers, ' ');
+    if (!*uri)
+        return false;
+    **uri = '\0';
+    (*uri)++;
 
-    // Read the headers to get the content length
-    ssize_t inital_size = recv(client_fd, headers, sizeof(headers), MSG_WAITALL);
+    *http_version = strchr(*uri, ' ');
+    if (!*http_version)
+        return false;
+    **http_version = '\0';
+    (*http_version)++;
+
+    *header_start = strstr(*http_version, "\r\n");
+    if (!*header_start)
+        return false;
+    **header_start = '\0';
+    *header_start += 2;
+
+    return true;
+}
+
+// Parse the Content-Length header
+size_t parse_content_length(const char* header_start, const char* end_of_headers) {
+    const char* content_length_header = strcasestr(header_start, "content-length:");
+    if (!content_length_header || content_length_header >= end_of_headers) {
+        return 0;
+    }
+    return strtoul(content_length_header + 15, NULL, 10);
+}
+
+// Parse the URI, extracting path and query parameters
+bool parse_uri(const char* decoded_uri, char** path, char** query, map** query_params) {
+    *path = strdup(decoded_uri);
+    if (!*path)
+        return false;
+
+    *query = strchr(*path, '?');
+    if (*query) {
+        **query = '\0';
+        (*query)++;
+
+        *query_params = map_create(0, key_compare_char_ptr);
+        if (!*query_params) {
+            free(*path);
+            return false;
+        }
+
+        if (!parse_url_query_params(*query, *query_params)) {
+            free(*path);
+            map_destroy(*query_params, true);
+            return false;
+        }
+    } else {
+        *query_params = NULL;
+    }
+
+    return true;
+}
+
+// Handle the case when a route is not found
+bool handle_not_found(request_t* req, const char* method, const char* http_version, const char* path) {
+    if (notFoundRoute) {
+        req->route = notFoundRoute;
+        LOG_ERROR("Route not found: %s\n", path);
+        LOG_ERROR("Using not found route\n");
+        return true;
+    } else {
+        fprintf(stderr, "%s - %s %s 404 Not Found\n", method, http_version, path);
+        http_error(req->client_fd, StatusNotFound, "Not Found\n");
+        return false;
+    }
+}
+
+// Allocate memory for the body and read it from the socket
+bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
+                            const char* initial_body) {
+    *body = (uint8_t*)malloc(body_size + 1);
+    if (!*body)
+        return false;
+
+    // copy the initial body read if any
+    if (initial_read > 0) {
+        memcpy(*body, initial_body, initial_read);
+    }
+
+    size_t total_read = initial_read;
+
+    while (total_read < body_size) {
+        ssize_t count = recv(client_fd, *body + total_read, body_size - total_read, 0);
+        if (count == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            } else {
+                perror("recv");
+                free(*body);
+                *body = NULL;
+                return false;
+            }
+        } else if (count == 0) {
+            break;  // EOF
+        }
+
+        total_read += count;
+    }
+
+    (*body)[total_read] = '\0';
+    return true;
+}
+
+// Initialize the request structure with parsed data
+void initialize_request(request_t* req, int client_fd, int epoll_fd, uint8_t* body, size_t content_length,
+                        map* query_params, HttpMethod httpMethod, const char* http_version, const char* path) {
+    req->client_fd = client_fd;
+    req->epoll_fd = epoll_fd;
+    req->body = body;
+    req->content_length = content_length;
+    req->query_params = query_params;
+    req->header_count = 0;
+    req->method = httpMethod;
+
+    strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
+    req->http_version[sizeof(req->http_version) - 1] = '\0';
+
+    req->path = strdup(path);
+    LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
+}
+
+// Clean up resources allocated for the request
+void cleanup_request(request_t* req) {
+    if (req->body) {
+        free(req->body);
+    }
+    if (req->query_params) {
+        map_destroy(req->query_params, true);
+    }
+    if (req->path) {
+        free(req->path);
+    }
+}
+
+static void handle_read(request_t* req, int client_fd, int epoll_fd) {
+    char headers[4096];
+    ssize_t inital_size = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (inital_size <= 0) {
         close_connection(client_fd, epoll_fd);
         return;
     }
     headers[inital_size] = '\0';
 
-    // extract http method, path(uri) and http version.
-    int count = sscanf(headers, "%15s %1023s %11s", method, uri, http_version);
-    if (count != 3) {
+    char *method, *uri, *http_version, *header_start, *end_of_headers;
+    if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
         close_connection(client_fd, epoll_fd);
         return;
     }
 
-    // Convert method string to an enum.
     HttpMethod httpMethod = method_fromstring(method);
     if (httpMethod == M_INVALID) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
@@ -723,234 +829,55 @@ static void handle_read(request_t* req, int client_fd, int epoll_fd) {
         return;
     }
 
-    // Get the content-length from headers.
-    char content_length[128] = {0};
-    char* clptr = strcasestr(headers, "content-length: ");
-    if (clptr) {
-        size_t header_len = 16;
-        char* ptr = clptr + header_len;
-        while (*ptr != '\r' && *(ptr + 1) != '\n') {
-            ptr++;
-        }
-
-        size_t length = ptr - clptr - header_len;
-        strncpy(content_length, clptr + header_len, sizeof(content_length) - 1);
-
-        LOG_ASSERT((length + 1 <= sizeof(content_length)), "content_length is too long");
-
-        content_length[length] = '\0';
+    // Find the end of the headers
+    // Can't use strstr because the headers may contain null bytes.
+    end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
+    if (!end_of_headers) {
+        http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
+        close_connection(client_fd, epoll_fd);
+        return;
     }
 
-    size_t total_read = 0;
-    size_t body_size = atoi(content_length);
+    // +4 to include the \r\n\r\n at the end of the headers
+    size_t header_capacity = end_of_headers - headers + 4;
 
-    // Bas64 decode the path and query parameters
-    char decoded_uri[1024] = {0};
+    size_t body_size = parse_content_length(header_start, end_of_headers);
+
+    char decoded_uri[1024];
     decode_uri(uri, decoded_uri, sizeof(decoded_uri));
 
-    // Split path and query
-    char* query = NULL;
+    char *path, *query;
     map* query_params = NULL;
-    char path[1024] = {0};
-
-    // If there are query parameters, extract them
-    if (strstr(decoded_uri, "?") && strstr(decoded_uri, "=")) {
-        char* query_start = strstr(decoded_uri, "?");
-        size_t query_len = 0;
-        char* ptr = query_start + 1;  // skip ?
-        while (*ptr != '\0' && *ptr != '#' && *ptr != ' ') {
-            query_len++;
-            ptr++;
-        }
-
-        size_t path_len = query_start - decoded_uri;
-        query = (char*)malloc(query_len + 1);
-        if (query == NULL) {
-            perror("malloc");
-            http_error(client_fd, StatusInternalServerError, "error parsing query params");
-            close_connection(client_fd, epoll_fd);
-            return;
-        }
-
-        strncpy(query, (char*)decoded_uri + path_len + 1, query_len);
-        query[query_len] = '\0';
-
-        if (path_len + 1 >= sizeof(path)) {
-            free(query);
-            http_error(client_fd, StatusInternalServerError, "URL is too long!");
-            close_connection(client_fd, epoll_fd);
-            return;
-        }
-
-        strncpy(path, decoded_uri, path_len + 1);
-        path[path_len] = '\0';
-
-        // Parse the query params
-        query_params = map_create(0, key_compare_char_ptr);
-        if (!query_params) {
-            free(query);
-            LOG_ERROR("unable to create map for query params");
-            http_error(client_fd, StatusInternalServerError, "error parsing query params");
-            close_connection(client_fd, epoll_fd);
-            return;
-        }
-
-        bool ok = parse_url_query_params(query, query_params);
-        if (!ok) {
-            LOG_ERROR("parse_url_query_params() failed");
-            free(query);
-            map_destroy(query_params, true);
-            http_error(client_fd, StatusInternalServerError, "error parsing query params");
-            close_connection(client_fd, epoll_fd);
-            return;
-        }
-    } else {
-        // Everything is a path
-        strncpy(path, decoded_uri, sizeof(path));
+    if (!parse_uri(decoded_uri, &path, &query, &query_params)) {
+        http_error(client_fd, StatusInternalServerError, "error parsing query params");
+        close_connection(client_fd, epoll_fd);
+        return;
     }
 
-    // Matches the route, populating path params that are part of the route if they exist
     req->route = default_route_matcher(httpMethod, path);
-    if (req->route == NULL) {
-        printf("Route not found: %s\n", path);
-        if (notFoundRoute) {
-            req->route = notFoundRoute;
-            LOG_ERROR("Route not found: %s\n", path);
-            LOG_ERROR("Using not found route\n");
-        } else {
-            fprintf(stderr, "%s - %s %s 404 Not Found\n", method, http_version, path);
-            http_error(client_fd, StatusNotFound, "Not Found\n");
-            close_connection(client_fd, epoll_fd);
-            return;
-        }
-    }
-
-    // Find end of status line
-    char* header_start = (char*)memmem(headers, inital_size, "\r\n", 2);
-    if (!header_start) {
-        LOG_ERROR("Could not find the start of headers");
-        http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
+    if (req->route == NULL && !handle_not_found(req, method, http_version, path)) {
         close_connection(client_fd, epoll_fd);
         return;
     }
 
-    // Find the end of headers
-    char* end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
-    if (!end_of_headers) {
-        LOG_ERROR("Could not find the end of headers");
-        http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
-        close_connection(client_fd, epoll_fd);
-        return;
-    }
-
-    // If the method is safe, then set the idle timeout to 0. We expect to read headers in one go.
-    int idle_timeout = is_safe_method(httpMethod) ? 0 : IDLE_TIMEOUT;
-
-    // By default the body is NULL.
     uint8_t* body = NULL;
-
-    // Calculate the size of the headers and status line
-    size_t header_capacity = end_of_headers - headers + 4;  // 4 is the size of "\r\n\r\n"
-
     // Initial body read(if any)
-    size_t body_read = inital_size - header_capacity;
-
-    if (!is_safe_method(httpMethod) && body_size != 0) {
-        body = (uint8_t*)malloc(body_size + 1);
-        if (!body) {
-            LOG_ERROR("could not allocate request body");
-            http_error(client_fd, StatusBadRequest, ERR_MEMORY_ALLOC_FAILED);
+    size_t total_read = inital_size - header_capacity;
+    if (!is_safe_method(httpMethod) && body_size > 0) {
+        if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
+            http_error(client_fd, StatusInternalServerError, "Failed to read request body");
             close_connection(client_fd, epoll_fd);
             return;
         }
-
-        // If part of body was read, copy it to body.
-        memcpy(body, headers + header_capacity, body_read);
-
-        // update total read
-        total_read += body_read;
     }
 
-    // Read the remaining body if at all
-    if (!is_safe_method(httpMethod) && body != NULL) {
-        // Initialize last_read_time
-        struct timespec last_read_time;
-        clock_gettime(CLOCK_MONOTONIC, &last_read_time);
+    initialize_request(req, client_fd, epoll_fd, body, body_size, query_params, httpMethod, http_version, path);
 
-        char buf[READ_BUFFER_SIZE] = {0};
-        ssize_t count;
-        while (total_read < body_size) {
-            memset(buf, 0, sizeof buf);
-            count = recv(client_fd, buf, sizeof buf, 0);
-            if (count == -1) {
-                if (errno == EAGAIN) {
-                    struct timespec current_time;
-                    clock_gettime(CLOCK_MONOTONIC, &current_time);
-
-                    // Check if idle timeout has been reached
-                    if (current_time.tv_sec - last_read_time.tv_sec >= idle_timeout) {
-                        http_error(client_fd, StatusInternalServerError, "Idle timeout\n");
-                        if (body) {
-                            free(body);
-                        }
-                        close_connection(client_fd, epoll_fd);
-                        return;
-                    }
-
-                    usleep(1000);
-                    continue;
-                } else {
-                    break;
-                }
-            } else if (count == 0) {
-                /* End of file. The remote has closed the connection. */
-                break;
-            }
-
-            // Reset idle interval
-            clock_gettime(CLOCK_MONOTONIC, &last_read_time);
-
-            // Copy the data to the body buffer
-            memcpy(body + total_read, buf, count);
-            total_read += count;
-        }
-
-        // Add a null terminator to the request data just in case
-        body[total_read] = '\0';
-    }
-
-    // Set new request object with the parsed data
-    // Headers are also pre-alocated from the memory pool.
-    req->client_fd = client_fd;
-    req->epoll_fd = epoll_fd;
-    req->body = body;
-    req->content_length = total_read;
-    req->query_params = query_params;
-    req->header_count = 0;
-    req->method = httpMethod;
-
-    strncpy(req->http_version, http_version, sizeof(req->http_version));
-
-    req->http_version[strlen(method)] = '\0';
-    req->path = (char*)malloc(strlen(path) + 1);
-    LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
-    strncpy(req->path, path, strlen(path) + 1);
-
-    http_error_t code = http_ok;
-
-    // Allocate and parse request headers
-    code = parse_request_headers(req, header_start + 2, header_capacity - 4);
+    http_error_t code = parse_request_headers(req, header_start, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
+        cleanup_request(req);
         close_connection(client_fd, epoll_fd);
-        if (body != NULL) {
-            free(body);
-        }
-
-        if (req->query_params) {
-            map_destroy(req->query_params, true);
-        }
-        return;
     }
 }
 
@@ -2261,6 +2188,14 @@ static void init_read_tasks(void) {
         if (!read_tasks[i].req->headers) {
             LOG_FATAL("Failed to allocate memory for request headers\n");
         }
+
+        // Pre-allocate all the headers.
+        for (size_t j = 0; j < MAX_REQ_HEADERS; j++) {
+            read_tasks[i].req->headers[j] = (header_t*)malloc(sizeof(header_t));
+            if (!read_tasks[i].req->headers[j]) {
+                LOG_FATAL("Failed to allocate memory for request header\n");
+            }
+        }
     }
 }
 
@@ -2277,16 +2212,13 @@ static read_task* get_read_task(void) {
     return NULL;
 }
 
+// Put the read task back in the pool without freeing the request object.
 static void put_read_task(read_task* task) {
     pthread_mutex_lock(&read_tasks_mutex);
 
-    // Free the allocated memory for the request headers
-    for (size_t i = 0; i < task->req->header_count; i++) {
-        free(task->req->headers[i]);
-    }
-
-    memset(task->req->headers, 0, sizeof(header_t*) * MAX_REQ_HEADERS);
+    // Reset header count.
     task->req->header_count = 0;
+
     task->client_fd = -1;
     task->epoll_fd = -1;
     task->index = -1;

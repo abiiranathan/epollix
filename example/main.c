@@ -86,6 +86,8 @@ void handle_create_user(context_t* ctx) {
     char* sub = (char*)username;
 
     JWTPayload payload = {0};
+
+    // segfaults if the string is null.
     strncpy(payload.sub, sub, sizeof(payload.sub) - 1);
     payload.sub[sizeof(payload.sub) - 1] = '\0';
 
