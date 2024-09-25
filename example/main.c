@@ -207,7 +207,7 @@ static void api_users(context_t* ctx) {
     }
 
     cJSON_AddItemToObject(root, "users", users_array);
-    char* data = cJSON_Print(root);
+    autofree char* data = cJSON_Print(root);
     send_json_string(ctx, data);
 
     cJSON_Delete(root);
@@ -259,8 +259,8 @@ int main(int argc, char** argv) {
     setenv(JWT_TOKEN_SECRET, "super_jwt_token_secret", 1);
 
     // Logging middleware
-    set_log_file(stdout);
-    use_global_middleware(1, epollix_logger);
+    // set_log_file(stdout);
+    // use_global_middleware(1, epollix_logger);
 
     // We need a way to associate the BasicAuthData to a route since C has no support for closures.
     // we can use the set_mw_context function to set the BasicAuthData to a specific route.

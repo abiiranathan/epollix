@@ -40,8 +40,8 @@ extern "C" {
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
 typedef struct header {
-    char* name;   // dynamically allocated header key
-    char* value;  // dynamically allocated header value
+    char name[MAX_HEADER_NAME];    // header name
+    char value[MAX_HEADER_VALUE];  // header value
 } header_t;
 
 typedef struct request {
@@ -168,6 +168,7 @@ void http_error(int client_fd, http_status status, const char* message) {
 void close_connection(int client_fd, int epoll_fd) {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
+    client_fd = -1;
 }
 
 void handle_sigint(int sig) {
@@ -297,13 +298,13 @@ const char* http_error_string(http_error_t code) {
 
 header_t* header_new(const char* name, const char* value) {
     header_t* header = malloc(sizeof(header_t));
-    if (header == NULL) {
-        LOG_ERROR("malloc header_t failed");
-        return NULL;
-    }
+    LOG_ASSERT(header, "malloc failed");
 
-    header->name = strdup(name);
-    header->value = strdup(value);
+    strncpy(header->name, name, MAX_HEADER_NAME - 1);
+    header->name[MAX_HEADER_NAME - 1] = '\0';
+
+    strncpy(header->value, value, MAX_HEADER_VALUE - 1);
+    header->value[MAX_HEADER_VALUE - 1] = '\0';
     return header;
 }
 
@@ -328,15 +329,15 @@ header_t* header_fromstring(const char* str) {
         LOG_ERROR("malloc header_t failed");
         return NULL;
     }
+
     // Copy header name
-    header->name = malloc(n + 1);
-    if (header->name == NULL) {
-        LOG_ERROR("malloc header name failed");
+    if (n >= MAX_HEADER_NAME) {
+        LOG_ERROR("header name is too long. Max length is %d", MAX_HEADER_NAME);
         free(header);
         return NULL;
     }
 
-    strncpy(header->name, str, n);
+    strncpy(header->name, str, MAX_HEADER_NAME - 1);
     header->name[n] = '\0';
 
     // skip the colon and any leading spaces.
@@ -346,18 +347,15 @@ header_t* header_fromstring(const char* str) {
     }
 
     // copy header value
-    header->value = strdup(str + n);
+    if (strlen(str + n) >= MAX_HEADER_VALUE) {
+        LOG_ERROR("header value is too long. Max length is %d", MAX_HEADER_VALUE);
+        free(header);
+        return NULL;
+    }
+
+    strncpy(header->value, str + n, MAX_HEADER_VALUE - 1);
+    header->value[strlen(str + n)] = '\0';
     return header;
-}
-
-void header_free(header_t* header) {
-    if (!header)
-        return;
-
-    free(header->name);
-    free(header->value);
-    free(header);
-    header = NULL;
 }
 
 http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length) {
@@ -365,16 +363,8 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
     const char* ptr = header_text;
     size_t start_pos = 0, endpos = length;
 
-    // allocate memory for headers
-    req->headers = (header_t**)malloc(MAX_REQ_HEADERS * sizeof(header_t*));
-    if (req->headers == NULL) {
-        LOG_ERROR("malloc headers failed");
-        return http_memory_alloc_failed;
-    }
-
-    memset(req->headers, 0, MAX_REQ_HEADERS * sizeof(header_t*));
+    // Headers are already allocated and initialized inside init_read_tasks.
     req->header_count = 0;
-
     size_t header_name_idx = 0;
     size_t header_value_idx = 0;
 
@@ -425,14 +415,9 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
                     header_t* h = header_new(header_name, header_value);
                     if (h == NULL) {
                         LOG_ERROR("header_new() failed");
-                        // free headers
-                        for (size_t j = 0; j < req->header_count; j++) {
-                            header_free(req->headers[j]);
-                        }
-                        free(req->headers);
-                        req->headers = NULL;
                         return http_memory_alloc_failed;
                     }
+
                     // add header to headers
                     req->headers[req->header_count++] = h;
 
@@ -484,9 +469,10 @@ bool set_header(context_t* ctx, const char* name, const char* value) {
     } else {
         // Replace header value
         header_t* h = ctx->headers[index];
-        free(h->value);
-        h->value = strdup(value);
-        // we don't need to free the header name because it is a constant string.
+
+        // Copy the new value to the header
+        strncpy(h->value, value, MAX_HEADER_VALUE - 1);
+        h->value[MAX_HEADER_VALUE - 1] = '\0';
     }
     return true;
 }
@@ -564,11 +550,8 @@ char* header_tostring(const header_t* h) {
     return buf;
 }
 
-static void free_request(request_t* req) {
-    if (!req) {
-        return;
-    }
-
+// Headers and request itself are allocated from the memory pool.
+static void reset_request(request_t* req) {
     // Close the connection after sending the response
     close_connection(req->client_fd, req->epoll_fd);
 
@@ -576,16 +559,6 @@ static void free_request(request_t* req) {
     if (req->path) {
         free(req->path);
         req->path = NULL;
-    }
-
-    // Free memory for the request headers
-    if (req->headers) {
-        for (size_t i = 0; i < req->header_count; i++) {
-            header_free(req->headers[i]);
-        }
-
-        free(req->headers);
-        req->headers = NULL;
     }
 
     // Free memory for the request body
@@ -598,11 +571,6 @@ static void free_request(request_t* req) {
     if (req->query_params) {
         map_destroy(req->query_params, true);
     }
-
-    // Free the request
-    free(req);
-
-    req = NULL;
 }
 
 // Free epollix context resources.
@@ -614,14 +582,15 @@ void free_context(context_t* ctx) {
     // Free the response headers
     if (ctx->headers) {
         for (size_t i = 0; i < ctx->header_count; i++) {
-            header_free(ctx->headers[i]);
+            free(ctx->headers[i]);
         }
+
         free(ctx->headers);
         ctx->headers = NULL;
     }
 
     // free the request
-    free_request(ctx->request);
+    reset_request(ctx->request);
 
     // Free the locals map
     if (ctx->locals) {
@@ -658,7 +627,7 @@ bool allocate_headers(context_t* ctx) {
     return true;
 }
 
-static void handle_write(request_t* req, Route* route) {
+static void handle_write(request_t* req) {
     // Initialize response
     context_t ctx = {0};
     ctx.request = req;
@@ -666,10 +635,12 @@ static void handle_write(request_t* req, Route* route) {
     ctx.headers_sent = false;
     ctx.chunked = false;
 
+    Route* route = req->route;
+
     // Initialize response headers
     if (!allocate_headers(&ctx)) {
         http_error(req->client_fd, StatusInternalServerError, "error allocating response headers");
-        free_request(req);
+        reset_request(req);
         return;
     }
 
@@ -678,7 +649,7 @@ static void handle_write(request_t* req, Route* route) {
     if (!ctx.locals) {
         LOG_ERROR("unable to create map for locals");
         http_error(req->client_fd, StatusInternalServerError, "error creating locals map");
-        free_request(req);
+        reset_request(req);
         return;
     }
 
@@ -691,7 +662,7 @@ static void handle_write(request_t* req, Route* route) {
     if (combined_middleware == NULL) {
         LOG_ERROR("malloc failed");
         http_error(req->client_fd, StatusInternalServerError, "error allocating middleware");
-        free_request(req);
+        reset_request(req);
         return;
     }
 
@@ -721,15 +692,12 @@ static void handle_write(request_t* req, Route* route) {
 
 /* We have data on the fd waiting to be read. Read and display it. We must read whatever data is available
 completely, as we are running in edge-triggered mode and won't get a notification again for the same data. */
-static void handle_read(int client_fd, int epoll_fd, read_result* result) {
+static void handle_read(request_t* req, int client_fd, int epoll_fd) {
     // Read headers
     char headers[4096] = {0};
     char method[16] = {0};
     char uri[1024] = {0};  // undecoded path, query.
     char http_version[12];
-
-    result->req = NULL;
-    result->route = NULL;
 
     // Read the headers to get the content length
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers), MSG_WAITALL);
@@ -796,7 +764,7 @@ static void handle_read(int client_fd, int epoll_fd, read_result* result) {
         }
 
         size_t path_len = query_start - decoded_uri;
-        query = malloc(query_len + 1);
+        query = (char*)malloc(query_len + 1);
         if (query == NULL) {
             perror("malloc");
             http_error(client_fd, StatusInternalServerError, "error parsing query params");
@@ -842,12 +810,11 @@ static void handle_read(int client_fd, int epoll_fd, read_result* result) {
     }
 
     // Matches the route, populating path params that are part of the route if they exist
-    Route* route = default_route_matcher(httpMethod, path);
-
-    if (route == NULL) {
+    req->route = default_route_matcher(httpMethod, path);
+    if (req->route == NULL) {
         printf("Route not found: %s\n", path);
         if (notFoundRoute) {
-            route = notFoundRoute;
+            req->route = notFoundRoute;
             LOG_ERROR("Route not found: %s\n", path);
             LOG_ERROR("Using not found route\n");
         } else {
@@ -889,7 +856,7 @@ static void handle_read(int client_fd, int epoll_fd, read_result* result) {
     size_t body_read = inital_size - header_capacity;
 
     if (!is_safe_method(httpMethod) && body_size != 0) {
-        body = malloc(body_size + 1);
+        body = (uint8_t*)malloc(body_size + 1);
         if (!body) {
             LOG_ERROR("could not allocate request body");
             http_error(client_fd, StatusBadRequest, ERR_MEMORY_ALLOC_FAILED);
@@ -952,24 +919,13 @@ static void handle_read(int client_fd, int epoll_fd, read_result* result) {
         body[total_read] = '\0';
     }
 
-    request_t* req = malloc(sizeof(request_t));
-    if (!req) {
-        perror("malloc");
-        http_error(client_fd, StatusInternalServerError, http_error_string(http_memory_alloc_failed));
-        close_connection(client_fd, epoll_fd);
-        if (body != NULL) {
-            free(body);
-        }
-        return;
-    }
-
-    // Initialize the request
+    // Set new request object with the parsed data
+    // Headers are also pre-alocated from the memory pool.
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
     req->body = body;
     req->content_length = total_read;
     req->query_params = query_params;
-    req->route = route;
     req->header_count = 0;
     req->method = httpMethod;
 
@@ -994,13 +950,8 @@ static void handle_read(int client_fd, int epoll_fd, read_result* result) {
         if (req->query_params) {
             map_destroy(req->query_params, true);
         }
-
-        free(req);
         return;
     }
-
-    result->req = req;
-    result->route = route;
 }
 
 // Like send(2) but sends the request in chunks if larger than 4K.
@@ -1520,9 +1471,10 @@ static int setup_server_socket(const char* port) {
 
 // ================== Main program ===========================
 typedef struct read_task {
-    int epoll_fd;   // Epoll file descriptor
-    int client_fd;  // Client file descriptor
-    int index;      // Index of the task in the tasks array. -1 means task if free.
+    int epoll_fd;    // Epoll file descriptor
+    int client_fd;   // Client file descriptor
+    int index;       // Index of the task in the tasks array. -1 means task if free.
+    request_t* req;  // Request object
 } read_task;
 
 // Default route matcher.
@@ -1605,7 +1557,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->middleware = NULL;
 
     route->pattern = strdup(pattern);
-    route->params = malloc(sizeof(PathParams));
+    route->params = (PathParams*)malloc(sizeof(PathParams));
     LOG_ASSERT(route->pattern, "strdup failed");
     LOG_ASSERT(route->params, "malloc failed");
 
@@ -1810,7 +1762,7 @@ Route* route_static(const char* pattern, const char* dir) {
 
 // Create a new RouteGroup.
 RouteGroup* route_group(const char* pattern) {
-    RouteGroup* group = malloc(sizeof(RouteGroup));
+    RouteGroup* group = (RouteGroup*)malloc(sizeof(RouteGroup));
     if (!group) {
         LOG_FATAL("Failed to allocate memory for RouteGroup\n");
     }
@@ -1868,7 +1820,7 @@ void use_group_middleware(RouteGroup* group, int count, ...) {
 
 static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const char* pattern, Handler handler,
                                  RouteType type) {
-    char* route_pattern = malloc(strlen(group->prefix) + strlen(pattern) + 1);
+    char* route_pattern = (char*)malloc(strlen(group->prefix) + strlen(pattern) + 1);
     if (!route_pattern) {
         LOG_FATAL("Failed to allocate memory for route pattern\n");
     }
@@ -2023,7 +1975,7 @@ static inline void append_or_error(context_t* ctx, Arena* arena, cstr* response,
 static void serve_directory_listing(context_t* ctx, const char* dirname, const char* base_prefix) {
     DIR* dir;
     struct dirent* ent;
-    Arena* arena = arena_create(1 * 1024 * 1024, 8);
+    Arena* arena = arena_create(0);
     if (!arena) {
         LOG_ERROR("Failed to create arena\n");
         send_error_page(ctx, StatusInternalServerError);
@@ -2296,6 +2248,19 @@ pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void init_read_tasks(void) {
     for (size_t i = 0; i < MAX_READ_TASKS; i++) {
         memset(&read_tasks[i], -1, sizeof(read_task));
+        // init request object
+        read_tasks[i].req = (request_t*)malloc(sizeof(request_t));
+        if (!read_tasks[i].req) {
+            LOG_FATAL("Failed to allocate memory for request object\n");
+        }
+
+        memset(read_tasks[i].req, 0, sizeof(request_t));
+
+        // Allocate memory for the request headers
+        read_tasks[i].req->headers = (header_t**)malloc(sizeof(header_t*) * MAX_REQ_HEADERS);
+        if (!read_tasks[i].req->headers) {
+            LOG_FATAL("Failed to allocate memory for request headers\n");
+        }
     }
 }
 
@@ -2314,17 +2279,28 @@ static read_task* get_read_task(void) {
 
 static void put_read_task(read_task* task) {
     pthread_mutex_lock(&read_tasks_mutex);
-    memset(task, -1, sizeof(read_task));
+
+    // Free the allocated memory for the request headers
+    for (size_t i = 0; i < task->req->header_count; i++) {
+        free(task->req->headers[i]);
+    }
+
+    memset(task->req->headers, 0, sizeof(header_t*) * MAX_REQ_HEADERS);
+    task->req->header_count = 0;
+    task->client_fd = -1;
+    task->epoll_fd = -1;
+    task->index = -1;
     pthread_mutex_unlock(&read_tasks_mutex);
 }
 
 static void submit_read_task(void* arg) {
     read_task* task = (read_task*)arg;
-    read_result result = {0};
-    handle_read(task->client_fd, task->epoll_fd, &result);
-    if (result.req && result.route) {
-        handle_write(result.req, result.route);
+    handle_read(task->req, task->client_fd, task->epoll_fd);
+    if (task->req->route != NULL && task->client_fd != -1) {
+        handle_write(task->req);
     }
+
+    // Put the task back in the pool
     put_read_task(task);
 }
 
@@ -2390,6 +2366,15 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
     printf("[PID: %d]\n", get_gid());
     printf("[Server listening on port http://0.0.0.0:%s with %d threads]\n", port, nworkers);
 
+    // log max allowed file descriptors for the process
+
+    long maxfd = sysconf(_SC_OPEN_MAX);
+    if (maxfd == -1) {
+        perror("sysconf");
+    } else {
+        printf("[Max file descriptors allowed: %ld]\n", maxfd);
+    }
+
     // Create a threadpool with n threads
     pool = threadpool_create(nworkers);
     LOG_ASSERT(pool, "Failed to create threadpool\n");
@@ -2418,6 +2403,10 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
                         if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
                             /* We have processed all incoming connections. */
                             break;
+                        } else if (errno == EMFILE) {
+                            LOG_ERROR("Too many open file descriptors\n");
+                            break;
+                            sleep(1);
                         } else {
                             perror("accept");
                             break;

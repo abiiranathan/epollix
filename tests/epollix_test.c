@@ -30,7 +30,7 @@ void test_parse_request_headers(void) {
     LOG_ASSERT(strcmp(req->headers[2]->name, "Accept") == 0, "Expected Accept header");
     LOG_ASSERT(strcmp(req->headers[2]->value, "*/*") == 0, "Expected */*");
 
-    free_request(req);
+    reset_request(req);
 
     LOG_INFO("test_parse_request_headers passed");
 }
@@ -87,7 +87,7 @@ void test_header_fromstring(void) {
     LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
     LOG_ASSERT(strcmp(header->value, "text/html") == 0, "Expected text/html, got %s", header->value);
 
-    header_free(header);
+    free(header);
     LOG_INFO("test_header_fromstring passed");
 }
 

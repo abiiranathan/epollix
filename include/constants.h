@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #ifndef MAXEVENTS
-#define MAXEVENTS 2048
+#define MAXEVENTS 4096
 #endif
 
 #ifndef READ_BUFFER_SIZE
