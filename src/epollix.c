@@ -105,10 +105,12 @@ typedef struct RouteGroup {
     uint8_t middleware_count;  // Number of middleware functions
 } RouteGroup;
 
-typedef struct read_result {
+typedef struct read_task {
+    int epoll_fd;    // Epoll file descriptor
+    int client_fd;   // Client file descriptor
+    int index;       // Index of the task in the tasks array. -1 means task if free.
     request_t* req;  // Request object
-    Route* route;    // Matched route
-} read_result;
+} read_task;
 
 // =================== STATIC GLOBALS ================================================
 static Route routeTable[MAX_ROUTES] = {0};                   // static Route table
@@ -130,6 +132,11 @@ volatile sig_atomic_t cleanup_done = false;                 // atomic flag to in
 ThreadPool pool = NULL;                                     // Thread pool for handling requests
 pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;  // Mutex for cleanup
 pthread_t shutdown_thread = 0;                              // Thread for cleanup
+
+// Pool of read tasks to avoid malloc/free overhead
+#define MAX_READ_TASKS (MAXEVENTS * 2)
+static read_task read_tasks[MAX_READ_TASKS] = {0};
+pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // =================== STATIC DECLARATIONS ================================================
 
@@ -524,7 +531,6 @@ char* header_tostring(const header_t* h) {
 
 // Headers and request itself are allocated from the memory pool.
 static void reset_request(request_t* req) {
-    // Close the connection after sending the response
     close_connection(req->client_fd, req->epoll_fd);
 
     // Free memory for the request path
@@ -776,10 +782,9 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
 }
 
 // Initialize the request structure with parsed data
-void initialize_request(request_t* req, int client_fd, int epoll_fd, uint8_t* body, size_t content_length,
-                        map* query_params, HttpMethod httpMethod, const char* http_version, const char* path) {
-    req->client_fd = client_fd;
-    req->epoll_fd = epoll_fd;
+void initialize_request(request_t* req, uint8_t* body, size_t content_length, map* query_params, HttpMethod httpMethod,
+                        const char* http_version, const char* path) {
+
     req->body = body;
     req->content_length = content_length;
     req->query_params = query_params;
@@ -806,7 +811,10 @@ void cleanup_request(request_t* req) {
     }
 }
 
-static void handle_read(request_t* req, int client_fd, int epoll_fd) {
+static void handle_read(request_t* req) {
+    int client_fd = req->client_fd;
+    int epoll_fd = req->epoll_fd;
+
     char headers[4096];
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (inital_size <= 0) {
@@ -871,7 +879,7 @@ static void handle_read(request_t* req, int client_fd, int epoll_fd) {
         }
     }
 
-    initialize_request(req, client_fd, epoll_fd, body, body_size, query_params, httpMethod, http_version, path);
+    initialize_request(req, body, body_size, query_params, httpMethod, http_version, path);
 
     http_error_t code = parse_request_headers(req, header_start, header_capacity - 4);
     if (code != http_ok) {
@@ -881,44 +889,27 @@ static void handle_read(request_t* req, int client_fd, int epoll_fd) {
     }
 }
 
-// Like send(2) but sends the request in chunks if larger than 4K.
-// Uses MSG_NOSIGNAL as the flags.
 ssize_t sendall(int fd, const void* buf, size_t n) {
-    // Enable TCP_NODELAY to disable Nagle's algorithm
-    int flag = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+    size_t sent = 0;
+    size_t remaining = n;
+    const char* data = (const char*)buf;
 
-    // If the data is less than 64 bytes, send it in one go
-    if (n <= 64) {
-        return send(fd, buf, n, MSG_NOSIGNAL);
-    }
+    // Send data in 4K chunks
+    while (remaining > 0) {
+        size_t chunk_size = remaining < 4096 ? remaining : 4096;
 
-    size_t sent = 0, remaining = n;
-    size_t chunk_size = 4096;
-    char* data = (char*)buf;
-
-    while (remaining > 0 && running) {
-        char buffer[4096] = {0};
-
-        // Make sure we don't overflow the buffer
-        if (remaining < chunk_size) {
-            chunk_size = remaining;
-        }
-
-        memcpy(buffer, data + sent, chunk_size);
-        int bytes_sent = send(fd, buffer, chunk_size, MSG_NOSIGNAL);
+        ssize_t bytes_sent = send(fd, data + sent, chunk_size, MSG_NOSIGNAL);
         if (bytes_sent == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Retry send after a short delay
-                usleep(1000);  // 1ms delay
+                // Retry after a short delay (consider using poll or epoll for efficiency)
+                usleep(100);  // 100 microseconds
                 continue;
             } else {
-                perror("send");
                 return -1;
             }
         }
         sent += (size_t)bytes_sent;
-        remaining -= bytes_sent;
+        remaining -= (size_t)bytes_sent;
     }
     return sent;
 }
@@ -932,50 +923,50 @@ static void write_headers(context_t* ctx) {
         ctx->status = StatusOK;
     }
 
-    size_t written = 0;
-    char status_line[128] = {0};
-    char header_res[MAX_RES_HEADER_SIZE] = {0};
-    int ret;
+    char header_res[MAX_RES_HEADER_SIZE];
+    size_t remaining = sizeof(header_res);
+    char* current = header_res;
 
-    ret = snprintf(status_line, sizeof(status_line), "HTTP/1.1 %u %s\r\n", ctx->status, http_status_text(ctx->status));
-    if (ret > (int)sizeof(status_line)) {
-        LOG_ERROR("status line truncated. Aborted!!");
+    // Write status line
+    int ret = snprintf(current, remaining, "HTTP/1.1 %u %s\r\n", ctx->status, http_status_text(ctx->status));
+    if (ret < 0 || (size_t)ret >= remaining) {
+        LOG_ERROR("Status line truncated or error occurred");
         return;
     }
-
-    // Write the status line to the header
-    snprintf(header_res, sizeof(header_res), "%s", status_line);
-    written += strlen(status_line);
+    current += ret;
+    remaining -= ret;
 
     // Add headers
     for (size_t i = 0; i < ctx->header_count; i++) {
-        // Convert the header to a string with \r\n at the end
-        char* header = header_tostring(ctx->headers[i]);
-        if (header == NULL) {
-            LOG_ERROR("header_tostring() failed");
+        ret = snprintf(current, remaining, "%s: %s\r\n", ctx->headers[i]->name, ctx->headers[i]->value);
+        if (ret < 0 || (size_t)ret >= remaining) {
+            LOG_ERROR("Header truncated or error occurred");
             return;
         }
-
-        // Append the header to the response headers
-        strncat(header_res, header, sizeof(header_res) - written);
-        written += strlen(header);
-        free(header);
+        current += ret;
+        remaining -= ret;
     }
 
     // Append the end of the headers
-    strncat(header_res, "\r\n", sizeof(header_res) - written);
-    written += 2;
-    header_res[written] = '\0';
+    if (remaining < 3) {
+        LOG_ERROR("No space for final CRLF");
+        return;
+    }
+    memcpy(current, "\r\n", 2);
+    current += 2;
+    *current = '\0';
 
     // Send the response headers
-    // MSG_NOSIGNAL: Do not generate a SIGPIPE signal if the peer
-    // on a stream-oriented socket has closed the connection.
     int nbytes_sent = sendall(ctx->request->client_fd, header_res, strlen(header_res));
     if (nbytes_sent == -1) {
-        perror("write_headers() failed");
+        if (errno == EBADF) {
+            // Can happend if the client closes the connection before the response is sent.
+            // we can safely ignore this error.
+        } else {
+            LOG_ERROR("%s, fd: %d", strerror(errno), ctx->request->client_fd);
+        }
     }
-
-    ctx->headers_sent = true;
+    ctx->headers_sent = nbytes_sent != -1;
 }
 
 // Send the response to the client.
@@ -1397,12 +1388,6 @@ static int setup_server_socket(const char* port) {
 }
 
 // ================== Main program ===========================
-typedef struct read_task {
-    int epoll_fd;    // Epoll file descriptor
-    int client_fd;   // Client file descriptor
-    int index;       // Index of the task in the tasks array. -1 means task if free.
-    request_t* req;  // Request object
-} read_task;
 
 // Default route matcher.
 static Route* default_route_matcher(HttpMethod method, const char* path) {
@@ -2167,11 +2152,6 @@ char* get_ip_address(context_t* ctx) {
     return strdup(ip_addr);
 }
 
-// Pool of read tasks to avoid malloc/free overhead
-#define MAX_READ_TASKS (MAXEVENTS * 2)
-static read_task read_tasks[MAX_READ_TASKS] = {0};
-pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static void init_read_tasks(void) {
     for (size_t i = 0; i < MAX_READ_TASKS; i++) {
         memset(&read_tasks[i], -1, sizeof(read_task));
@@ -2195,6 +2175,20 @@ static void init_read_tasks(void) {
             if (!read_tasks[i].req->headers[j]) {
                 LOG_FATAL("Failed to allocate memory for request header\n");
             }
+        }
+    }
+}
+
+void free_read_tasks(void) {
+    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
+        if (read_tasks[i].req) {
+            for (size_t j = 0; j < MAX_REQ_HEADERS; j++) {
+                if (read_tasks[i].req->headers[j]) {
+                    free(read_tasks[i].req->headers[j]);
+                }
+            }
+            free(read_tasks[i].req->headers);
+            free(read_tasks[i].req);
         }
     }
 }
@@ -2227,7 +2221,10 @@ static void put_read_task(read_task* task) {
 
 static void submit_read_task(void* arg) {
     read_task* task = (read_task*)arg;
-    handle_read(task->req, task->client_fd, task->epoll_fd);
+    task->req->client_fd = task->client_fd;
+    task->req->epoll_fd = task->epoll_fd;
+    handle_read(task->req);
+
     if (task->req->route != NULL && task->client_fd != -1) {
         handle_write(task->req);
     }
@@ -2357,6 +2354,18 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
                         perror("epoll_ctl");
                         LOG_FATAL("Failed to add client socket to epoll\n");
                     }
+
+                    // Disable Nagle's algorithm for the client socket
+                    int flag = 1;
+                    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+
+                    // Enable keepalive for the client socket
+                    enable_keepalive(client_fd);
+
+                    struct timeval timeout;
+                    timeout.tv_sec = 5;  // 5 seconds timeout
+                    timeout.tv_usec = 0;
+                    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
                 }
             } else {
                 if (events[i].events & EPOLLIN) {
@@ -2372,10 +2381,8 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
                     task->client_fd = events[i].data.fd;
                     task->epoll_fd = epoll_fd;
                     threadpool_add_task(pool, submit_read_task, task);
-
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
-                    LOG_ERROR("error on fd %d", events[i].data.fd);
-                    close(events[i].data.fd);
+                    close_connection(events[i].data.fd, epoll_fd);
                 }
             }
         }
@@ -2392,6 +2399,7 @@ __attribute__((destructor)) static void epollix_cleanup(void) {
 
     free_static_routes();
     destroy_mime_hashtable();
+    free_read_tasks();
 
     if (global_middleware_context) {
         map_destroy(global_middleware_context, true);
