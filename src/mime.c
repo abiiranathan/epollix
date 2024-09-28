@@ -285,7 +285,7 @@ uint32_t hash(const char* str) {
 void init_mime_hashtable(void) {
     for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
         uint32_t index = hash(mapping[i].extension) % HASH_TABLE_SIZE;
-        HashEntry* entry = malloc(sizeof(HashEntry));
+        HashEntry* entry = (HashEntry*)malloc(sizeof(HashEntry));
         if (entry == NULL) {
             LOG_FATAL("Failed to allocate memory for HashEntry\n");
         }

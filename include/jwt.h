@@ -1,6 +1,10 @@
 #ifndef JWT_H
 #define JWT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <time.h>
@@ -24,5 +28,9 @@ bool jwt_token_verify(const char* token, const char* secret, JWTPayload* p);
 
 // Function to parse the payload
 bool jwt_parse_payload(const char* payload, JWTPayload* p);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // JWT_H

@@ -61,7 +61,6 @@ endif()
 
 # Headers
 set(HEADERS
-    include/automem.h
     include/constants.h
     include/defer.h
     include/epollix.h
@@ -72,6 +71,15 @@ set(HEADERS
     include/params.h
     include/status.h
 )
+
+
+# Include "include/automem.h" if using GCC or Clang and not in C++ mode
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    if(NOT CMAKE_CXX_COMPILER_ID)
+        list(APPEND HEADERS include/automem.h)
+    endif()
+endif()
+
 
 # Add the middleware headers
 if(CRYPTO_ENABLED)

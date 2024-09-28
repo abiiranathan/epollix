@@ -32,7 +32,7 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
 
     // Decode the Base64-encoded credentials
     size_t decoded_length = 0;
-    autofree unsigned char* decoded_credentials = crypto_base64_decode(encoded_credentials, &decoded_length);
+    unsigned char* decoded_credentials = crypto_base64_decode(encoded_credentials, &decoded_length);
     if (decoded_credentials == NULL) {
         return -1;
     }
@@ -43,12 +43,15 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
     // Split the decoded credentials into username and password
     char* colon_pos = strchr((char*)decoded_credentials, ':');
     if (colon_pos == NULL) {
+        free(decoded_credentials);
         return -1;
     }
 
     *colon_pos = '\0';
     *out_username = strdup((char*)decoded_credentials);
     *out_password = strdup(colon_pos + 1);
+
+    free(decoded_credentials);
     return 0;
 }
 
@@ -65,19 +68,29 @@ static void handle(context_t* ctx, Handler next, BasicAuthData* auth_data) {
         return;
     }
 
-    autofree char* username = NULL;
-    autofree char* password = NULL;
+    char* username = NULL;
+    char* password = NULL;
 
     if (parse_authorization_header(auth_header, &username, &password) != 0) {
-        userUnathorized(ctx);
-        return;
+        goto unauthorized;
     }
 
     if (strcmp(username, auth_data->username) == 0 && strcmp(password, auth_data->password) == 0) {
+        free(username);
+        free(password);
         next(ctx);
-    } else {
-        userUnathorized(ctx);
+        return;
     }
+
+unauthorized:
+    if (username) {
+        free(username);
+    }
+
+    if (password) {
+        free(password);
+    }
+    userUnathorized(ctx);
 }
 
 void route_basic_auth(context_t* ctx, Handler next) {

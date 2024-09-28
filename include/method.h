@@ -1,6 +1,10 @@
 #ifndef METHOD_H
 #define METHOD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 typedef enum {
@@ -17,5 +21,9 @@ typedef enum {
 const char* method_tostring(HttpMethod method);
 HttpMethod method_fromstring(const char* method);
 bool is_safe_method(HttpMethod method);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* METHOD_H */

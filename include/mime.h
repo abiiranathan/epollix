@@ -1,6 +1,10 @@
 #ifndef CEF815FD_9502_4556_B51E_B7573472FAA6
 #define CEF815FD_9502_4556_B51E_B7573472FAA6
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Initialize the mime hashtable with the default mapping.
 void init_mime_hashtable(void);
 
@@ -12,5 +16,9 @@ void destroy_mime_hashtable(void);
 // Warning: You must initialize the mime hashtable before calling this function with
 // init_mime_hashtable() and destroy it after you are done with destroy_mime_hashtable().
 const char* get_mimetype(char* filename);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CEF815FD_9502_4556_B51E_B7573472FAA6 */

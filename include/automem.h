@@ -1,8 +1,15 @@
 #ifndef _AUTOMEM_H
 #define _AUTOMEM_H
 
-#ifdef __cplusplus
-extern "C" {
+// __attribute__((cleanup(automem_free))) is a GCC extension that allows
+// you to specify a cleanup function that will be called when the variable goes out of scope.
+// Not supported in C++ and MSVC.
+#if !defined(__GNUC__) && !defined(__clang__)
+#error "__attribute__(cleanup) is only supported in GCC and Clang compilers."
+#endif
+
+#if defined(__cplusplus)
+#error "__attribute__(cleanup) is only supported in C."
 #endif
 
 #include <stddef.h>
@@ -34,9 +41,5 @@ static inline void autoclose_file(void* ptr) {
 }
 
 #endif  // AUTOMEM_IMPL
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif  // _AUTOMEM_H

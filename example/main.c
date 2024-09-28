@@ -103,7 +103,7 @@ void handle_create_user(context_t* ctx) {
         return;
     }
 
-    autofree char* jwtToken = jwt_token_create(&payload, secret);
+    char* jwtToken = jwt_token_create(&payload, secret);
     LOG_INFO("Generated JWT token: %s", jwtToken);
 
     // response_redirect(ctx, "/");
@@ -114,8 +114,11 @@ void handle_create_user(context_t* ctx) {
     cJSON_AddStringToObject(json, "email", email);
     cJSON_AddStringToObject(json, "token", jwtToken);
 
-    autofree char* data = cJSON_Print(json);
+    free(jwtToken);
+
+    char* data = cJSON_Print(json);
     send_json_string(ctx, data);
+    free(data);
 
     cJSON_Delete(json);
     multipart_free_form((MultipartForm*)&form);
@@ -209,11 +212,12 @@ static void api_users(context_t* ctx) {
     }
 
     cJSON_AddItemToObject(root, "users", users_array);
-    autofree char* data = cJSON_Print(root);
+    char* data = cJSON_Print(root);
     send_json_string(ctx, data);
 
     cJSON_Delete(root);
     free(users);
+    free(data);
 }
 
 static void api_user_by_id(context_t* ctx) {

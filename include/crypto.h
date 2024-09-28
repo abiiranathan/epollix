@@ -1,6 +1,10 @@
 #ifndef BE4FD858_E745_486F_B1AF_99C95F83CAAC
 #define BE4FD858_E745_486F_B1AF_99C95F83CAAC
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -124,5 +128,9 @@ bool crypto_hash_password_bcrypt(const char* password, char hash[BCRYPT_HASH_SIZ
 // Check if the password matches the hash
 bool crypto_verify_password_bcrypt(const char* password, const char* hash);
 //==============================================================
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* BE4FD858_E745_486F_B1AF_99C95F83CAAC */

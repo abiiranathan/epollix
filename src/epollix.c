@@ -1,8 +1,3 @@
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../include/epollix.h"
 #include <arpa/inet.h>
 #include <assert.h>
@@ -33,9 +28,6 @@ extern "C" {
 #include "../include/logging.h"
 #include "../include/method.h"
 
-#ifdef __cplusplus
-}
-#endif
 
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
@@ -113,9 +105,9 @@ typedef struct read_task {
 } read_task;
 
 // =================== STATIC GLOBALS ================================================
-static Route routeTable[MAX_ROUTES] = {0};                   // static Route table
+static Route routeTable[MAX_ROUTES]={};                   // static Route table
 static size_t numRoutes = 0;                                 // number of routes in the route table
-static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE];  // Global middleware
+static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE]={};  // Global middleware
 static size_t global_middleware_count = 0;                   // Number of global middleware functions
 volatile sig_atomic_t running = 1;                           // Flag to indicate if the server is running
 static Route* notFoundRoute = NULL;                          // Route to use when a route is not found
@@ -228,7 +220,7 @@ char* encode_uri(const char* str) {
     // terminator.
     size_t src_len = strlen(str);
     size_t capacity = src_len * 3 + 1;
-    char* encoded_str = malloc(capacity);
+    char* encoded_str = (char*)malloc(capacity);
     if (encoded_str == NULL) {
         perror("memory allocation failed");
         return NULL;
@@ -304,7 +296,7 @@ const char* http_error_string(http_error_t code) {
 }
 
 header_t* header_new(const char* name, const char* value) {
-    header_t* header = malloc(sizeof(header_t));
+    header_t* header = (header_t*)malloc(sizeof(header_t));
     LOG_ASSERT(header, "malloc failed");
 
     strncpy(header->name, name, MAX_HEADER_NAME - 1);
@@ -331,7 +323,7 @@ header_t* header_fromstring(const char* str) {
         return NULL;
     }
 
-    header_t* header = malloc(sizeof(header_t));
+    header_t* header = (header_t*)malloc(sizeof(header_t));
     if (header == NULL) {
         LOG_ERROR("malloc header_t failed");
         return NULL;
@@ -378,7 +370,7 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
         }
 
         // Parse header name
-        const char* colon = memchr(ptr, ':', end - ptr);
+        const char* colon = (const char*)memchr(ptr, ':', end - ptr);
         if (!colon)
             break;
 
@@ -395,7 +387,7 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
             ptr++;
 
         // Parse header value
-        const char* eol = memchr(ptr, '\r', end - ptr);
+        const char* eol = (const char*)memchr(ptr, '\r', end - ptr);
         if (!eol || eol + 1 >= end || eol[1] != '\n')
             break;
 
@@ -519,7 +511,7 @@ bool header_valid(const header_t* h) {
 // Returns a dynamically allocated string that the caller must free.
 char* header_tostring(const header_t* h) {
     size_t len = strlen(h->name) + strlen(h->value) + 5;  // 5 is for ": " and "\r\n" and null terminator
-    char* buf = malloc(len);
+    char* buf = (char *)malloc(len);
     if (buf == NULL) {
         LOG_ERROR("malloc failed");
         return NULL;
@@ -607,7 +599,7 @@ bool allocate_headers(context_t* ctx) {
 
 static void handle_write(request_t* req) {
     // Initialize response
-    context_t ctx = {0};
+    context_t ctx = {};
     ctx.request = req;
     ctx.status = StatusOK;
     ctx.headers_sent = false;
@@ -636,7 +628,7 @@ static void handle_write(request_t* req) {
     ctx.mw_ctx = &mw_ctx;
 
     // Combine global and route-specific middleware
-    Middleware* combined_middleware = malloc(sizeof(Middleware) * (global_middleware_count + route->middleware_count));
+    Middleware* combined_middleware = (Middleware*)malloc(sizeof(Middleware) * (global_middleware_count + route->middleware_count));
     if (combined_middleware == NULL) {
         LOG_ERROR("malloc failed");
         http_error(req->client_fd, StatusInternalServerError, "error allocating middleware");
@@ -1532,7 +1524,7 @@ void use_route_middleware(Route* route, int count, ...) {
     }
 
     size_t new_count = route->middleware_count + count;
-    Middleware* new_middleware = realloc(route->middleware, sizeof(Middleware) * new_count);
+    Middleware* new_middleware = (Middleware*)realloc(route->middleware, sizeof(Middleware) * new_count);
     if (!new_middleware) {
         perror("realloc");
         LOG_FATAL("Failed to allocate memory for route middleware\n");
@@ -1575,7 +1567,7 @@ const char* get_query(context_t* ctx, const char* name) {
         return NULL;
     }
 
-    return map_get(ctx->request->query_params, (char*)name);
+    return (const char*)map_get(ctx->request->query_params, (char*)name);
 }
 
 const char* get_param(context_t* ctx, const char* name) {
@@ -1714,7 +1706,7 @@ void use_group_middleware(RouteGroup* group, int count, ...) {
     }
 
     uint8_t new_count = group->middleware_count + (uint8_t)count;
-    Middleware* new_middleware = realloc(group->middleware, sizeof(Middleware) * (size_t)new_count);
+    Middleware* new_middleware = (Middleware*)realloc(group->middleware, sizeof(Middleware) * (size_t)new_count);
     if (!new_middleware) {
         LOG_FATAL("Failed to allocate memory for group middleware\n");
     }
@@ -1743,7 +1735,7 @@ static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const cha
     }
 
     // realloc the routes array, may be null if this is the first route
-    Route** new_routes = realloc(group->routes, sizeof(Route*) * (group->count + 1));
+    Route** new_routes = (Route**)realloc(group->routes, sizeof(Route*) * (group->count + 1));
     if (!new_routes) {
         LOG_FATAL("Failed to allocate memory for group routes\n");
     }
@@ -1860,7 +1852,7 @@ const char* format_file_size(off_t size) {
     return buf;
 }
 
-static void send_error_page(context_t* ctx, int status) {
+static void send_error_page(context_t* ctx, http_status status) {
     const char* status_str = http_status_text(status);
     char* error_page = NULL;
     int ret = asprintf(&error_page, "<html><head><title>%d %s</title></head><body><h1>%d %s</h1></body></html>", status,
@@ -2018,7 +2010,7 @@ static void staticFileHandler(context_t* ctx) {
     request_t* req = ctx->request;
     Route* route = req->route;
 
-    char* dirname = route->dirname;
+    const char* dirname = route->dirname;
 
     // Replace . and .. with ./ and ../
     if (strcmp(dirname, ".") == 0) {
@@ -2095,7 +2087,7 @@ static void staticFileHandler(context_t* ctx) {
     }
 
     // Send a 404 response if the file is not found
-    char* response = "File Not Found\n";
+    const char* response = "File Not Found\n";
     set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->status = StatusNotFound;
     send_response(ctx, response, strlen(response));

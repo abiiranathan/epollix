@@ -1,5 +1,4 @@
 #include "../include/jwt.h"
-#include "../include/automem.h"
 #include "../include/crypto.h"
 #include "../include/logging.h"
 
@@ -40,29 +39,39 @@ static char* jwt_generate(const JWTPayload* payload, const char* secret) {
     cJSON_AddStringToObject(json, "sub", payload->sub);
     cJSON_AddNumberToObject(json, "exp", payload->exp);
     cJSON_AddStringToObject(json, "data", payload->data);
-    autofree char* payload_str = cJSON_PrintUnformatted(json);
+    char* payload_str = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
 
     // Base64url encode header and payload
-    autofree char* encoded_header = crypto_base64_encode((unsigned char*)JWT_HEADER, header_len);
-    autofree char* encoded_payload = crypto_base64_encode((unsigned char*)payload_str, strlen(payload_str));
+    char* encoded_header = crypto_base64_encode((unsigned char*)JWT_HEADER, header_len);
+    char* encoded_payload = crypto_base64_encode((unsigned char*)payload_str, strlen(payload_str));
 
     // Create the message to sign
-    autofree char* message = (char*)malloc(strlen(encoded_header) + strlen(encoded_payload) + 2);
+    char* message = (char*)malloc(strlen(encoded_header) + strlen(encoded_payload) + 2);
     sprintf(message, "%s.%s", encoded_header, encoded_payload);
 
     // Create the HMAC SHA-256 signature
     unsigned int len = 0;
     unsigned char hmac[EVP_MAX_MD_SIZE] = {0};
     if (!create_hmac_sha256(secret, message, hmac, &len)) {
+        free(payload_str);
+        free(encoded_header);
+        free(encoded_payload);
+        free(message);
         return NULL;
     }
-    autofree char* encoded_signature = crypto_base64_encode(hmac, len);
+    char* encoded_signature = crypto_base64_encode(hmac, len);
 
     // Create the JWT
     char* jwt_token = (char*)malloc(strlen(message) + strlen(encoded_signature) + 2);
     sprintf(jwt_token, "%s.%s", message, encoded_signature);
 
+    // Free all allocated memory except jwt_token
+    free(payload_str);
+    free(encoded_header);
+    free(encoded_payload);
+    free(message);
+    free(encoded_signature);
     return jwt_token;
 }
 
@@ -116,77 +125,95 @@ char* jwt_token_create(const JWTPayload* payload, const char* secret) {
     return jwt_generate(payload, secret);
 }
 
-// Verify JWT
 bool jwt_token_verify(const char* token, const char* secret, JWTPayload* p) {
-    if (!secret) {
-        LOG_ERROR("JWT secret is NULL.");
+    if (!token || !secret || !p) {
+        LOG_ERROR("Invalid input: token, secret, or payload is NULL.");
         return false;
     }
 
     // Initialize the payload
     memset(p, 0, sizeof(JWTPayload));
-    memset(p->sub, 0, sizeof(p->sub));
-    memset(p->data, 0, sizeof(p->data));
-    p->exp = 0;
 
-    // There must be 3 parts to the JWT
-    int parts = 0;
-    for (size_t i = 0; i < strlen(token); i++) {
-        if (token[i] == '.')
-            parts++;
-    }
-
-    if (parts != 2) {
+    // Validate JWT format (must have exactly two dots)
+    const char* first_dot = strchr(token, '.');
+    const char* second_dot = first_dot ? strchr(first_dot + 1, '.') : NULL;
+    if (!first_dot || !second_dot || strchr(second_dot + 1, '.')) {
         LOG_ERROR("Invalid JWT format.");
         return false;
     }
 
-    // copy the token to avoid modifying the original
-    autofree char* token_copy = strdup(token);
+    // Calculate lengths
+    size_t header_len = first_dot - token;
+    size_t payload_len = second_dot - (first_dot + 1);
+    size_t signature_len = strlen(second_dot + 1);
 
-    // Split the JWT into header, payload, and signature
-    char* header = strtok(token_copy, ".");
-    char* payload = strtok(NULL, ".");
-    char* signature = strtok(NULL, ".");
-
-    if (!header || !payload || !signature) {
-        LOG_ERROR("Invalid JWT format.");
+    // Allocate memory for message (header + payload)
+    size_t message_len = header_len + payload_len + 1;  // +1 for the dot
+    char* message = (char*)malloc(message_len + 1);     // +1 for null terminator
+    if (!message) {
+        perror("Failed to allocate memory for message");
         return false;
     }
 
-    // Reconstruct the message
-    autofree char* message = (char*)malloc(strlen(header) + strlen(payload) + 2);
-    sprintf(message, "%s.%s", header, payload);
+    // Construct message
+    memcpy(message, token, header_len);
+    message[header_len] = '.';
+    memcpy(message + header_len + 1, first_dot + 1, payload_len);
+    message[message_len] = '\0';
 
-    // Create the HMAC SHA-256 signature
-    unsigned int len = 0;
-    unsigned char hmac[EVP_MAX_MD_SIZE] = {0};
-    if (!create_hmac_sha256(secret, message, hmac, &len)) {
-        return NULL;
+    // Create HMAC SHA-256 signature
+    unsigned char hmac[EVP_MAX_MD_SIZE];
+    unsigned int hmac_len;
+    if (!create_hmac_sha256(secret, message, hmac, &hmac_len)) {
+        LOG_ERROR("HMAC creation failed.");
+        free(message);
+        return false;
     }
 
-    autofree char* encoded_signature = crypto_base64_encode(hmac, len);
-
-    // Compare the signatures
-    bool result = strcmp(encoded_signature, signature) == 0;
-
-    if (result) {
-        // signature is valid. make sure the token is not expired
-        size_t out_len = 0;
-        autofree char* decoded_payload = (char*)crypto_base64_decode(payload, &out_len);
-        if (decoded_payload) {
-            result = jwt_parse_payload(decoded_payload, p);
-            if (result) {
-                unsigned long now = (unsigned long)time(NULL);
-                result = p->exp > now;
-
-                if (!result) {
-                    LOG_ERROR("JWT token is expired.");
-                }
-            }
-        } else {
-            LOG_ERROR("Failed to decode payload.");
-        }
+    // Encode HMAC to base64
+    char* encoded_signature = crypto_base64_encode(hmac, hmac_len);
+    if (!encoded_signature) {
+        LOG_ERROR("Base64 encoding failed.");
+        free(message);
+        return false;
     }
-    return result;
+
+    // Compare signatures
+    bool signatures_match =
+        (strlen(encoded_signature) == signature_len) && (memcmp(encoded_signature, second_dot + 1, signature_len) == 0);
+
+    free(encoded_signature);
+
+    if (!signatures_match) {
+        LOG_ERROR("Signature mismatch.");
+        free(message);
+        return false;
+    }
+
+    // Decode payload
+    size_t decoded_payload_len;
+    unsigned char* decoded_payload = crypto_base64_decode(first_dot + 1, &decoded_payload_len);
+    if (!decoded_payload) {
+        LOG_ERROR("Failed to decode payload.");
+        free(message);
+        return false;
+    }
+
+    // Parse payload
+    bool payload_parsed = jwt_parse_payload((char*)decoded_payload, p);
+    free(decoded_payload);
+    free(message);
+
+    if (!payload_parsed) {
+        LOG_ERROR("Failed to parse payload.");
+        return false;
+    }
+
+    // Check expiration
+    if (p->exp <= (unsigned long)time(NULL)) {
+        LOG_ERROR("JWT token is expired.");
+        return false;
+    }
+
+    return true;
 }

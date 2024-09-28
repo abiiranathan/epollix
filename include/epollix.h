@@ -16,8 +16,6 @@ extern "C" {
 #include "params.h"
 #include "status.h"
 
-#include "automem.h"
-
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)(var))
 

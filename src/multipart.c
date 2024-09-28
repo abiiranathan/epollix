@@ -9,7 +9,9 @@
 // Author: Dr. Abiira Nathan                                                              #
 // Date: 17 June 2024                                                                     #
 //=========================================================================================
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE  // for memmem
+#endif
 
 #include "../include/multipart.h"
 #include "../include/logging.h"
@@ -108,7 +110,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     // Start parsing the form data
     while (ptr < data + size) {
         switch (state) {
-            case STATE_BOUNDARY:
+            case STATE_BOUNDARY: {
                 if (strncmp(ptr, boundary, boundary_length) == 0) {
                     state = STATE_HEADER;
                     ptr += boundary_length;
@@ -117,8 +119,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 } else {
                     ptr++;
                 }
-                break;
-            case STATE_HEADER:
+            } break;
+            case STATE_HEADER: {
                 if (strncmp(ptr, "Content-Disposition:", 20) == 0) {
                     ptr = sstrstr(ptr, "name=\"", size - (ptr - data));
                     if (!ptr) {
@@ -131,7 +133,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 } else {
                     ptr++;
                 }
-                break;
+            } break;
             case STATE_KEY:
                 if (*ptr == '"' && key_start != NULL) {
                     size_t key_length = ptr - key_start;
@@ -309,14 +311,14 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 state = STATE_FILE_BODY;
 
             } break;
-            case STATE_FILE_BODY:
+            case STATE_FILE_BODY: {
                 header.offset = ptr - data;
                 size_t endpos = 0;
                 size_t haystack_len = size - header.offset;
 
                 // Apparently strstr can't be used with binary data!!
                 // I spen't days here trying to figgit with binary files :)
-                char* endptr = memmem(ptr, haystack_len, boundary, boundary_length);
+                char* endptr = (char*)memmem(ptr, haystack_len, boundary, boundary_length);
                 if (endptr == NULL) {
                     code = INVALID_FORM_BOUNDARY;
                     goto cleanup;
@@ -364,7 +366,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                     ptr += 2;
                 }
                 state = STATE_BOUNDARY;
-                break;
+
+            } break;
             default:
                 // This is unreachable but just in case, we don't want an infinite-loop
                 // Crash and burn!!

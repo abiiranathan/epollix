@@ -1,6 +1,5 @@
 // test gzip file/bytes compression and decompression
 #include "../include/gzip.h"
-#include "../include/automem.h"
 #include "../include/logging.h"
 
 #include <solidc/filepath.h>
@@ -8,9 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-void test_gzip_file_compression_and_decompression() {
-    autofree char* filename = make_tempfile();
-    autofree char* compressed_filename = make_tempfile();
+static void test_gzip_file_compression_and_decompression(void) {
+    char* filename = make_tempfile();
+    char* compressed_filename = make_tempfile();
 
     FILE* file = fopen(filename, "wb");
     LOG_ASSERT(file, "Failed to open file for writing");
@@ -33,7 +32,7 @@ void test_gzip_file_compression_and_decompression() {
     file = fopen(compressed_filename, "rb");
     LOG_ASSERT(file, "Failed to open compressed file for reading");
 
-    autofree char* decompressed_filename = make_tempfile();
+    char* decompressed_filename = make_tempfile();
     compressed_file = fopen(decompressed_filename, "wb");
     LOG_ASSERT(compressed_file, "Failed to open file for writing");
 
@@ -54,7 +53,7 @@ void test_gzip_file_compression_and_decompression() {
 
     fseek(file, 0, SEEK_SET);
 
-    autofree char* buffer = malloc(file_size);
+    char* buffer = malloc(file_size);
     size_t n = fread(buffer, 1, file_size, file);
     LOG_ASSERT(n == (size_t)file_size, "Failed to read decompressed file");
     fclose(file);
@@ -65,10 +64,15 @@ void test_gzip_file_compression_and_decompression() {
     remove(compressed_filename);
     remove(decompressed_filename);
 
+    free(filename);
+    free(compressed_filename);
+    free(decompressed_filename);
+    free(buffer);
+
     puts("Gzip file compression and decompression tests passed");
 }
 
-void test_gzip_bytes_compression_and_decompression() {
+static void test_gzip_bytes_compression_and_decompression(void) {
     const char* data = "Hello, World!";
     size_t data_len = strlen(data);
 

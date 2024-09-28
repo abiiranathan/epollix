@@ -1,6 +1,10 @@
 #ifndef BA374F62_2CF0_43AD_9D7A_2D80B9D267A5
 #define BA374F62_2CF0_43AD_9D7A_2D80B9D267A5
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,5 +34,9 @@ bool gzip_compress_bytes(const uint8_t* data, size_t data_len, uint8_t** compres
 // The uncompressed_data_len parameter is set to the length of the uncompressed data.
 bool gzip_decompress_bytes(const uint8_t* compressed_data, size_t compressed_data_len, uint8_t** uncompressed_data,
                            size_t* uncompressed_data_len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* BA374F62_2CF0_43AD_9D7A_2D80B9D267A5 */
