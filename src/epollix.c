@@ -28,7 +28,6 @@
 #include "../include/logging.h"
 #include "../include/method.h"
 
-
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 
 typedef struct header {
@@ -105,13 +104,13 @@ typedef struct read_task {
 } read_task;
 
 // =================== STATIC GLOBALS ================================================
-static Route routeTable[MAX_ROUTES]={};                   // static Route table
-static size_t numRoutes = 0;                                 // number of routes in the route table
-static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE]={};  // Global middleware
-static size_t global_middleware_count = 0;                   // Number of global middleware functions
-volatile sig_atomic_t running = 1;                           // Flag to indicate if the server is running
-static Route* notFoundRoute = NULL;                          // Route to use when a route is not found
-static map* global_middleware_context = NULL;                // Global middleware context
+static Route routeTable[MAX_ROUTES] = {};                         // static Route table
+static size_t numRoutes = 0;                                      // number of routes in the route table
+static Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE] = {};  // Global middleware
+static size_t global_middleware_count = 0;                        // Number of global middleware functions
+volatile sig_atomic_t running = 1;                                // Flag to indicate if the server is running
+static Route* notFoundRoute = NULL;                               // Route to use when a route is not found
+static map* global_middleware_context = NULL;                     // Global middleware context
 
 static const char* CONTENT_TYPE_HEADER = "Content-Type";  // Content-Type header name
 static cleanup_func user_cleanup_func = NULL;             // User-defined cleanup function
@@ -511,7 +510,7 @@ bool header_valid(const header_t* h) {
 // Returns a dynamically allocated string that the caller must free.
 char* header_tostring(const header_t* h) {
     size_t len = strlen(h->name) + strlen(h->value) + 5;  // 5 is for ": " and "\r\n" and null terminator
-    char* buf = (char *)malloc(len);
+    char* buf = (char*)malloc(len);
     if (buf == NULL) {
         LOG_ERROR("malloc failed");
         return NULL;
@@ -628,7 +627,8 @@ static void handle_write(request_t* req) {
     ctx.mw_ctx = &mw_ctx;
 
     // Combine global and route-specific middleware
-    Middleware* combined_middleware = (Middleware*)malloc(sizeof(Middleware) * (global_middleware_count + route->middleware_count));
+    Middleware* combined_middleware =
+        (Middleware*)malloc(sizeof(Middleware) * (global_middleware_count + route->middleware_count));
     if (combined_middleware == NULL) {
         LOG_ERROR("malloc failed");
         http_error(req->client_fd, StatusInternalServerError, "error allocating middleware");
@@ -696,8 +696,10 @@ size_t parse_content_length(const char* header_start, const char* end_of_headers
 // Parse the URI, extracting path and query parameters
 bool parse_uri(const char* decoded_uri, char** path, char** query, map** query_params) {
     *path = strdup(decoded_uri);
-    if (!*path)
+    if (!*path) {
+        LOG_ERROR("malloc failed");
         return false;
+    }
 
     *query = strchr(*path, '?');
     if (*query) {
@@ -806,79 +808,88 @@ void cleanup_request(request_t* req) {
 static void handle_read(request_t* req) {
     int client_fd = req->client_fd;
     int epoll_fd = req->epoll_fd;
+    char headers[4096] = {};
 
-    char headers[4096];
+    char* path = NULL;                  // Request path
+    char* query = NULL;                 // Query string
+    map* query_params = NULL;           // Query parameters
+    uint8_t* body = NULL;               // Request body (dynamically allocated)
+    size_t total_read = 0;              // Total bytes read
+    HttpMethod httpMethod = M_INVALID;  // Http method
+    http_error_t code = http_ok;        // Error code
+    char decoded_uri[1024] = {};        // Decoded URI (e.g., "/path/to/resource?query=string")
+    size_t header_capacity = 0;         // Size of the headers in the buffer (including the initial read)
+    size_t body_size = 0;               // Size of the request body (from the Content-Length header)
+
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (inital_size <= 0) {
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
     headers[inital_size] = '\0';
 
     char *method, *uri, *http_version, *header_start, *end_of_headers;
     if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
 
-    HttpMethod httpMethod = method_fromstring(method);
+    httpMethod = method_fromstring(method);
     if (httpMethod == M_INVALID) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
 
-    // Find the end of the headers
-    // Can't use strstr because the headers may contain null bytes.
     end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
     if (!end_of_headers) {
         http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
 
-    // +4 to include the \r\n\r\n at the end of the headers
-    size_t header_capacity = end_of_headers - headers + 4;
+    header_capacity = end_of_headers - headers + 4;
+    body_size = parse_content_length(header_start, end_of_headers);
 
-    size_t body_size = parse_content_length(header_start, end_of_headers);
-
-    char decoded_uri[1024];
     decode_uri(uri, decoded_uri, sizeof(decoded_uri));
 
-    char *path, *query;
-    map* query_params = NULL;
     if (!parse_uri(decoded_uri, &path, &query, &query_params)) {
         http_error(client_fd, StatusInternalServerError, "error parsing query params");
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
 
     req->route = default_route_matcher(httpMethod, path);
     if (req->route == NULL && !handle_not_found(req, method, http_version, path)) {
-        close_connection(client_fd, epoll_fd);
-        return;
+        goto error;
     }
 
-    uint8_t* body = NULL;
-    // Initial body read(if any)
-    size_t total_read = inital_size - header_capacity;
+    total_read = inital_size - header_capacity;
     if (!is_safe_method(httpMethod) && body_size > 0) {
         if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
             http_error(client_fd, StatusInternalServerError, "Failed to read request body");
-            close_connection(client_fd, epoll_fd);
-            return;
+            goto error;
         }
     }
 
     initialize_request(req, body, body_size, query_params, httpMethod, http_version, path);
-
-    http_error_t code = parse_request_headers(req, header_start, header_capacity - 4);
+    code = parse_request_headers(req, header_start, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
-        cleanup_request(req);
-        close_connection(client_fd, epoll_fd);
+        goto error;
     }
+
+    free(path);
+    if (query) {
+        free(query);
+    }
+    return;  // success, return early to avoid cleanup code
+
+error:
+    if (path) {
+        free(path);
+    }
+    if (query) {
+        free(query);
+    }
+    cleanup_request(req);
+    close_connection(client_fd, epoll_fd);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
