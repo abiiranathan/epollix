@@ -1,13 +1,14 @@
-BUILD_OPTIONS=-DCRYPTO_ENABLED=ON -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 TARGET=build/example/example
 
 all:
-	mkdir -p build
-	cd build && cmake $(BUILD_OPTIONS)  -S .. -B . -G Ninja 
+	cd build && cmake ..
 	cd build && ninja
 
 install:
 	cd build && sudo ninja install
+
+test:
+	cd build && ctest
 
 clean:
 	rm -rf build .cache

@@ -1,8 +1,10 @@
 #ifndef CE7D16EF_5604_4957_A4B1_24F7EC61C514
 #define CE7D16EF_5604_4957_A4B1_24F7EC61C514
 
-#include "../epollix.h"
-#include "../include/jwt.h"
+#include <cipherkit/jwt.h>
+#include "../include/epollix.h"
+
+#define JWT_TOKEN_SECRET "JWT_TOKEN_SECRET"
 
 // BearerAuthMiddleware is a middleware that checks if the Authorization header contains a valid Bearer token.
 // You must set the JWT_TOKEN_SECRET environment variable to the null-terminated secret key used to sign the token.

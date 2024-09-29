@@ -2,20 +2,23 @@
 #include "../include/logging.h"
 
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
+#define DEFAULT_CONTENT_TYPE "application/octet-stream"
+
 typedef struct {
     const char* extension;
     const char* contentType;
-} ct_mapping;
+} MimeEntry;
 
 // Define an array of file extension:content_type mapping.
 // https://mimetype.io/all-types
-static const ct_mapping mapping[] = {
+static const MimeEntry mime_mapping[] = {
     // Text mime types
     {"html", "text/html"},
     {"htm", "text/html"},
@@ -28,7 +31,6 @@ static const ct_mapping mapping[] = {
     {"css", "text/css"},
     {"js", "application/javascript"},
     {"txt", "text/plain"},
-    {"xml", "application/xml"},
     {"json", "application/json"},
     {"csv", "text/csv"},
     {"md", "text/markdown"},
@@ -210,7 +212,6 @@ static const ct_mapping mapping[] = {
     {"krz", "application/x-krita"},
 
     // Microsoft Windows Applications
-    {"application", "application/x-ms-application"},
     {"wmd", "application/x-ms-wmd"},
     {"wmz", "application/x-ms-wmz"},
     {"xbap", "application/x-ms-xbap"},
@@ -240,6 +241,9 @@ static const ct_mapping mapping[] = {
     {"shp", "application/x-qgis"},
     {"geojson", "application/geo+json"},
 
+    // configuration
+    {"jsonld", "application/ld+json"},
+
     // Mathematical Data
     {"m", "text/x-matlab"},
     {"r", "application/R"},
@@ -261,45 +265,14 @@ static const ct_mapping mapping[] = {
     {"fits", "application/fits"},
 };
 
-#define HASH_TABLE_SIZE (sizeof(mapping) / sizeof(mapping[0]))
-#define DEFAULT_CONTENT_TYPE "application/octet-stream"
-
-typedef struct HashEntry {
-    const char* extension;
-    const char* contentType;
-    struct HashEntry* next;
-} HashEntry;
-
-// A simple hash table to store the mapping.
-// Uses separate chaining for collision resolution.
-static HashEntry* hashTable[HASH_TABLE_SIZE];
-
-uint32_t hash(const char* str) {
-    uint32_t hash = 0;
-    while (*str) {
-        hash = hash * 31 + *str++;
-    }
-    return hash;
-}
-
-void init_mime_hashtable(void) {
-    for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
-        uint32_t index = hash(mapping[i].extension) % HASH_TABLE_SIZE;
-        HashEntry* entry = (HashEntry*)malloc(sizeof(HashEntry));
-        if (entry == NULL) {
-            LOG_FATAL("Failed to allocate memory for HashEntry\n");
-        }
-
-        entry->extension = mapping[i].extension;
-        entry->contentType = mapping[i].contentType;
-        entry->next = hashTable[index];
-        hashTable[index] = entry;
-    }
-}
+#define MIME_MAPPING_SIZE (sizeof(mime_mapping) / sizeof(mime_mapping[0]))
 
 const char* get_mimetype(char* filename) {
-    size_t len = strlen(filename);
-    // Get the file extension
+    if (!filename) {
+        return DEFAULT_CONTENT_TYPE;
+    }
+
+    // Get the file extension.
     char *ptr, *start = filename, *last = NULL;
     while ((ptr = strstr(start, "."))) {
         last = ptr;
@@ -312,46 +285,11 @@ const char* get_mimetype(char* filename) {
     }
 
     char* extension = last + 1;  // skip "."
-    char* end = filename + len;
 
-    size_t ext_len = end - extension;
-    if (ext_len == 0) {
-        return DEFAULT_CONTENT_TYPE;
-    }
-
-    if (ext_len > 255) {
-        LOG_ERROR("File extension is too long: %s", extension);
-        return DEFAULT_CONTENT_TYPE;
-    }
-
-    char file_extension[256] = {0};
-    strncpy(file_extension, extension, sizeof(file_extension) - 1);
-    file_extension[ext_len] = '\0';
-
-    // convert extension to lowercase
-    for (size_t i = 0; i < ext_len; i++) {
-        file_extension[i] = tolower(file_extension[i]);
-    }
-
-    uint32_t index = hash(file_extension) % HASH_TABLE_SIZE;
-    HashEntry* entry = hashTable[index];
-
-    while (entry) {
-        if (strcasecmp(file_extension, entry->extension) == 0) {
-            return entry->contentType;
+    for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
+        if (strcasecmp(extension, mime_mapping[i].extension) == 0) {
+            return mime_mapping[i].contentType;
         }
-        entry = entry->next;
     }
     return DEFAULT_CONTENT_TYPE;
-}
-
-void destroy_mime_hashtable(void) {
-    for (size_t i = 0; i < HASH_TABLE_SIZE; i++) {
-        HashEntry* entry = hashTable[i];
-        while (entry) {
-            HashEntry* temp = entry;
-            entry = entry->next;
-            free(temp);
-        }
-    }
 }

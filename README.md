@@ -54,42 +54,16 @@ make
 - **solidc**: A personal C library for common data structures and utilities that are cross-platform and easy to use. [Find solidc on Github](https://github.com/abiiranathan/solidc)
 
 ### Optional dependencies
-> You can disable these dependencies by setting the corresponding CMake options to `OFF`.
+- **cipherkit**: A personal C library for cryptographic functions, hashing etc. [Find solidc on Github](https://github.com/abiiranathan/cipherkit)
+
+The middleware and example are only built if the optional dependencies are found. If you want to build the middleware and example, you need to clone the `cipherkit` repository and build it. Not that it also depends on OpenSSL, libsodium, zlib, cjson.
+
+Find the installation instructions for `cipherkit` from the link above.
+
 ```bash
--DCRYPTO_ENABLED=OFF
-```
-
-- **openssl**: For future HTTPS support and cryptography functions. 
-  If you want to use HTTPS, you need to install the openssl library. You can install it using the following command:
-```bash
-sudo apt-get install libssl-dev
-
-# Arch Linux
-sudo pacman -S openssl
-```
-
--**libsodium**: For cryptography functions. If you want to use the libsodium library, you need to install it using the following command:
-```bash
-sudo apt-get install libsodium-dev
-
-# Arch Linux
-sudo pacman -S libsodium
-```
-
-- **zlib**: For gzip compression support. If you want to use gzip compression, you need to install the zlib library. You can install it using the following command:
-```bash
-sudo apt-get install zlib1g-dev
-
-# Arch Linux
-sudo pacman -S zlib
-```
-
-- **cJSON**: For JSON parsing and serialization and used in JWT generation. You can install it using the following command:
-```bash
-sudo apt-get install libcjson-dev
-
-# Arch Linux
-sudo pacman -S cjson
+git clone https://github.com/abiiranathan/cipherkit.git
+cd cipherkit
+sudo make install
 ```
 
 ## Run the example
@@ -98,10 +72,8 @@ After building the library, you can run the example server by running the follow
 ```bash
 cd example
 
-# We go into the example directory for the server to locate the static files.
-# if the port number is not passed, the server will listen on port 3000.
-../build/example/example 8000
-
+# default port 3000.
+../build/example/example
 ```
 
 ## Public API Reference

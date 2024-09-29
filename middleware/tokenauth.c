@@ -1,4 +1,4 @@
-#include "../include/mw/tokenauth.h"
+#include "tokenauth.h"
 #include <string.h>
 
 #define BEARER "Bearer "

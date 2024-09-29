@@ -1,11 +1,9 @@
 #include "../src/epollix.c"
+#include "../include/constants.h"
 #include "../include/logging.h"
-#include "constants.h"
 
 // test parse request headers
-// http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length)
-
-void test_parse_request_headers(void) {
+static void test_parse_request_headers(void) {
     request_t* req = (request_t*)malloc(sizeof(request_t));
     LOG_ASSERT(req != NULL, "Failed to allocate memory for request_t");
 
@@ -44,7 +42,7 @@ void test_parse_request_headers(void) {
 }
 
 // decode_uri
-void test_decode_uri(void) {
+static void test_decode_uri(void) {
     char* encoded = "Hello%20World%21";
     char decoded[100];
     decode_uri(encoded, decoded, sizeof(decoded));
@@ -54,7 +52,7 @@ void test_decode_uri(void) {
 }
 
 // encode_uri
-void test_encode_uri(void) {
+static void test_encode_uri(void) {
     char* decoded = "Hello World!";
     char* encoded = encode_uri(decoded);
     bool result = strcmp(encoded, "Hello%20World%21") == 0;
@@ -65,7 +63,7 @@ void test_encode_uri(void) {
 }
 
 // bool set_header(context_t* ctx, const char* name, const char* value)
-void test_header_setter_and_getters(void) {
+static void test_header_setter_and_getters(void) {
     context_t* ctx = (context_t*)malloc(sizeof(context_t));
     LOG_ASSERT(ctx != NULL, "Failed to allocate memory for context_t");
 
@@ -89,7 +87,7 @@ void test_header_setter_and_getters(void) {
 }
 
 // header_t header_fromstring(const char* str)
-void test_header_fromstring(void) {
+static void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
     header_t* header = header_fromstring(header_text);
     LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
@@ -100,7 +98,7 @@ void test_header_fromstring(void) {
 }
 
 // bool parse_url_query_params(char* query, map* query_params)
-void test_parse_url_query_params(void) {
+static void test_parse_url_query_params(void) {
     map* query_params = map_create(10, key_compare_char_ptr);
     LOG_ASSERT(query_params != NULL, "Failed to create map for query_params");
 
@@ -128,7 +126,7 @@ void test_parse_url_query_params(void) {
 }
 
 // test match params in params.c
-void test_match_params(void) {
+static void test_match_params(void) {
     const char* pattern = "/about/{name}/profile/{id}/";
     const char url[] = "/about/John Doe/profile/123/";
 

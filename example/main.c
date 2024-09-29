@@ -11,13 +11,12 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../include/crypto.h"
+#include <cipherkit/cipherkit.h>
+
 #include "../include/epollix.h"
-#include "../include/gzip.h"
-#include "../include/jwt.h"
-#include "../include/mw/basicauth.h"
-#include "../include/mw/logger.h"
-#include "../include/mw/tokenauth.h"
+#include "../middleware/basicauth.h"
+#include "../middleware/logger.h"
+#include "../middleware/tokenauth.h"
 
 // ======================= Routes =======================
 void index_page(context_t* ctx) {
@@ -103,7 +102,15 @@ void handle_create_user(context_t* ctx) {
         return;
     }
 
-    char* jwtToken = jwt_token_create(&payload, secret);
+    char* jwtToken = NULL;
+    jwt_error_t jwt_err = jwt_token_create(&payload, secret, &jwtToken);
+    if (jwt_err != JWT_SUCCESS) {
+        LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
+        set_status(ctx, StatusInternalServerError);
+        send_string(ctx, "Internal Server Error");
+        return;
+    }
+
     LOG_INFO("Generated JWT token: %s", jwtToken);
 
     // response_redirect(ctx, "/");

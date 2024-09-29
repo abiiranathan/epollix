@@ -2243,7 +2243,6 @@ __attribute__((constructor())) void init(void) {
     }
 
     install_signal_handler();
-    init_mime_hashtable();
 }
 
 // Server request on given port. This blocks forever.
@@ -2401,7 +2400,6 @@ __attribute__((destructor)) static void epollix_cleanup(void) {
     }
 
     free_static_routes();
-    destroy_mime_hashtable();
     free_read_tasks();
 
     if (global_middleware_context) {

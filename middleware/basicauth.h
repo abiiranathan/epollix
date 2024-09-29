@@ -1,9 +1,9 @@
 #ifndef DF122B59_E09E_45EA_A842_517C7384D3EB
 #define DF122B59_E09E_45EA_A842_517C7384D3EB
 
-#include "../epollix.h"
-
 #define BASIC_AUTH_KEY "BasicAuthData"
+
+#include "../include/epollix.h"
 
 typedef struct basic_auth_data BasicAuthData;
 

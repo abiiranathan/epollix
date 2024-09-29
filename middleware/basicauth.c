@@ -1,6 +1,6 @@
-#include "../../include/mw/basicauth.h"
+#include "basicauth.h"
+#include <cipherkit/crypto.h>
 #include <string.h>
-#include "../../include/crypto.h"
 
 struct basic_auth_data {
     const char* username;  // Username

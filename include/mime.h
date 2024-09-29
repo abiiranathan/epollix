@@ -5,16 +5,8 @@
 extern "C" {
 #endif
 
-// Initialize the mime hashtable with the default mapping.
-void init_mime_hashtable(void);
-
-// Destroy the mime hashtable and free the memory.
-void destroy_mime_hashtable(void);
-
-// Returns the mime type expected for files. If your file is not included in the
-// default mapping, feel-free to contribute.
-// Warning: You must initialize the mime hashtable before calling this function with
-// init_mime_hashtable() and destroy it after you are done with destroy_mime_hashtable().
+// Returns the mime type of the file based on its extension.
+// If the extension is not recognized or filename is NULL, it returns "application/octet-stream".
 const char* get_mimetype(char* filename);
 
 #ifdef __cplusplus

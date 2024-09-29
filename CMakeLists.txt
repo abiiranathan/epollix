@@ -7,26 +7,22 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-option(BUILD_TESTS "Build the tests" OFF)
-
-# This allows the user to enable or disable the crypto libraries and middleware
-# and tests that depend on it.
-option(CRYPTO_ENABLED "Build with ssl, crypto, and sodium, cjson" ON)
-
-set(OPTIONAL_LIBS "")
-if(CRYPTO_ENABLED)
-    find_package(OpenSSL REQUIRED)
-    find_package(cJSON REQUIRED)
-    list(APPEND OPTIONAL_LIBS "-lcrypto -lssl -lsodium -lcjson -lz")
-
-endif()
-
-# Find the solidc library
-find_package(solidc REQUIRED)
-
 include(GNUInstallDirs)
 include(CTest)
 enable_testing()
+
+option(BUILD_TESTS "Build the tests" ON)
+
+find_package(solidc REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(CIPHERKIT cipherkit)
+
+if(CIPHERKIT_FOUND)
+    message(STATUS "Cipherkit found, middleware and example will be built")
+else()
+    message(STATUS "Cipherkit not found, middleware and example will not be built")
+endif()
+
 
 # Add libbcrypt
 add_subdirectory(deps/libbcrypt)
@@ -45,17 +41,11 @@ set(SOURCES
 )
 
 # Add the middleware sources
-if(CRYPTO_ENABLED)
+if(CIPHERKIT_FOUND)
     list(APPEND SOURCES
-        # Libraries
-        src/gzip.c
-        src/jwt.c
-        src/crypto.c
-
-        # Middleware implementations
-        src/mw/logger.c
-        src/mw/tokenauth.c
-        src/mw/basicauth.c
+        middleware/logger.c
+        middleware/tokenauth.c
+        middleware/basicauth.c
     )
 endif()
 
@@ -82,11 +72,11 @@ endif()
 
 
 # Add the middleware headers
-if(CRYPTO_ENABLED)
+if(CIPHERKIT_FOUND)
     list(APPEND HEADERS
-        include/mw/basicauth.h
-        include/mw/logger.h
-        include/mw/tokenauth.h
+        middleware/basicauth.h
+        middleware/logger.h
+        middleware/tokenauth.h
     )
 endif()
 
@@ -94,12 +84,9 @@ endif()
 # Can pass -DBUILD_SHARED_LIB to build a shared library
 add_library(epollix ${SOURCES})
 target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
-
-# Link the middleware libraries
-if(CRYPTO_ENABLED)
-    target_link_libraries(epollix PUBLIC OpenSSL::SSL OpenSSL::Crypto sodium cjson)
+if(CIPHERKIT_FOUND)
+    target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
 endif()
-
 target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
 
 # If using clang, add support for -fblocks
@@ -113,12 +100,7 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # If in release mode, add some security flags
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         message(STATUS "Using GCC, adding security flags")
-        target_compile_options(epollix PUBLIC 
-            -fstack-protector-strong 
-            -D_FORTIFY_SOURCE=2 
-            -fPIE 
-            -fPIC 
-            -O2)
+        target_compile_options(epollix PUBLIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC)
     endif()
 endif()
 
@@ -141,11 +123,11 @@ install(TARGETS epollix
 )
 
 # Add the tests and build middleware
-if(BUILD_TESTS AND CRYPTO_ENABLED)
+if(BUILD_TESTS AND CIPHERKIT_FOUND)
     add_subdirectory(tests)
 endif()
 
-if (CRYPTO_ENABLED)
+if (CIPHERKIT_FOUND)
     add_subdirectory(example)
 endif()
 
