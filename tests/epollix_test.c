@@ -1,4 +1,4 @@
-#include "../src/epollix.c"
+#include "../include/epollix.h"
 #include "../include/constants.h"
 #include "../include/logging.h"
 
@@ -36,7 +36,7 @@ static void test_parse_request_headers(void) {
     LOG_ASSERT(strcmp(req->headers[2]->name, "Accept") == 0, "Expected Accept header");
     LOG_ASSERT(strcmp(req->headers[2]->value, "*/*") == 0, "Expected */*");
 
-    reset_request(req);
+    request_destroy(req);
 
     LOG_INFO("test_parse_request_headers passed");
 }

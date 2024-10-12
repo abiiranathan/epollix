@@ -8,119 +8,45 @@ extern "C" {
 #define _GNU_SOURCE 1
 
 #include <stdio.h>
-#include "constants.h"
-#include "logging.h"
-#include "method.h"
+#include "middleware.h"
 #include "mime.h"
 #include "multipart.h"
-#include "params.h"
-#include "status.h"
+#include "request.h"
 
-// Macro to silence unused variable errors.
-#define UNUSED(var) ((void)(var))
+// epollix context containing response primitives and request state.
+typedef struct epollix_context {
+    http_status status;                // Status code
+    uint8_t* data;                     // Response data as bytes.
+    size_t content_length;             // Content-Length
+    request_t* request;                // Pointer to the request
+    bool headers_sent;                 // Headers already sent
+    bool chunked;                      // Is a chunked transfer
+    size_t header_count;               // Number of headers set.
+    header_t** headers;                // Response headers
+    struct MiddlewareContext* mw_ctx;  // Middleware context
+    map* locals;                       // user-data key-value store the context.
+} context_t;
 
-#define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
-#define ERR_TOO_MANY_HEADERS "Too many headers\n"
-#define ERR_HEADER_NAME_TOO_LONG "Header name too long\n"
-#define ERR_HEADER_VALUE_TOO_LONG "Header value too long\n"
-#define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
-#define ERR_INVALID_STATUS_LINE "Invalid http status line\n"
-#define ERR_METHOD_NOT_ALLOWED "Method not allowed\n"
+// Allocate memory for request headers.
+bool allocate_headers(context_t* ctx);
 
-// Request object.
-typedef struct request request_t;
-
-// Response object.
-typedef struct epollix_context context_t;
-
-// Handler func.
-typedef void (*Handler)(context_t* ctx);
-
-// Route struct.
-typedef struct Route Route;
-
-// RouteGroup struct.
-typedef struct RouteGroup RouteGroup;
-
-// A middleware function that takes a context and a next function.
-// The next function is a callback that will be called to pass control to the next middleware.
-typedef void (*Middleware)(context_t* ctx, Handler next);
-
-// RouteMatcher matches the request to a given Route.
-// The route handler is passed the response and request objects.
-typedef Route* (*RouteMatcher)(HttpMethod method, const char* path);
-
-// Apply middleware(s) to all registered routes.
-void use_global_middleware(int count, ...);
-
-// Apply middleware(s) to a spacific route.
-void use_route_middleware(Route* route, int count, ...);
-
-// Apply middleware(s) to a group of routes.
-void use_group_middleware(RouteGroup* group, int count, ...);
-
-// Set route middleware context or userdata.
-void set_middleware_context(Route* route, void* userdata);
-
-// Returns the route middleware context or userdata or NULL if not set
-// for the current route.
-void* get_route_middleware_context(context_t* ctx);
-
-// Set global middleware context or userdata.
-void set_global_mw_context(const char* key, void* userdata);
-
-// Returns the global middleware context or userdata or NULL if not set.
-void* get_global_middleware_context(const char* key);
-
-//  ================== Getters =====================
-
-// Returns the query parameter by name or NULL if it does not exist.
-const char* get_query(context_t* ctx, const char* name);
-
-// Returns the path parameter by name or NULL if it does not exist.
-const char* get_param(context_t* ctx, const char* name);
-
-// Returns the Request PATH associated with this request.
-// This excludes the query params.
-const char* get_path(context_t* ctx);
-
-// Returns a request header by name or NULL if it does not exist.
-const char* get_header(context_t* ctx, const char* name);
-
-// Returns a response header by name or NULL if it does not exist.
-const char* get_response_header(context_t* ctx, const char* name);
-
-// Returns the http method as a const char*. All methods are in uppercase.
-// If you want the type-safe enum, use get_method.
-const char* get_method_str(context_t* ctx);
-
-// Returns the content-type for this request by reading the Content-Type header.
-const char* get_content_type(context_t* ctx);
-
-// Returns the IP address of the client.
-// It reads the X-Forwarded-For header if it exists, if not
-// reads X-Real-IP header before resolving the IP address from the socket.
-// The returned address is a heap-allocated string that the caller must free.
-char* get_ip_address(context_t* ctx);
-
-// Returns the HttpMethod enum for the request.
-// Use get_method_str if you want the method as a char*.
-HttpMethod get_method(context_t* ctx);
-
-// Returns the body of the request or NULL if there is no body.
-char* get_body(context_t* ctx);
-
-// Returns the number of bytes in the request body or 0 if no body.
-size_t get_body_size(context_t* ctx);
-
-// Returns the current route.
-const Route* get_current_route(context_t* ctx);
-
-// Returns the pattern for which route was registered.
-const char* get_route_pattern(Route* route);
+// Set the response status code.
+void set_status(context_t* ctx, http_status status);
 
 // Get response status code.
 http_status get_status(context_t* ctx);
+
+// Get the content type of the request.
+const char* get_content_type(context_t* ctx);
+
+const char* get_param(context_t* ctx, const char* name);
+
+// Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
+// Adds MSG_NOSIGNAL to send flags to ignore sigpipe.
+ssize_t sendall(int fd, const void* buf, size_t n);
+
+// Send error back to client as html with a status code.
+void http_error(int client_fd, http_status status, const char* message);
 
 // =================== Setters =================================
 
@@ -136,6 +62,9 @@ void set_content_type(context_t* ctx, const char* content_type);
 // Enable or disable directory browsing for the server.
 // If the requested path is a directory, the server will list the files in the directory.
 void enable_directory_browsing(bool enable);
+
+// Returns the IP address of the client.
+char* get_ip_address(context_t* ctx);
 
 // format_file_size returns a human-readable string representation of the file size.
 // The function returns a pointer to a static buffer that is overwritten on each call.
@@ -174,77 +103,8 @@ int send_string(context_t* ctx, const char* data);
 // Send a formatted string as a response.
 __attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...);
 
-// percent-encode a string for safe use in a URL.
-// Returns an allocated char* that the caller must free after use.
-char* encode_uri(const char* str);
-
-// decode uri component and replace percent-encoded characters with proper
-// ascii characters e.g %20 becomes " " etc.
-void decode_uri(const char* url, char* dst, size_t dst_size);
-
 // Redirect the response to a new URL with a 302 status code.
 void response_redirect(context_t* ctx, const char* url);
-
-// ==================== REGISTER ROUTES ON CTX ===================================
-// Register an OPTIONS route.
-Route* route_options(const char* pattern, Handler handler);
-
-// Register a GET route.
-Route* route_get(const char* pattern, Handler handler);
-
-// Register a POST route.
-Route* route_post(const char* pattern, Handler handler);
-
-// Register a PUT route.
-Route* route_put(const char* pattern, Handler handler);
-
-// Register a PATCH route.
-Route* route_patch(const char* pattern, Handler handler);
-
-// Register a DELETE route.
-Route* route_delete(const char* pattern, Handler handler);
-
-// Serve static directory at dirname.
-// e.g   route_static("/web", "/var/www/html");
-Route* route_static(const char* pattern, const char* dirname);
-
-// =========== REGISTER ROUTES ON Group ========================
-
-// Create a new RouteGroup.
-// A RouteGroup is a collection of routes that share the same prefix.
-// The allocated group must be freed by calling ROUTE_GROUP_FREE.
-RouteGroup* route_group(const char* pattern);
-
-// Free a RouteGroup allocated by ROUTE_GROUP.
-void route_group_free(RouteGroup* group);
-
-// Register an OPTIONS route.
-Route* route_group_options(RouteGroup* group, const char* pattern, Handler handler);
-
-// Register a GET route.
-Route* route_group_get(RouteGroup* group, const char* pattern, Handler handler);
-
-// Register a POST route.
-Route* route_group_post(RouteGroup* group, const char* pattern, Handler handler);
-
-// Register a PUT route.
-Route* route_group_put(RouteGroup* group, const char* pattern, Handler handler);
-
-// Register a PATCH route.
-Route* route_group_patch(RouteGroup* group, const char* pattern, Handler handler);
-
-// Register a DELETE route.
-Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handler);
-
-// Serve static directory at dirname.
-// e.g   STATIC_GROUP_DIR(group, "/web", "/var/www/html");
-Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname);
-
-// Set a NotFoundHandler. This is handy for SPAs.
-// It will be called if the RouteMatcher returns NULL.
-Route* route_notfound(Handler h);
-
-// =========================================================================
 
 // serve a file with support for partial content specified by the "Range" header.
 // Uses sendfile to copy content from file directly into the kernel space.

@@ -1,4 +1,6 @@
 #include "logger.h"
+#include "../include/epollix.h"
+#include "../include/middleware.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -70,7 +72,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Method
     if (log_flags & LOG_METHOD) {
-        const char* method_str = get_method_str(ctx);
+        const char* method_str = method_tostring(ctx->request->method);
         if (method_str) {
             if (running_in_terminal()) {
                 buffer_offset += snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset,
@@ -84,7 +86,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Path
     if (log_flags & LOG_PATH) {
-        const char* path = get_path(ctx);
+        const char* path = ctx->request->path;
         if (path) {
             buffer_offset += snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%s ", path);
         }
@@ -145,7 +147,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // User Agent
     if (log_flags & LOG_USER_AGENT) {
-        const char* user_agent = get_header(ctx, "User-Agent");
+        const char* user_agent = find_header(ctx->request->headers, ctx->request->header_count, "User-Agent");
         if (user_agent) {
             buffer_offset +=
                 snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%s ", user_agent);

@@ -14,6 +14,7 @@
 #include <cipherkit/cipherkit.h>
 
 #include "../include/epollix.h"
+#include "../include/request.h"
 #include "../middleware/basicauth.h"
 #include "../middleware/logger.h"
 #include "../middleware/tokenauth.h"
@@ -53,8 +54,8 @@ void handle_create_user(context_t* ctx) {
         return;
     }
 
-    char* body = get_body(ctx);
-    code = multipart_parse_form(body, get_body_size(ctx), boundary, &form);
+    char* body = (char*)ctx->request->body;
+    code = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
     if (code != MULTIPART_OK) {
         set_status(ctx, StatusBadRequest);
         const char* error = multipart_error_message(code);

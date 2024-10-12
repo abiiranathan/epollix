@@ -68,4 +68,16 @@
 #define MAX_GROUP_MIDDLEWARE 4
 #endif
 
+// Macro to silence unused variable errors.
+#define UNUSED(var) ((void)(var))
+
+#define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
+#define ERR_TOO_MANY_HEADERS "Too many headers\n"
+#define ERR_HEADER_NAME_TOO_LONG "Header name too long\n"
+#define ERR_HEADER_VALUE_TOO_LONG "Header value too long\n"
+#define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
+#define ERR_INVALID_STATUS_LINE "Invalid http status line\n"
+#define ERR_METHOD_NOT_ALLOWED "Method not allowed\n"
+#define CONTENT_TYPE_HEADER "Content-Type"
+
 #endif /* EA56F184_3413_409F_A9D5_E26BBDFC9535 */

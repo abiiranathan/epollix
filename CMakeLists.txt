@@ -33,10 +33,15 @@ add_subdirectory(deps/libbcrypt)
 
 set(SOURCES
     src/epollix.c
+    src/header.c
     src/method.c
+    src/middleware.c
     src/mime.c
-    src/params.c
     src/multipart.c
+    src/params.c
+    src/request.c
+    src/route.c
+    src/static.c
     src/status.c
 )
 
@@ -56,10 +61,16 @@ set(HEADERS
     include/epollix.h
     include/logging.h
     include/method.h
+    include/header.h
     include/mime.h
     include/multipart.h
     include/params.h
     include/status.h
+    include/header.h
+    include/middleware.h
+    include/request.h
+    include/route.h
+    include/static.h
 )
 
 
