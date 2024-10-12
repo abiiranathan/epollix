@@ -120,7 +120,7 @@ static cleanup_func user_cleanup_func = NULL;             // User-defined cleanu
 int epoll_fd = -1;                                          // epoll file descriptor
 int server_fd = -1;                                         // server file descriptor
 volatile sig_atomic_t cleanup_done = false;                 // atomic flag to indicate cleanup is done
-ThreadPool pool = NULL;                                     // Thread pool for handling requests
+ThreadPool* pool = NULL;                                    // Thread pool for handling requests
 pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;  // Mutex for cleanup
 pthread_t shutdown_thread = 0;                              // Thread for cleanup
 
@@ -2395,7 +2395,6 @@ int listen_and_serve(const char* port, size_t num_workers, cleanup_func cf) {
 
 __attribute__((destructor)) static void epollix_cleanup(void) {
     if (pool) {
-        threadpool_wait(pool);
         threadpool_destroy(pool);
     }
 
