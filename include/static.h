@@ -5,7 +5,12 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include "epollix.h"
+
+// Enable or disable directory browsing for the server.
+// If the requested path is a directory, the server will list the files in the directory.
+void enable_directory_browsing(bool enable);
 
 void staticFileHandler(context_t* ctx);
 

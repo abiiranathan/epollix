@@ -1,6 +1,5 @@
-#define _GNU_SOURCE
-
 #include "../include/request.h"
+#include "../include/middleware.h"
 #include "../include/route.h"
 
 #include <ctype.h>
@@ -16,6 +15,25 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 
 extern void http_error(int client_fd, http_status status, const char* message);
 extern void close_connection(int client_fd, int epoll_fd);
+
+// Get request header value by name.
+const char* get_request_header(request_t* req, const char* name) {
+    return find_header(req->headers, req->header_count, name);
+}
+
+// Get the content type of the request.
+const char* get_content_type(request_t* req) {
+    return get_request_header(req, CONTENT_TYPE_HEADER);
+}
+
+const char* get_param(request_t* req, const char* name) {
+    return get_path_param(req->route->params, name);
+}
+
+// Get the value of a query parameter by name.
+const char* get_query_param(request_t* req, const char* name) {
+    return map_get(req->query_params, (void*)name);
+}
 
 static const char* http_error_string(http_error_t code) {
     switch (code) {
@@ -317,15 +335,32 @@ void initialize_request(request_t* req, uint8_t* body, size_t content_length, ma
 
 // Clean up resources allocated for the request
 void request_destroy(request_t* req) {
-    if (req->body) {
-        free(req->body);
+    if (!req) {
+        return;
     }
-    if (req->query_params) {
-        map_destroy(req->query_params, true);
-    }
+
     if (req->path) {
         free(req->path);
+        req->path = NULL;
     }
+
+    if (req->client_fd != -1 && req->epoll_fd != -1) {
+        close_connection(req->client_fd, req->epoll_fd);
+        req->client_fd = -1;
+        req->epoll_fd = -1;
+    }
+
+    if (req->body) {
+        free(req->body);
+        req->body = NULL;
+    }
+
+    if (req->query_params) {
+        map_destroy(req->query_params, true);
+        req->query_params = NULL;
+    }
+
+    req = NULL;
 }
 
 // Handle the case when a route is not found
@@ -352,7 +387,7 @@ Route* route_notfound(Handler h) {
 }
 
 // handle the request and send response.
-void handle_request(request_t* req) {
+void process_request(request_t* req) {
     int client_fd = req->client_fd;
     int epoll_fd = req->epoll_fd;
     char headers[4096] = {};
@@ -432,10 +467,9 @@ error:
     if (path) {
         free(path);
     }
+
     if (query) {
         free(query);
     }
-
-    request_destroy(req);
     close_connection(client_fd, epoll_fd);
 }

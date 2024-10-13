@@ -37,6 +37,18 @@ http_error_t parse_request_headers(request_t* req, const char* header_text, size
 // Populates the map.
 bool parse_url_query_params(char* query, map* query_params);
 
+// Get request header value by name.
+const char* get_request_header(request_t* req, const char* name);
+
+// Get the value of a query parameter by name.
+const char* get_query_param(request_t* req, const char* name);
+
+// Get the value of a path parameter by name.
+const char* get_param(request_t* req, const char* name);
+
+// Get the content type of the request.
+const char* get_content_type(request_t* req);
+
 // percent-encode a string for safe use in a URL.
 // Returns an allocated char* that the caller must free after use.
 char* encode_uri(const char* str);
@@ -45,7 +57,7 @@ char* encode_uri(const char* str);
 void decode_uri(const char* src, char* dst, size_t dst_size);
 
 // Handle Request and send response to the client.
-void handle_request(request_t* req);
+void process_request(request_t* req);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns NULL.

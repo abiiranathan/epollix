@@ -61,7 +61,7 @@ Route* route_delete(const char* pattern, Handler handler);
 Route* route_static(const char* pattern, const char* dirname);
 
 // Retruns the context data passed that was passed to this route and its middleware.
-void* get_route_middleware_context(struct epollix_context* ctx);
+void* route_middleware_context(struct epollix_context* ctx);
 
 // =========== REGISTER ROUTES ON Group ========================
 

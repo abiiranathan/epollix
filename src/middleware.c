@@ -52,7 +52,7 @@ void* get_global_middleware_context(const char* key) {
 }
 
 // Combine global and route-specific middleware
-Middleware* apply_middleware(Route* route, MiddlewareContext* mw_ctx, uint8_t* total) {
+Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx) {
     size_t total_count = global_middleware_count + route->middleware_count;
     Middleware* combined = (Middleware*)malloc(sizeof(Middleware) * total_count);
     if (combined == NULL) {
@@ -76,26 +76,33 @@ Middleware* apply_middleware(Route* route, MiddlewareContext* mw_ctx, uint8_t* t
     mw_ctx->count = combined_count;    // Set total mw count for the context.
     mw_ctx->index = 0;                 // Initialize middlewares traversed to 0
     mw_ctx->handler = route->handler;  // Store a reference to handler
-    *total = combined_count;           // Update total parameter
-
     return combined;
 }
 
-static void middleware_next(struct epollix_context* ctx) {
-    // cast incomplete type to concrete type
-    MiddlewareContext* mw_ctx = ((context_t*)(ctx))->mw_ctx;
-    execute_middleware(ctx, mw_ctx->middleware, mw_ctx->count, ++mw_ctx->index, mw_ctx->handler);
+// get_global_middleware_count returns the number of global middleware functions.
+size_t get_global_middleware_count(void) {
+    return global_middleware_count;
 }
 
-void execute_middleware(struct epollix_context* ctx, Middleware* middleware, size_t count, size_t index,
-                        Handler handler) {
+// get_global_middleware returns the global middleware functions.
+Middleware* get_global_middleware(void) {
+    return global_middleware;
+}
+
+static void middleware_next(context_t* ctx) {
+    MiddlewareContext* mw_ctx = ctx->mw_ctx;
+    execute_middleware(ctx, mw_ctx->middleware, mw_ctx->count, (mw_ctx->index++), mw_ctx->handler);
+}
+
+void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler handler) {
     if (index < count) {
         // Execute the next middleware in the chain
         middleware[index](ctx, middleware_next);
-    } else if (handler) {
-        // Call the handler if all middleware have been executed
-        handler(ctx);
+        return;
     }
+
+    // Call the handler if all middleware have been executed
+    handler(ctx);
 }
 
 // ================ Middleware logic ==================

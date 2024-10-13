@@ -2,6 +2,7 @@
 #include "../include/static.h"
 
 #include <solidc/filepath.h>
+#include <stdarg.h>
 
 // =================== STATIC GLOBALS ================================================
 static Route routeTable[MAX_ROUTES] = {};
@@ -14,7 +15,6 @@ const char* get_route_pattern(Route* route) {
 // Default route matcher.
 Route* default_route_matcher(HttpMethod method, const char* path) {
     bool matches = false;
-
     for (size_t i = 0; i < numRoutes; i++) {
         if (method != routeTable[i].method) {
             continue;
@@ -244,6 +244,64 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     return route;
 }
 
-void* get_route_middleware_context(context_t* ctx) {
+void* route_middleware_context(context_t* ctx) {
     return ctx->request->route->mw_data;
+}
+
+// Create a new RouteGroup.
+RouteGroup* route_group(const char* pattern) {
+    RouteGroup* group = (RouteGroup*)malloc(sizeof(RouteGroup));
+    if (!group) {
+        LOG_FATAL("Failed to allocate memory for RouteGroup\n");
+    }
+
+    group->prefix = strdup(pattern);
+    if (!group->prefix) {
+        LOG_FATAL("Failed to allocate memory for RouteGroup prefix\n");
+    }
+
+    group->middleware_count = 0;
+    group->count = 0;
+    group->middleware = NULL;
+    group->middleware_count = 0;
+    group->routes = NULL;
+    return group;
+}
+
+void route_group_free(RouteGroup* group) {
+    // Free the group prefix
+    free(group->prefix);
+    if (group->middleware) {
+        free(group->middleware);
+    }
+
+    if (group->routes) {
+        // The individual routes are freed in free_static_routes
+        free(group->routes);
+        group->routes = NULL;
+    }
+    free(group);
+}
+
+// Attach route group middleware.
+void use_group_middleware(RouteGroup* group, int count, ...) {
+    if (count <= 0) {
+        return;
+    }
+
+    uint8_t new_count = group->middleware_count + (uint8_t)count;
+    Middleware* new_middleware = (Middleware*)realloc(group->middleware, sizeof(Middleware) * (size_t)new_count);
+    if (!new_middleware) {
+        LOG_FATAL("Failed to allocate memory for group middleware\n");
+    }
+
+    group->middleware = new_middleware;
+
+    va_list args;
+    va_start(args, count);
+    for (size_t i = group->middleware_count; i < new_count; i++) {
+        ((Middleware*)(group->middleware))[i] = va_arg(args, Middleware);
+    }
+    group->middleware_count = new_count;
+    va_end(args);
 }

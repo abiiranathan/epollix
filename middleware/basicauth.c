@@ -1,6 +1,8 @@
 #include "basicauth.h"
 #include <cipherkit/crypto.h>
 #include <string.h>
+#include "../include/response.h"
+#include "basicauth.h"
 
 struct basic_auth_data {
     const char* username;  // Username
@@ -56,8 +58,8 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
 }
 
 static void userUnathorized(context_t* ctx) {
-    set_status(ctx, StatusUnauthorized);
-    set_header(ctx, "WWW-Authenticate", "Basic realm=\"Protected\"");
+    ctx->status = StatusUnauthorized;
+    set_response_header(ctx, "WWW-Authenticate", "Basic realm=\"Protected\"");
     send_string(ctx, "Unauthorized");
 }
 
@@ -94,7 +96,7 @@ unauthorized:
 }
 
 void route_basic_auth(context_t* ctx, Handler next) {
-    BasicAuthData* auth_data = (BasicAuthData*)get_route_middleware_context(ctx);
+    BasicAuthData* auth_data = (BasicAuthData*)route_middleware_context(ctx);
     if (auth_data == NULL) {
         userUnathorized(ctx);
         return;

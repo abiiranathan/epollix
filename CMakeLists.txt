@@ -27,10 +27,6 @@ endif()
 # Add libbcrypt
 add_subdirectory(deps/libbcrypt)
 
-# file(GLOB_RECURSE SOURCES "src/*.c")
-# file(GLOB_RECURSE HEADERS "include/*.h")
-# Explicitly list the source files
-
 set(SOURCES
     src/epollix.c
     src/header.c
@@ -43,6 +39,8 @@ set(SOURCES
     src/route.c
     src/static.c
     src/status.c
+    src/response.c
+    src/server.c
 )
 
 # Add the middleware sources
@@ -71,6 +69,8 @@ set(HEADERS
     include/request.h
     include/route.h
     include/static.h
+    include/response.h
+    include/server.h
 )
 
 
@@ -98,7 +98,7 @@ target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
 if(CIPHERKIT_FOUND)
     target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
 endif()
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -g)
 
 # If using clang, add support for -fblocks
 # sudo pacman -S libdispatch # provides libBlocksRuntime

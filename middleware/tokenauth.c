@@ -1,32 +1,38 @@
+
+#define _GNU_SOURCE 1
+
 #include "tokenauth.h"
+#include <stdlib.h>
 #include <string.h>
+#include "../include/response.h"
 
 #define BEARER "Bearer "
 #define BEARER_LEN 7
 #define JWT_PAYLOAD_CONTEXT_NAME "JWT_PAYLOAD_CONTEXT_NAME"
 
-void unauthorized(context_t* ctx) {
-    set_status(ctx, StatusUnauthorized);
+void handleUnauthorized(context_t* ctx) {
+    ctx->status = StatusUnauthorized;
     send_string(ctx, "Unauthorized");
 }
 
 void BearerAuthMiddleware(context_t* ctx, Handler next) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
     if (auth_header == NULL) {
-        unauthorized(ctx);
+        LOG_ERROR("Authorization header is missing");
+        handleUnauthorized(ctx);
         return;
     }
 
-    const char* secret = getenv(JWT_TOKEN_SECRET);
+    const char* secret = secure_getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
-        unauthorized(ctx);
+        handleUnauthorized(ctx);
         return;
     }
 
     const char* token = strstr(auth_header, BEARER);
     if (token == NULL) {
-        unauthorized(ctx);
+        handleUnauthorized(ctx);
         return;
     }
 
@@ -36,19 +42,27 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     JWTPayload* payload = (JWTPayload*)malloc(sizeof(JWTPayload));
     if (!payload) {
         LOG_ERROR("Failed to allocate memory for JWT payload");
-        unauthorized(ctx);
+        handleUnauthorized(ctx);
         return;
     }
 
-    if (!jwt_token_verify(token, secret, payload)) {
+    // Verify the token against the secret key.
+    jwt_error_t code = jwt_token_verify(token, secret, payload);
+    if (code != JWT_SUCCESS) {
+        free(payload);
         LOG_ERROR("Invalid JWT token: %s", token);
-        unauthorized(ctx);
+        handleUnauthorized(ctx);
         return;
     }
 
     // Store the payload in the context
     set_context_value(ctx, JWT_PAYLOAD_CONTEXT_NAME, payload);
+
+    // Call the next middleware or handler
     next(ctx);
+
+    // Free the payload after the response is sent
+    free(payload);
 }
 
 // Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.

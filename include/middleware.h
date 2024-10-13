@@ -25,7 +25,13 @@ void middleware_init(void);
 void middleware_cleanup(void);
 
 // Combine global and route specific middleware.
-Middleware* apply_middleware(Route* route, MiddlewareContext* mw_ctx, uint8_t* total);
+Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx);
+
+// get_global_middleware_count returns the number of global middleware functions.
+size_t get_global_middleware_count(void);
+
+// get_global_middleware returns the global middleware functions.
+Middleware* get_global_middleware(void);
 
 void execute_middleware(struct epollix_context* ctx, Middleware* middleware, size_t count, size_t index,
                         Handler handler);

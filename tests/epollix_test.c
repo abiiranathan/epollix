@@ -1,6 +1,7 @@
 #include "../include/epollix.h"
 #include "../include/constants.h"
 #include "../include/logging.h"
+#include "../include/response.h"
 
 // test parse request headers
 static void test_parse_request_headers(void) {
@@ -69,7 +70,7 @@ static void test_header_setter_and_getters(void) {
 
     bool ok = allocate_headers(ctx);
     LOG_ASSERT(ok, "Failed to allocate headers");
-    bool result = set_header(ctx, "Content-Type", "text/html");
+    bool result = set_response_header(ctx, "Content-Type", "text/html");
     LOG_ASSERT(result, "Failed to set header");
 
     LOG_ASSERT(strcmp(ctx->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");

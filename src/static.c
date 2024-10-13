@@ -1,7 +1,7 @@
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE 1
 
-#include "../include/epollix.h"
 #include "../include/request.h"
+#include "../include/response.h"
 
 #include <solidc/arena.h>
 #include <solidc/cstr.h>
@@ -29,7 +29,7 @@ static void send_error_page(context_t* ctx, http_status status) {
         return;
     }
 
-    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->status = status;
     send_string(ctx, error_page);
     free(error_page);
@@ -86,7 +86,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     char* path = strdup(base_prefix);
     if (!path) {
         LOG_ERROR("Failed to allocate memory for path\n");
-        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->status = StatusInternalServerError;
         send_string(ctx, "Failed to allocate memory for path");
         arena_destroy(arena);
@@ -150,7 +150,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         closedir(dir);
     } else {
         // Could not open directory
-        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->status = StatusInternalServerError;
         send_string(ctx, "Unable to open directory");
         arena_destroy(arena);
@@ -158,7 +158,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     }
 
     append_or_error(ctx, arena, html_response, "</table></body></html>");
-    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->status = StatusOK;
     send_string(ctx, html_response->data);
     arena_destroy(arena);
@@ -192,7 +192,7 @@ void staticFileHandler(context_t* ctx) {
     if (n < 0 || n >= MAX_PATH_LEN) {
         char errmsg[256];
         snprintf(errmsg, 256, "%s %d", "The path exceeds the maximum path size of", MAX_PATH_LEN);
-        set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->status = StatusRequestURITooLong;
         send_response(ctx, errmsg, strlen(errmsg));
         return;
@@ -221,7 +221,7 @@ void staticFileHandler(context_t* ctx) {
                 snprintf(prefix, MAX_PATH_LEN, "%s%s", route->pattern, static_path);
                 serve_directory_listing(ctx, filepath, prefix);
             } else {
-                set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+                set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
                 ctx->status = StatusForbidden;
                 send_string(ctx, "<h1>Directory listing is disabled</h1>");
             }
@@ -234,8 +234,8 @@ void staticFileHandler(context_t* ctx) {
 
     if (path_exists(filepath)) {
         const char* web_ct = get_mimetype(filepath);
-        set_header(ctx, CONTENT_TYPE_HEADER, web_ct);
-        http_servefile(ctx, filepath);
+        set_response_header(ctx, CONTENT_TYPE_HEADER, web_ct);
+        servefile(ctx, filepath);
         return;
     }
 
@@ -246,7 +246,7 @@ void staticFileHandler(context_t* ctx) {
 
     // Send a 404 response if the file is not found
     const char* response = "File Not Found\n";
-    set_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->status = StatusNotFound;
     send_response(ctx, response, strlen(response));
 }

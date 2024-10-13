@@ -2,6 +2,7 @@
 #define _GNU_SOURCE 1
 
 #include <assert.h>
+#include <cipherkit/cipherkit.h>
 #include <cjson/cJSON.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -10,11 +11,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#include <cipherkit/cipherkit.h>
-
-#include "../include/epollix.h"
-#include "../include/request.h"
+#include "../include/response.h"
+#include "../include/server.h"
 #include "../middleware/basicauth.h"
 #include "../middleware/logger.h"
 #include "../middleware/tokenauth.h"
@@ -22,21 +20,21 @@
 // ======================= Routes =======================
 void index_page(context_t* ctx) {
     set_content_type(ctx, "text/html");
-    http_servefile(ctx, "assets/index.html");
+    servefile(ctx, "assets/index.html");
 }
 
 void serve_movie(context_t* ctx) {
     set_content_type(ctx, "video/mp4");
-    http_servefile(ctx, "assets/BigBuckBunny.mp4");
+    servefile(ctx, "assets/BigBuckBunny.mp4");
 }
 
 // GET /greet/{name}
 void handle_greet(context_t* ctx) {
-    char* name = (char*)get_param(ctx, "name");
+    const char* name = get_param(ctx->request, "name");
     assert(name);
     printf("Hello %s\n", name);
 
-    set_header(ctx, "Content-Type", "text/plain");
+    set_response_header(ctx, "Content-Type", "text/plain");
     send_response(ctx, name, strlen(name));
 }
 
@@ -44,11 +42,11 @@ void handle_greet(context_t* ctx) {
 void handle_create_user(context_t* ctx) {
     MultipartForm form;
     MultipartCode code;
-    const char* content_type = get_content_type(ctx);
+    const char* content_type = get_content_type(ctx->request);
 
     char boundary[128] = {0};
     if (!multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary))) {
-        set_status(ctx, StatusBadRequest);
+        ctx->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
         send_string(ctx, error);
         return;
@@ -57,7 +55,7 @@ void handle_create_user(context_t* ctx) {
     char* body = (char*)ctx->request->body;
     code = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
     if (code != MULTIPART_OK) {
-        set_status(ctx, StatusBadRequest);
+        ctx->status = StatusBadRequest;
         const char* error = multipart_error_message(code);
         send_response(ctx, (char*)error, strlen(error));
         return;
@@ -98,7 +96,7 @@ void handle_create_user(context_t* ctx) {
     const char* secret = getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
-        set_status(ctx, StatusInternalServerError);
+        ctx->status = StatusInternalServerError;
         send_string(ctx, "Internal Server Error");
         return;
     }
@@ -107,7 +105,7 @@ void handle_create_user(context_t* ctx) {
     jwt_error_t jwt_err = jwt_token_create(&payload, secret, &jwtToken);
     if (jwt_err != JWT_SUCCESS) {
         LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
-        set_status(ctx, StatusInternalServerError);
+        ctx->status = StatusInternalServerError;
         send_string(ctx, "Internal Server Error");
         return;
     }
@@ -135,14 +133,14 @@ void handle_create_user(context_t* ctx) {
 // GET /users/register
 void render_register_form(context_t* ctx) {
     set_content_type(ctx, "text/html");
-    http_servefile(ctx, "./assets/register_user.html");
+    servefile(ctx, "./assets/register_user.html");
 }
 
 // Beared Authenticated route
 void protected_route(context_t* ctx) {
     const JWTPayload* payload = get_jwt_payload(ctx);
     if (payload == NULL) {
-        set_status(ctx, StatusUnauthorized);
+        ctx->status = StatusUnauthorized;
         send_string(ctx, "Unauthorized: Missing JWT token");
         return;
     }
@@ -229,7 +227,7 @@ static void api_users(context_t* ctx) {
 }
 
 static void api_user_by_id(context_t* ctx) {
-    char* id = (char*)get_param(ctx, "id");
+    char* id = (char*)get_param(ctx->request, "id");
     assert(id);
 
     char buffer[128];
@@ -243,7 +241,7 @@ void gzip_route(context_t* ctx) {
     size_t compressed_data_len = 0;
     gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
 
-    set_header(ctx, "Content-Encoding", "gzip");
+    set_response_header(ctx, "Content-Encoding", "gzip");
     send_response(ctx, (void*)compressed_data, compressed_data_len);
 
     free(compressed_data);
@@ -255,7 +253,7 @@ void cleanup(void) {
 
 void spa_route(context_t* ctx) {
     printf("Serving SPA route\n");
-    http_servefile(ctx, "/home/nabiizy/Code/C/pdfsearch/frontend/build/index.html");
+    servefile(ctx, "/home/nabiizy/Code/C/pdfsearch/frontend/build/index.html");
 }
 
 // ======================= END OF ROUTES ========================================
@@ -321,5 +319,13 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    listen_and_serve(port, 4, cleanup);
+    EpollServer* server = epoll_server_create(0, port, cleanup);
+    if (server == NULL) {
+        LOG_FATAL("Failed to create server\n");
+    }
+
+    // Start the server
+    epoll_server_listen(server);
+
+    return 0;
 }

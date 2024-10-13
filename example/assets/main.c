@@ -1,4 +1,6 @@
 #include "../../include/epollix.h"
+#include "../../include/response.h"
+#include "../../include/server.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -9,36 +11,36 @@
 #include <unistd.h>
 
 void logging_middleware(context_t* ctx, Handler next) {
-    printf("Request: %s %s\n", get_method_str(ctx), get_path(ctx));
+    printf("Request: %s %s\n", method_tostring(ctx->request->method), ctx->request->path);
     next(ctx);
 }
 
 void auth_middleware(context_t* ctx, Handler next) {
-    const char* auth = get_header(ctx, "Authorization");
+    const char* auth = get_request_header(ctx->request, "Authorization");
     if (auth && strcmp(auth, "secret") == 0) {
         printf("Authenticated!!\n");
         next(ctx);
     } else {
-        set_status(ctx, 401);
+        ctx->status = 401;
         send_response(ctx, "Unauthorized", strlen("Unauthorized"));
     }
 }
 
 void index_page(context_t* ctx) {
-    http_serve_file(ctx, "build/index.html");
+    servefile(ctx, "build/index.html");
 }
 
 void serve_movie(context_t* ctx) {
-    http_serve_file(ctx, "build/BigBuckBunny.mp4");
+    servefile(ctx, "build/BigBuckBunny.mp4");
 }
 
 // GET /greet/{name}
 void handle_greet(context_t* ctx) {
-    char* name = (char*)get_param(ctx, "name");
+    char* name = (char*)get_param(ctx->request, "name");
     assert(name);
     printf("Hello %s\n", name);
 
-    set_header(ctx, "Content-Type", "text/plain");
+    set_response_header(ctx, "Content-Type", "text/plain");
     send_response(ctx, name, strlen(name));
 }
 
@@ -46,17 +48,19 @@ void handle_greet(context_t* ctx) {
 void handle_create_user(context_t* ctx) {
     MultipartForm form;
     MultipartCode code;
-    const char* content_type = get_content_type(ctx);
+    const char* content_type = get_content_type(ctx->request);
     printf("Content-Type: %s\n", content_type);
 
     char boundary[128] = {0};
+    const char* body = (const char*)ctx->request->body;
+    size_t len = ctx->request->content_length;
+
     // You can also parse it from the body.
     bool ok = multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary));
     if (ok) {
-        char* body = get_body(ctx);
-        code = multipart_parse_form(body, get_body_length(ctx), boundary, &form);
+        code = multipart_parse_form(body, len, boundary, &form);
         if (code != MULTIPART_OK) {
-            set_status(ctx, StatusBadRequest);
+            ctx->status = StatusBadRequest;
             const char* error = multipart_error_message(code);
             send_response(ctx, (char*)error, strlen(error));
             return;
@@ -78,7 +82,7 @@ void handle_create_user(context_t* ctx) {
         multipart_free_form(&form);
         response_redirect(ctx, "/");
     } else {
-        set_status(ctx, StatusBadRequest);
+        ctx->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
         send_response(ctx, (char*)error, strlen(error));
     }
@@ -86,7 +90,7 @@ void handle_create_user(context_t* ctx) {
 
 // GET /users/register
 void render_register_form(context_t* ctx) {
-    http_serve_file(ctx, "./build/register_user.html");
+    servefile(ctx, "./build/register_user.html");
 }
 
 void* send_time(void* arg) {
@@ -130,19 +134,24 @@ int main(int argc, char** argv) {
 
     char* port = argv[1];
 
-    GET_ROUTE("/", index_page);
-    GET_ROUTE("/movie", serve_movie);
-    GET_ROUTE("/greet/{name}", handle_greet);
+    route_get("/", index_page);
+    route_get("/movie", serve_movie);
+    route_get("/greet/{name}", handle_greet);
 
-    Route* reg = GET_ROUTE("/users/register", render_register_form);
-    use_route_middleware(reg, auth_middleware);
+    Route* reg = route_get("/users/register", render_register_form);
+    use_route_middleware(reg, 1, auth_middleware);
 
-    POST_ROUTE("/users/create", handle_create_user);
-    GET_ROUTE("/chunked", chunked_response);
-    STATIC_DIR("/static", "./build");
+    route_post("/users/create", handle_create_user);
+    route_get("/chunked", chunked_response);
+    route_static("/static", "./build");
 
     // Add middleware
-    use_global_middleware(logging_middleware);
+    use_global_middleware(1, logging_middleware);
 
-    listen_and_serve(port, default_route_matcher, 4);
+    EpollServer* server = epoll_server_create(0, port, NULL);
+    if (server == NULL) {
+        LOG_FATAL("Failed to create server\n");
+    }
+
+    epoll_server_listen(server);
 }

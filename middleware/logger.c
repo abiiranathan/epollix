@@ -1,6 +1,4 @@
-#include "logger.h"
-#include "../include/epollix.h"
-#include "../include/middleware.h"
+#define _GNU_SOURCE 1
 
 #include <pthread.h>
 #include <stdio.h>
@@ -8,6 +6,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "../include/epollix.h"
+#include "../include/middleware.h"
+#include "logger.h"
 
 #define COLOR_RESET "\x1b[0m"
 #define COLOR_RED "\x1b[31m"
@@ -94,7 +96,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Status Code
     if (log_flags & LOG_STATUS) {
-        int status = get_status(ctx);
+        int status = ctx->status;
         if (running_in_terminal()) {
             switch (status / 100) {
                 case 2:
