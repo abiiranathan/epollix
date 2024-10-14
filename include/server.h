@@ -29,7 +29,7 @@ typedef struct EpollServer {
     cleanup_func cleanup;  // Cleanup function
     int server_fd;         // Server file descriptor
     int epoll_fd;          // Epoll file descriptor
-    ThreadPool* pool;      // Thread pool
+    ThreadPool pool;       // Thread pool
 } EpollServer;
 
 // Create a new EpollServer. If num_workers is 0, we use the num_cpus on the target machine.

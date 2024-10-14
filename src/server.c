@@ -401,6 +401,7 @@ static void epoll_server_shutdown(EpollServer* server) {
     }
 
     if (server->pool) {
+        threadpool_wait(server->pool);
         threadpool_destroy(server->pool);
     }
 
