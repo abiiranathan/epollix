@@ -7,7 +7,6 @@ void index_page(context_t* ctx) {
 
 void serve_movie(context_t* ctx) {
     set_content_type(ctx->response, "video/mp4");
-
     servefile(ctx, "/home/nabiizy/Videos/Movies/ANGRYBIRDS-2.mp4");
 }
 

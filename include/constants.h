@@ -21,13 +21,13 @@
 
 // Maximum length of a header name.
 #ifndef MAX_HEADER_NAME
-#define MAX_HEADER_NAME 64
+#define MAX_HEADER_NAME 32
 #endif
 
 // Maximum length of a header value.
 // Something reasonably long to accommodate JWT tokens, and cookies :)
 #ifndef MAX_HEADER_VALUE
-#define MAX_HEADER_VALUE 512
+#define MAX_HEADER_VALUE 256
 #endif
 
 #ifndef MAX_REQ_HEADERS
