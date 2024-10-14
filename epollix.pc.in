@@ -8,5 +8,5 @@ Description: An epoll web server library written in C
 Version: @PROJECT_VERSION@
 
 Requires: solidc
-Libs: -L${libdir} -lepollix -lsolidc @CIPHERKIT_LIBRARIES@
+Libs: -L${libdir} -lepollix -lsolidc @CIPHERKIT_LIBRARIES_PC@
 Cflags: -I${includedir}

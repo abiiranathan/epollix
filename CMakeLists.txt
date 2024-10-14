@@ -97,7 +97,9 @@ add_library(epollix ${SOURCES})
 target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
 if(CIPHERKIT_FOUND)
     target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
+    set(CIPHERKIT_LIBRARIES_PC "-lssl -lcrypto -lsodium -cjson -lcipherkit")
 endif()
+
 target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -g)
 
 # If using clang, add support for -fblocks
