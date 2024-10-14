@@ -28,7 +28,7 @@ endif()
 add_subdirectory(deps/libbcrypt)
 
 set(SOURCES
-    src/epollix.c
+    src/net.c
     src/header.c
     src/method.c
     src/middleware.c
@@ -56,7 +56,7 @@ endif()
 set(HEADERS
     include/constants.h
     include/defer.h
-    include/epollix.h
+    include/net.h
     include/logging.h
     include/method.h
     include/header.h
@@ -71,8 +71,8 @@ set(HEADERS
     include/static.h
     include/response.h
     include/server.h
+    include/epollix.h
 )
-
 
 # Include "include/automem.h" if using GCC or Clang and not in C++ mode
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
@@ -97,10 +97,10 @@ add_library(epollix ${SOURCES})
 target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
 if(CIPHERKIT_FOUND)
     target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
-    set(CIPHERKIT_LIBRARIES_PC "-lssl -lcrypto -lsodium -cjson -lcipherkit")
+    set(CIPHERKIT_LIBRARIES_PC "-lcipherkit -lssl -lcrypto -lsodium -lcjson")
 endif()
 
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -g)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
 
 # If using clang, add support for -fblocks
 # sudo pacman -S libdispatch # provides libBlocksRuntime

@@ -7,8 +7,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../include/epollix.h"
 #include "../include/middleware.h"
+#include "../include/net.h"
+#include "../include/response.h"
 #include "logger.h"
 
 #define COLOR_RESET "\x1b[0m"
@@ -96,7 +97,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Status Code
     if (log_flags & LOG_STATUS) {
-        int status = ctx->status;
+        int status = ctx->response->status;
         if (running_in_terminal()) {
             switch (status / 100) {
                 case 2:

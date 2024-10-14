@@ -1,4 +1,4 @@
-#include "../../include/epollix.h"
+#include "../../include/net.h"
 #include "../../include/response.h"
 #include "../../include/server.h"
 
@@ -21,8 +21,8 @@ void auth_middleware(context_t* ctx, Handler next) {
         printf("Authenticated!!\n");
         next(ctx);
     } else {
-        ctx->status = 401;
-        send_response(ctx, "Unauthorized", strlen("Unauthorized"));
+        ctx->response->status = 401;
+        send_response(ctx->response, "Unauthorized", strlen("Unauthorized"));
     }
 }
 
@@ -40,8 +40,8 @@ void handle_greet(context_t* ctx) {
     assert(name);
     printf("Hello %s\n", name);
 
-    set_response_header(ctx, "Content-Type", "text/plain");
-    send_response(ctx, name, strlen(name));
+    set_response_header(ctx->response, "Content-Type", "text/plain");
+    send_response(ctx->response, name, strlen(name));
 }
 
 // /POST /users/create
@@ -60,9 +60,9 @@ void handle_create_user(context_t* ctx) {
     if (ok) {
         code = multipart_parse_form(body, len, boundary, &form);
         if (code != MULTIPART_OK) {
-            ctx->status = StatusBadRequest;
+            ctx->response->status = StatusBadRequest;
             const char* error = multipart_error_message(code);
-            send_response(ctx, (char*)error, strlen(error));
+            send_response(ctx->response, (char*)error, strlen(error));
             return;
         }
 
@@ -80,11 +80,11 @@ void handle_create_user(context_t* ctx) {
         }
 
         multipart_free_form(&form);
-        response_redirect(ctx, "/");
+        response_redirect(ctx->response, "/");
     } else {
-        ctx->status = StatusBadRequest;
+        ctx->response->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
-        send_response(ctx, (char*)error, strlen(error));
+        send_response(ctx->response, (char*)error, strlen(error));
     }
 }
 
@@ -105,7 +105,7 @@ void* send_time(void* arg) {
         timeinfo = localtime(&rawtime);
         strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
 
-        int ret = response_send_chunk(ctx, buffer, strlen(buffer));
+        int ret = response_send_chunk(ctx->response, buffer, strlen(buffer));
         if (ret < 0) {
             break;
         }
@@ -124,7 +124,7 @@ void chunked_response(context_t* ctx) {
     pthread_t thread;
     pthread_create(&thread, NULL, send_time, ctx);
     pthread_join(thread, NULL);
-    response_end(ctx);
+    response_end(ctx->response);
 }
 
 int main(int argc, char** argv) {

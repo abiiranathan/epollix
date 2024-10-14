@@ -10,29 +10,29 @@
 #define BEARER_LEN 7
 #define JWT_PAYLOAD_CONTEXT_NAME "JWT_PAYLOAD_CONTEXT_NAME"
 
-void handleUnauthorized(context_t* ctx) {
-    ctx->status = StatusUnauthorized;
-    send_string(ctx, "Unauthorized");
+void handleUnauthorized(Response* res) {
+    res->status = StatusUnauthorized;
+    send_string(res, "Unauthorized");
 }
 
 void BearerAuthMiddleware(context_t* ctx, Handler next) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
     if (auth_header == NULL) {
         LOG_ERROR("Authorization header is missing");
-        handleUnauthorized(ctx);
+        handleUnauthorized(ctx->response);
         return;
     }
 
     const char* secret = secure_getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
-        handleUnauthorized(ctx);
+        handleUnauthorized(ctx->response);
         return;
     }
 
     const char* token = strstr(auth_header, BEARER);
     if (token == NULL) {
-        handleUnauthorized(ctx);
+        handleUnauthorized(ctx->response);
         return;
     }
 
@@ -42,7 +42,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     JWTPayload* payload = (JWTPayload*)malloc(sizeof(JWTPayload));
     if (!payload) {
         LOG_ERROR("Failed to allocate memory for JWT payload");
-        handleUnauthorized(ctx);
+        handleUnauthorized(ctx->response);
         return;
     }
 
@@ -52,7 +52,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
         free(payload);
         payload = NULL;
         LOG_ERROR("Invalid JWT token: %s", token);
-        handleUnauthorized(ctx);
+        handleUnauthorized(ctx->response);
         return;
     }
 
@@ -61,11 +61,9 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
 
     // Call the next middleware or handler
     next(ctx);
-
 }
 
 // Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.
 const JWTPayload* get_jwt_payload(context_t* ctx) {
     return (JWTPayload*)get_context_value(ctx, JWT_PAYLOAD_CONTEXT_NAME);
 }
-

@@ -1,31 +1,14 @@
-#define _POSIX_C_SOURCE 200809L
-#define _GNU_SOURCE 1
+#include "../include/epollix.h"
 
-#include <assert.h>
-#include <cipherkit/cipherkit.h>
-#include <cjson/cJSON.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#include "../include/response.h"
-#include "../include/server.h"
-#include "../middleware/basicauth.h"
-#include "../middleware/logger.h"
-#include "../middleware/tokenauth.h"
-
-// ======================= Routes =======================
 void index_page(context_t* ctx) {
-    set_content_type(ctx, "text/html");
+    set_content_type(ctx->response, "text/html");
     servefile(ctx, "assets/index.html");
 }
 
 void serve_movie(context_t* ctx) {
-    set_content_type(ctx, "video/mp4");
-    servefile(ctx, "assets/BigBuckBunny.mp4");
+    set_content_type(ctx->response, "video/mp4");
+
+    servefile(ctx, "/home/nabiizy/Videos/Movies/ANGRYBIRDS-2.mp4");
 }
 
 // GET /greet/{name}
@@ -34,8 +17,8 @@ void handle_greet(context_t* ctx) {
     assert(name);
     printf("Hello %s\n", name);
 
-    set_response_header(ctx, "Content-Type", "text/plain");
-    send_response(ctx, name, strlen(name));
+    set_response_header(ctx->response, "Content-Type", "text/plain");
+    send_response(ctx->response, name, strlen(name));
 }
 
 // /POST /users/create
@@ -46,18 +29,18 @@ void handle_create_user(context_t* ctx) {
 
     char boundary[128] = {0};
     if (!multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary))) {
-        ctx->status = StatusBadRequest;
+        ctx->response->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
-        send_string(ctx, error);
+        send_string(ctx->response, error);
         return;
     }
 
     char* body = (char*)ctx->request->body;
     code = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
     if (code != MULTIPART_OK) {
-        ctx->status = StatusBadRequest;
+        ctx->response->status = StatusBadRequest;
         const char* error = multipart_error_message(code);
-        send_response(ctx, (char*)error, strlen(error));
+        send_response(ctx->response, (char*)error, strlen(error));
         return;
     }
 
@@ -96,8 +79,8 @@ void handle_create_user(context_t* ctx) {
     const char* secret = getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
-        ctx->status = StatusInternalServerError;
-        send_string(ctx, "Internal Server Error");
+        ctx->response->status = StatusInternalServerError;
+        send_string(ctx->response, "Internal Server Error");
         return;
     }
 
@@ -105,8 +88,8 @@ void handle_create_user(context_t* ctx) {
     jwt_error_t jwt_err = jwt_token_create(&payload, secret, &jwtToken);
     if (jwt_err != JWT_SUCCESS) {
         LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
-        ctx->status = StatusInternalServerError;
-        send_string(ctx, "Internal Server Error");
+        ctx->response->status = StatusInternalServerError;
+        send_string(ctx->response, "Internal Server Error");
         return;
     }
 
@@ -123,7 +106,7 @@ void handle_create_user(context_t* ctx) {
     free(jwtToken);
 
     char* data = cJSON_Print(json);
-    send_json_string(ctx, data);
+    send_json_string(ctx->response, data);
     free(data);
 
     cJSON_Delete(json);
@@ -132,14 +115,14 @@ void handle_create_user(context_t* ctx) {
 
 // GET /users/register
 void render_register_form(context_t* ctx) {
-    set_content_type(ctx, "text/html");
+    set_content_type(ctx->response, "text/html");
     servefile(ctx, "./assets/register_user.html");
 }
 
 // Beared Authenticated route
 void protected_route(context_t* ctx) {
     const JWTPayload* payload = get_jwt_payload(ctx);
-    send_string_f(ctx, "Protected route:\nYour username is: %s\n", payload->sub);
+    send_string_f(ctx->response, "Protected route:\nYour username is: %s\n", payload->sub);
 }
 
 void* send_time(void* arg) {
@@ -154,7 +137,7 @@ void* send_time(void* arg) {
         timeinfo = localtime(&rawtime);
         strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
 
-        int ret = response_send_chunk(ctx, buffer, strlen(buffer));
+        int ret = response_send_chunk(ctx->response, buffer, strlen(buffer));
         if (ret < 0) {
             break;
         }
@@ -173,12 +156,12 @@ void chunked_response(context_t* ctx) {
     pthread_t thread;
     pthread_create(&thread, NULL, send_time, ctx);
     pthread_join(thread, NULL);
-    response_end(ctx);
+    response_end(ctx->response);
 }
 
 static void api_index(context_t* ctx) {
     char* data = "{\"message\": \"Welcome to the API\"}";
-    send_json(ctx, data, strlen(data));
+    send_json(ctx->response, data, strlen(data));
 }
 
 typedef struct User {
@@ -190,7 +173,7 @@ typedef struct User {
 static void api_users(context_t* ctx) {
     User* users = (User*)malloc(sizeof(User) * 10);
     if (users == NULL) {
-        send_string(ctx, "Failed to allocate memory for users");
+        send_string(ctx->response, "Failed to allocate memory for users");
         return;
     }
 
@@ -213,7 +196,7 @@ static void api_users(context_t* ctx) {
 
     cJSON_AddItemToObject(root, "users", users_array);
     char* data = cJSON_Print(root);
-    send_json_string(ctx, data);
+    send_json_string(ctx->response, data);
 
     cJSON_Delete(root);
     free(users);
@@ -226,7 +209,7 @@ static void api_user_by_id(context_t* ctx) {
 
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "{\"user\": \"%s\"}", id);
-    send_json_string(ctx, buffer);
+    send_json_string(ctx->response, buffer);
 }
 
 void gzip_route(context_t* ctx) {
@@ -235,8 +218,8 @@ void gzip_route(context_t* ctx) {
     size_t compressed_data_len = 0;
     gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
 
-    set_response_header(ctx, "Content-Encoding", "gzip");
-    send_response(ctx, (void*)compressed_data, compressed_data_len);
+    set_response_header(ctx->response, "Content-Encoding", "gzip");
+    send_response(ctx->response, (void*)compressed_data, compressed_data_len);
 
     free(compressed_data);
 }

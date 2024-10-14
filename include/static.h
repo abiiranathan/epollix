@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include "epollix.h"
+#include "net.h"
 
 // Enable or disable directory browsing for the server.
 // If the requested path is a directory, the server will list the files in the directory.

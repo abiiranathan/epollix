@@ -1,7 +1,6 @@
 #define _GNU_SOURCE 1
 
 #include "../include/server.h"
-#include "../include/epollix.h"
 #include "../include/response.h"
 
 #include <arpa/inet.h>
@@ -30,13 +29,13 @@ static void init_read_tasks(void) {
         memset(&read_tasks[i], -1, sizeof(read_task));
 
         // init request object
-        read_tasks[i].req = (request_t*)malloc(sizeof(request_t));
+        read_tasks[i].req = (Request*)malloc(sizeof(Request));
         if (!read_tasks[i].req) {
             LOG_FATAL("Failed to allocate memory for request object\n");
         }
 
         // Zero out the request object
-        memset(read_tasks[i].req, 0, sizeof(request_t));
+        memset(read_tasks[i].req, 0, sizeof(Request));
 
         // Allocate memory for the request headers array.
         read_tasks[i].req->headers = (header_t**)malloc(sizeof(header_t*) * MAX_REQ_HEADERS);

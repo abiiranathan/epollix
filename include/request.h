@@ -20,7 +20,7 @@ typedef struct request {
     uint8_t header_count;   // Number of headers
     header_t** headers;     // Request headers (dynamically allocated)
     map* query_params;      // Query parameters (consider replacing with a more efficient structure)
-} request_t;
+} Request;
 
 typedef enum {
     http_ok,
@@ -31,23 +31,23 @@ typedef enum {
 } http_error_t;
 
 // Parse request headers from text.
-http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length);
+http_error_t parse_request_headers(Request* req, const char* header_text, size_t length);
 
 // Parse URL query parameters from a query string.
 // Populates the map.
 bool parse_url_query_params(char* query, map* query_params);
 
 // Get request header value by name.
-const char* get_request_header(request_t* req, const char* name);
+const char* get_request_header(Request* req, const char* name);
 
 // Get the value of a query parameter by name.
-const char* get_query_param(request_t* req, const char* name);
+const char* get_query_param(Request* req, const char* name);
 
 // Get the value of a path parameter by name.
-const char* get_param(request_t* req, const char* name);
+const char* get_param(Request* req, const char* name);
 
 // Get the content type of the request.
-const char* get_content_type(request_t* req);
+const char* get_content_type(Request* req);
 
 // percent-encode a string for safe use in a URL.
 // Returns an allocated char* that the caller must free after use.
@@ -57,14 +57,14 @@ char* encode_uri(const char* str);
 void decode_uri(const char* src, char* dst, size_t dst_size);
 
 // Handle Request and send response to the client.
-void process_request(request_t* req);
+void process_request(Request* req);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns NULL.
 Route* route_notfound(Handler h);
 
 // Free up resources allocated by the request.
-void request_destroy(request_t* req);
+void request_destroy(Request* req);
 
 #ifdef __cplusplus
 }

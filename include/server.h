@@ -13,10 +13,10 @@ extern "C" {
 #define MAX_READ_TASKS 1024
 
 typedef struct read_task {
-    int epoll_fd;    // Epoll file descriptor
-    int client_fd;   // Client file descriptor
-    int index;       // Index of the task in the tasks array. -1 means task if free.
-    request_t* req;  // Request object
+    int epoll_fd;   // Epoll file descriptor
+    int client_fd;  // Client file descriptor
+    int index;      // Index of the task in the tasks array. -1 means task if free.
+    Request* req;   // Request object
 } read_task;
 
 // User-defined callback function will be called atexit.

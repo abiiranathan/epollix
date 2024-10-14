@@ -17,21 +17,21 @@ extern void http_error(int client_fd, http_status status, const char* message);
 extern void close_connection(int client_fd, int epoll_fd);
 
 // Get request header value by name.
-const char* get_request_header(request_t* req, const char* name) {
+const char* get_request_header(Request* req, const char* name) {
     return find_header(req->headers, req->header_count, name);
 }
 
 // Get the content type of the request.
-const char* get_content_type(request_t* req) {
+const char* get_content_type(Request* req) {
     return get_request_header(req, CONTENT_TYPE_HEADER);
 }
 
-const char* get_param(request_t* req, const char* name) {
+const char* get_param(Request* req, const char* name) {
     return get_path_param(req->route->params, name);
 }
 
 // Get the value of a query parameter by name.
-const char* get_query_param(request_t* req, const char* name) {
+const char* get_query_param(Request* req, const char* name) {
     return map_get(req->query_params, (void*)name);
 }
 
@@ -52,7 +52,7 @@ static const char* http_error_string(http_error_t code) {
     return "success";
 }
 
-http_error_t parse_request_headers(request_t* req, const char* header_text, size_t length) {
+http_error_t parse_request_headers(Request* req, const char* header_text, size_t length) {
     const char* ptr = header_text;
     const char* end = ptr + length;
 
@@ -317,7 +317,7 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
 }
 
 // Initialize the request structure with parsed data
-void initialize_request(request_t* req, uint8_t* body, size_t content_length, map* query_params, HttpMethod httpMethod,
+void initialize_request(Request* req, uint8_t* body, size_t content_length, map* query_params, HttpMethod httpMethod,
                         const char* http_version, const char* path) {
 
     req->body = body;
@@ -334,7 +334,7 @@ void initialize_request(request_t* req, uint8_t* body, size_t content_length, ma
 }
 
 // Clean up resources allocated for the request
-void request_destroy(request_t* req) {
+void request_destroy(Request* req) {
     if (!req) {
         return;
     }
@@ -364,7 +364,7 @@ void request_destroy(request_t* req) {
 }
 
 // Handle the case when a route is not found
-bool handle_not_found(request_t* req, const char* method, const char* http_version, const char* path) {
+bool handle_not_found(Request* req, const char* method, const char* http_version, const char* path) {
     if (notFoundRoute) {
         req->route = notFoundRoute;
         return true;
@@ -387,7 +387,7 @@ Route* route_notfound(Handler h) {
 }
 
 // handle the request and send response.
-void process_request(request_t* req) {
+void process_request(Request* req) {
     int client_fd = req->client_fd;
     int epoll_fd = req->epoll_fd;
     char headers[4096] = {};

@@ -27,7 +27,7 @@
 // Maximum length of a header value.
 // Something reasonably long to accommodate JWT tokens, and cookies :)
 #ifndef MAX_HEADER_VALUE
-#define MAX_HEADER_VALUE 1024
+#define MAX_HEADER_VALUE 512
 #endif
 
 #ifndef MAX_REQ_HEADERS

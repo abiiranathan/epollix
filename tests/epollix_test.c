@@ -1,12 +1,12 @@
-#include "../include/epollix.h"
 #include "../include/constants.h"
 #include "../include/logging.h"
+#include "../include/net.h"
 #include "../include/response.h"
 
 // test parse request headers
 static void test_parse_request_headers(void) {
-    request_t* req = (request_t*)malloc(sizeof(request_t));
-    LOG_ASSERT(req != NULL, "Failed to allocate memory for request_t");
+    Request* req = (Request*)malloc(sizeof(Request));
+    LOG_ASSERT(req != NULL, "Failed to allocate memory for request");
 
     req->body = NULL;
     req->content_length = 0;
@@ -65,24 +65,21 @@ static void test_encode_uri(void) {
 
 // bool set_header(context_t* ctx, const char* name, const char* value)
 static void test_header_setter_and_getters(void) {
-    context_t* ctx = (context_t*)malloc(sizeof(context_t));
-    LOG_ASSERT(ctx != NULL, "Failed to allocate memory for context_t");
-
-    bool ok = allocate_headers(ctx);
-    LOG_ASSERT(ok, "Failed to allocate headers");
-    bool result = set_response_header(ctx, "Content-Type", "text/html");
+    Response* res = allocate_response(1);
+    LOG_ASSERT(res != NULL, "Failed to allocate response");
+    bool result = set_response_header(res, "Content-Type", "text/html");
     LOG_ASSERT(result, "Failed to set header");
 
-    LOG_ASSERT(strcmp(ctx->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");
-    LOG_ASSERT(strcmp(ctx->headers[0]->value, "text/html") == 0, "Expected text/html");
+    LOG_ASSERT(strcmp(res->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");
+    LOG_ASSERT(strcmp(res->headers[0]->value, "text/html") == 0, "Expected text/html");
 
-    const char* value = find_header(ctx->headers, ctx->header_count, "Content-Type");
+    const char* value = find_header(res->headers, res->header_count, "Content-Type");
     LOG_ASSERT(value != NULL, "Failed to find header");
 
-    int index = find_header_index(ctx->headers, ctx->header_count, "Content-Type");
+    int index = find_header_index(res->headers, res->header_count, "Content-Type");
     LOG_ASSERT(index == 0, "Failed to find header index");
 
-    free(ctx);
+    free_reponse(res);
 
     LOG_INFO("test_set_header passed");
 }
