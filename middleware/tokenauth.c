@@ -50,6 +50,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     jwt_error_t code = jwt_token_verify(token, secret, payload);
     if (code != JWT_SUCCESS) {
         free(payload);
+        payload = NULL;
         LOG_ERROR("Invalid JWT token: %s", token);
         handleUnauthorized(ctx);
         return;
@@ -61,11 +62,10 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     // Call the next middleware or handler
     next(ctx);
 
-    // Free the payload after the response is sent
-    free(payload);
 }
 
 // Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.
 const JWTPayload* get_jwt_payload(context_t* ctx) {
-    return (const JWTPayload*)get_context_value(ctx, JWT_PAYLOAD_CONTEXT_NAME);
+    return (JWTPayload*)get_context_value(ctx, JWT_PAYLOAD_CONTEXT_NAME);
 }
+

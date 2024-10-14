@@ -139,12 +139,6 @@ void render_register_form(context_t* ctx) {
 // Beared Authenticated route
 void protected_route(context_t* ctx) {
     const JWTPayload* payload = get_jwt_payload(ctx);
-    if (payload == NULL) {
-        ctx->status = StatusUnauthorized;
-        send_string(ctx, "Unauthorized: Missing JWT token");
-        return;
-    }
-
     send_string_f(ctx, "Protected route:\nYour username is: %s\n", payload->sub);
 }
 

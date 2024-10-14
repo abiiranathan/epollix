@@ -142,7 +142,6 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
 
 // Sends an error message to the client before the request is parsed.
 void http_error(int client_fd, http_status status, const char* message) {
-    LOG_ERROR("HTTP Error: %s\n", message);
     char* reply = NULL;
     const char* status_str = http_status_text(status);
     char* fmt = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
