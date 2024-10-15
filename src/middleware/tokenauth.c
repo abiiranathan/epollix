@@ -1,7 +1,7 @@
 
 #define _GNU_SOURCE 1
 
-#include "tokenauth.h"
+#include "../include/middleware/tokenauth.h"
 #include <stdlib.h>
 #include <string.h>
 #include "../include/response.h"

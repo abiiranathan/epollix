@@ -8,9 +8,9 @@
 #include <unistd.h>
 
 #include "../include/middleware.h"
+#include "../include/middleware/logger.h"
 #include "../include/net.h"
 #include "../include/response.h"
-#include "logger.h"
 
 #define COLOR_RESET "\x1b[0m"
 #define COLOR_RED "\x1b[31m"

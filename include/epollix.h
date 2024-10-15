@@ -11,9 +11,9 @@ extern "C" {
 #include <time.h>
 #include <unistd.h>
 
-#include "../middleware/basicauth.h"
-#include "../middleware/logger.h"
-#include "../middleware/tokenauth.h"
+#include "middleware/basicauth.h"
+#include "middleware/logger.h"
+#include "middleware/tokenauth.h"
 #include "response.h"
 #include "server.h"
 

@@ -1,8 +1,8 @@
-#include "basicauth.h"
 #include <cipherkit/crypto.h>
 #include <string.h>
+
+#include "../include/middleware/basicauth.h"
 #include "../include/response.h"
-#include "basicauth.h"
 
 struct basic_auth_data {
     const char* username;  // Username

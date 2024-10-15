@@ -3,7 +3,7 @@
 
 #define BASIC_AUTH_KEY "BasicAuthData"
 
-#include "../include/net.h"
+#include "../net.h"
 
 typedef struct basic_auth_data BasicAuthData;
 

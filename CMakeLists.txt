@@ -46,9 +46,9 @@ set(SOURCES
 # Add the middleware sources
 if(CIPHERKIT_FOUND)
     list(APPEND SOURCES
-        middleware/logger.c
-        middleware/tokenauth.c
-        middleware/basicauth.c
+        src/middleware/logger.c
+        src/middleware/tokenauth.c
+        src/middleware/basicauth.c
     )
 endif()
 
@@ -85,9 +85,9 @@ endif()
 # Add the middleware headers
 if(CIPHERKIT_FOUND)
     list(APPEND HEADERS
-        middleware/basicauth.h
-        middleware/logger.h
-        middleware/tokenauth.h
+        include/middleware/basicauth.h
+        include/middleware/logger.h
+        include/middleware/tokenauth.h
     )
 endif()
 
