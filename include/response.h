@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "../include/net.h"
+#include "net.h"
 
 typedef struct response {
     int client_fd;        // Client fd.
@@ -43,7 +43,7 @@ int response_send_chunk(Response* res, const char* data, size_t len);
 int response_end(Response* res);
 
 // Write http status code and send headers without the body.
-void send_status(Response *res, http_status code);
+void send_status(Response* res, http_status code);
 
 // Write data of length len as response to the client.
 // Default content-type is text/html.

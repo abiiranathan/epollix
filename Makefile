@@ -1,7 +1,7 @@
 TARGET=build/example/example
 
 all:
-	cd build && cmake ..
+	cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
 	cd build && ninja
 
 install:

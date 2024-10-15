@@ -28,27 +28,28 @@ endif()
 add_subdirectory(deps/libbcrypt)
 
 set(SOURCES
-    src/net.c
+    src/epollix.c
     src/header.c
     src/method.c
     src/middleware.c
     src/mime.c
     src/multipart.c
+    src/net.c
     src/params.c
     src/request.c
+    src/response.c
     src/route.c
+    src/server.c
     src/static.c
     src/status.c
-    src/response.c
-    src/server.c
 )
 
 # Add the middleware sources
 if(CIPHERKIT_FOUND)
     list(APPEND SOURCES
+        src/middleware/basicauth.c
         src/middleware/logger.c
         src/middleware/tokenauth.c
-        src/middleware/basicauth.c
     )
 endif()
 
@@ -94,13 +95,14 @@ endif()
 # Build the epollix static library
 # Can pass -DBUILD_SHARED_LIB to build a shared library
 add_library(epollix ${SOURCES})
-target_link_libraries(epollix PUBLIC m z pthread solidc::solidc bcrypt atomic)
+
+target_link_libraries(epollix PUBLIC m z pthread bcrypt atomic solidc::solidc)
 if(CIPHERKIT_FOUND)
     target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
     set(CIPHERKIT_LIBRARIES_PC "-lcipherkit -lssl -lcrypto -lsodium -lcjson")
 endif()
 
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -O3)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror)
 
 # If using clang, add support for -fblocks
 # sudo pacman -S libdispatch # provides libBlocksRuntime
