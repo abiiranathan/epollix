@@ -7,6 +7,9 @@ all:
 install:
 	cd build && sudo ninja install
 
+run:
+	cd example && ../build/example/example
+   
 test:
 	cd build && ctest
 
