@@ -184,6 +184,11 @@ static void write_headers(Response* res) {
     res->headers_sent = nbytes_sent != -1;
 }
 
+void send_status(Response *res, http_status code){
+    res->status = code;
+    write_headers(res);
+}
+
 // Send the response to the client.
 // Returns the number of bytes sent or -1 on error.
 int send_response(Response* res, const char* data, size_t len) {
