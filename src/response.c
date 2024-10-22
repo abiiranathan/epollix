@@ -67,6 +67,10 @@ bool set_response_header(Response* res, const char* name, const char* value) {
         strncpy(h->value, value, MAX_HEADER_VALUE - 1);
         h->value[MAX_HEADER_VALUE - 1] = '\0';
     }
+
+    if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
+        res->content_type_set = true;
+    }
     return true;
 }
 
@@ -122,7 +126,7 @@ void process_response(Request* req) {
         mw_ctx.count = globalCount;
     }
 
-    // Execute middleware chain
+    // Execute middleware chain and handler
     execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
 
     // free the context
@@ -184,7 +188,7 @@ static void write_headers(Response* res) {
     res->headers_sent = nbytes_sent != -1;
 }
 
-void send_status(Response *res, http_status code){
+void send_status(Response* res, http_status code) {
     res->status = code;
     write_headers(res);
 }
@@ -345,41 +349,26 @@ static void send_range_headers(Response* res, ssize_t start, ssize_t end, off64_
     res->status = StatusPartialContent;
 }
 
-// serve a file with support for partial content specified by the "Range" header.
-// Uses sendfile to copy content from file directly into the kernel space.
-// See man(2) sendfile for more information.
-// RFC: https://datatracker.ietf.org/doc/html/rfc7233 for more information about
-// range requests.
+// ==================== sendfile =============================
+// Helper function prototypes
+bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range);
+bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t file_size);
+ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request);
+void set_content_disposition(Response* res, const char* filename);
+
+// Main function to serve a file
 int servefile(context_t* ctx, const char* filename) {
     Response* res = ctx->response;
     Request* req = ctx->request;
 
     // Guess content-type if not already set
-    if (find_header(res->headers, res->header_count, CONTENT_TYPE_HEADER) == NULL) {
+    if (!res->content_type_set) {
         set_response_header(res, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
-    }
-
-    ssize_t start = 0, end = 0;
-    const char* range_header = NULL;
-    bool is_range_request = false;
-    bool has_end_range = false;
-
-    range_header = find_header(req->headers, req->header_count, "Range");
-    if (range_header) {
-        if (strstr(range_header, "bytes=") != NULL) {
-            if (sscanf(range_header, "bytes=%ld-%ld", &start, &end) == 2) {
-                is_range_request = true;
-                has_end_range = true;
-            } else if (sscanf(range_header, "bytes=%ld-", &start) == 1) {
-                is_range_request = true;
-                has_end_range = false;
-            };
-        }
     }
 
     // Open the file with fopen64 to support large files
     FILE* file = fopen64(filename, "rb");
-    if (file == NULL) {
+    if (!file) {
         LOG_ERROR("Unable to open file: %s", filename);
         res->status = StatusInternalServerError;
         write_headers(res);
@@ -389,159 +378,184 @@ int servefile(context_t* ctx, const char* filename) {
     // Get the file size
     fseeko64(file, 0, SEEK_END);
     off64_t file_size = ftello64(file);
+    if (file_size == -1) {
+        perror("ftello64");
+        LOG_ERROR("Unable to get file size: %s", filename);
+        res->status = StatusInternalServerError;
+        write_headers(res);
+        return -1;
+    }
     fseeko64(file, 0, SEEK_SET);
 
-    // Set appropriate headers for partial content
-    if (is_range_request) {
-        if (start >= file_size) {
-            res->status = StatusRequestedRangeNotSatisfiable;
+    // Handle range requests
+    ssize_t start = 0, end = 0;
+    bool has_end_range = false, range_valid = false;
+    const char* range_header = find_header(req->headers, req->header_count, "Range");
+
+    if (range_header && parse_range(range_header, &start, &end, &has_end_range)) {
+        range_valid = validate_range(has_end_range, &start, &end, file_size);
+        if (!range_valid) {
             fclose(file);
+            res->status = StatusRequestedRangeNotSatisfiable;
             write_headers(res);
             return -1;
         }
-
-        // Send the requested range in chunks of 4MB
-        ssize_t byteRangeSize = (4 * 1024 * 1024) - 1;
-        if (!has_end_range && start >= 0) {
-            end = start + byteRangeSize;
-        } else if (start < 0) {
-            // Http range requests can be negative :) Wieird but true
-            // I had to read the RFC to understand this, who would have thought?
-            // https://datatracker.ietf.org/doc/html/rfc7233
-            start = file_size + start;    // subtract from the file size
-            end = start + byteRangeSize;  // send the next 4MB if not more than the file size
-        } else if (end < 0) {
-            // Even the end range can be negative. Deal with it!
-            end = file_size + end;
-        }
-
-        // Ensure the end of the range doesn't exceed the file size
-        if (end >= file_size) {
-            end = file_size - 1;
-        }
-
-        // Ensure the start and end range are within the file size
-        if (start < 0 || end < 0 || end >= file_size) {
-            res->status = StatusRequestedRangeNotSatisfiable;
-            fclose(file);
-            write_headers(res);
-            return -1;
-        }
-
         send_range_headers(res, start, end, file_size);
-
-        // Move file position to the start of the requested range
-        if (fseeko64(file, start, SEEK_SET) != 0) {
-            res->status = StatusRequestedRangeNotSatisfiable;
-            perror("fseeko64");
-            fclose(file);
-            return -1;
-        }
     } else {
-        // Set the content length header for the non-range request
+        // Set content length for non-range requests
         char content_len_str[32];
-        if (snprintf(content_len_str, sizeof(content_len_str), "%ld", file_size) < 0) {
-            perror("snprintf");
-            fclose(file);
-            return -1;
-        }
-
-        // Set the content length header if it's not a range request
+        snprintf(content_len_str, sizeof(content_len_str), "%ld", file_size);
         set_response_header(res, "Content-Length", content_len_str);
-    }
-
-    if (!is_range_request) {
-        // Set content disposition
-        char content_disposition[512] = {0};
-        char base_name[256] = {0};
-        filepath_basename(filename, base_name, sizeof(base_name));
-        snprintf(content_disposition, sizeof(content_disposition), "inline; filename=\"%s\"", base_name);
-        set_response_header(res, "Content-Disposition", content_disposition);
+        set_content_disposition(res, filename);
     }
 
     write_headers(res);
-
-    ssize_t total_bytes_sent = 0;   // Total bytes sent to the client
-    off64_t buffer_size = 2 << 20;  // 2MB buffer size
-
-    if (is_range_request) {
-        // Ensure the buffer size doesn't exceed the remaining bytes in the requested range
-        off64_t remaining_bytes = (end - start + 1);  // +1 to include the end byte
-
-        //Adjust the buffer size to the remaining bytes if it's less than the buffer size
-        buffer_size = remaining_bytes < buffer_size ? remaining_bytes : buffer_size;
-    } else {
-        // Set the buffer size to the file size if it's less than the buffer size
-        buffer_size = file_size < buffer_size ? file_size : buffer_size;
-    }
-
-    // Offset to start reading the file from
-    off_t offset = start;
-    ssize_t sent_bytes = -1;
-    int file_fd = fileno(file);
-    int max_range = end - start + 1;
-
-    // Enbale TCP_CORK to avoid sending small packets
-    int flag = 1;
-    setsockopt(res->client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
-
-    // Send the file using sendfile to avoid copying data from the kernel to user space
-    // This is more efficient than read/write
-    // See man sendfile(2) for more information
-    while (total_bytes_sent < file_size || (is_range_request && total_bytes_sent < max_range)) {
-        sent_bytes = sendfile(res->client_fd, file_fd, &offset, buffer_size);
-        if (sent_bytes > 0) {
-            total_bytes_sent += sent_bytes;
-
-            // If it's a range request, and we've sent the requested range, break out of
-            // the loop
-            if (is_range_request && total_bytes_sent >= max_range) {
-                break;
-            }
-
-            // Update the remaining bytes based on the data sent to the client.
-            if (is_range_request) {
-                off64_t remaining_bytes = max_range - total_bytes_sent;
-
-                // Adjust the buffer size to the remaining bytes if it's less than the buffer size
-                buffer_size = remaining_bytes < buffer_size ? remaining_bytes : buffer_size;
-            }
-        } else if (sent_bytes == -1) {
-            // Handle potential sendfile errors
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Retry sendfile after a short delay
-                usleep(1000);  // 1ms delay
-
-                // Continue the loop and retry sending the current buffer
-                continue;
-            } else {
-                if (errno == EPIPE) {
-                    // client disconnected. Nothing to report
-                } else {
-                    perror("sendfile");
-                }
-                fclose(file);
-                return -1;
-            }
-        }
-    }
-
-    if (sent_bytes == -1) {
-        if (errno == EPIPE) {
-            // client disconnected. Nothing to report
-        } else {
-            perror("sendfile");
-        }
-
-        fclose(file);
-        return -1;
-    }
+    ssize_t total_bytes_sent = send_file_content(res->client_fd, file, start, end, range_valid);
 
     fclose(file);
     return total_bytes_sent;
 }
 
-// ================== End middleware logic ==============
+// Serve an already opened file.
+// This is useful when the file is already opened by the caller and its not efficient to read
+// the contents of the file again.
+// The file is not closed by this function.
+int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* filename) {
+    Response* res = ctx->response;
+    Request* req = ctx->request;
+
+    // Guess content-type if not already set
+    if (!res->content_type_set) {
+        set_response_header(res, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
+    }
+
+    // Handle range requests
+    ssize_t start = 0, end = 0;
+    bool has_end_range = false, range_valid = false;
+    const char* range_header = find_header(req->headers, req->header_count, "Range");
+
+    if (range_header && parse_range(range_header, &start, &end, &has_end_range)) {
+        range_valid = validate_range(has_end_range, &start, &end, file_size);
+        if (!range_valid) {
+            fclose(file);
+            res->status = StatusRequestedRangeNotSatisfiable;
+            write_headers(res);
+            return -1;
+        }
+        send_range_headers(res, start, end, file_size);
+    } else {
+        // Set content length for non-range requests
+        char content_len_str[32];
+        snprintf(content_len_str, sizeof(content_len_str), "%ld", file_size);
+        set_response_header(res, "Content-Length", content_len_str);
+        set_content_disposition(res, filename);
+    }
+
+    write_headers(res);
+    ssize_t total_bytes_sent = send_file_content(res->client_fd, file, start, end, range_valid);
+    return total_bytes_sent;
+}
+
+// Parses the Range header and extracts start and end values
+bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range) {
+    if (strstr(range_header, "bytes=") != NULL) {
+        if (sscanf(range_header, "bytes=%ld-%ld", start, end) == 2) {
+            *has_end_range = true;
+            return true;
+        } else if (sscanf(range_header, "bytes=%ld-", start) == 1) {
+            *has_end_range = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Validates the requested range against the file size
+bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t file_size) {
+    ssize_t startByte = *start, endByte = *end;
+
+    // Send the requested range in chunks of 4MB
+    ssize_t byteRangeSize = (4 * 1024 * 1024) - 1;
+    if (!has_end_range && startByte >= 0) {
+        endByte = startByte + byteRangeSize;
+    } else if (startByte < 0) {
+        // Http range requests can be negative :) Wieird but true
+        // I had to read the RFC to understand this, who would have thought?
+        // https://datatracker.ietf.org/doc/html/rfc7233
+        startByte = file_size + startByte;    // subtract from the file size
+        endByte = startByte + byteRangeSize;  // send the next 4MB if not more than the file size
+    } else if (endByte < 0) {
+        // Even the end range can be negative. Deal with it!
+        endByte = file_size + endByte;
+    }
+
+    // Ensure the end of the range doesn't exceed the file size
+    if (endByte >= file_size) {
+        endByte = file_size - 1;
+    }
+
+    // Ensure the start and end range are within the file size
+    if (startByte < 0 || endByte < 0 || endByte >= file_size) {
+        return false;
+    }
+
+    *start = startByte;
+    *end = endByte;
+
+    return true;
+}
+
+// Sends the file content, handling both full and partial responses
+ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request) {
+    ssize_t total_bytes_sent = 0;
+    ssize_t buffer_size = 4 << 20;  // 2MB buffer
+    int file_fd = fileno(file);
+    off_t offset = start;
+    ssize_t max_range = end - start + 1;
+
+    if (is_range_request) {
+        buffer_size = max_range < buffer_size ? max_range : buffer_size;
+    } else {
+        fseeko64(file, 0, SEEK_SET);
+    }
+
+    // Enable TCP_CORK to avoid small packets
+    int flag = 1;
+    setsockopt(client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
+
+    while (total_bytes_sent < max_range) {
+        ssize_t sent_bytes = sendfile(client_fd, file_fd, &offset, buffer_size);
+        if (sent_bytes > 0) {
+            total_bytes_sent += sent_bytes;
+            if (is_range_request && total_bytes_sent >= max_range)
+                break;
+            buffer_size = (max_range - total_bytes_sent) < buffer_size ? (max_range - total_bytes_sent) : buffer_size;
+        } else if (sent_bytes == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(5000);  // 5ms delay
+                continue;
+            } else if (errno != EPIPE) {
+                perror("sendfile");
+            }
+            break;
+        }
+    }
+
+    // Disable TCP_CORK
+    flag = 0;
+    setsockopt(client_fd, IPPROTO_TCP, TCP_CORK, &flag, sizeof(int));
+
+    return total_bytes_sent;
+}
+
+// Sets the Content-Disposition header for the response
+void set_content_disposition(Response* res, const char* filename) {
+    char content_disposition[512];
+    char base_name[256];
+    filepath_basename(filename, base_name, sizeof(base_name));
+    snprintf(content_disposition, sizeof(content_disposition), "inline; filename=\"%s\"", base_name);
+    set_response_header(res, "Content-Disposition", content_disposition);
+}
 
 void set_content_type(Response* res, const char* content_type) {
     set_response_header(res, CONTENT_TYPE_HEADER, content_type);

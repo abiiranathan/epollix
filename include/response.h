@@ -1,20 +1,25 @@
 #ifndef C4C2FBAD_C23C_4F88_95D5_67AAD2406076
 #define C4C2FBAD_C23C_4F88_95D5_67AAD2406076
 
+#define _GNU_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include "net.h"
 
 typedef struct response {
-    int client_fd;        // Client fd.
-    http_status status;   // Status code
-    uint8_t* data;        // Response data as bytes.
-    bool headers_sent;    // Headers already sent
-    bool chunked;         // Is a chunked transfer
-    size_t header_count;  // Number of headers set.
-    header_t** headers;   // Response headers
+    int client_fd;          // Client fd.
+    http_status status;     // Status code
+    uint8_t* data;          // Response data as bytes.
+    bool headers_sent;      // Headers already sent
+    bool chunked;           // Is a chunked transfer
+    bool content_type_set;  // Whether content type header is set
+    size_t header_count;    // Number of headers set.
+    header_t** headers;     // Response headers
 } Response;
 
 // Create a new response object.
@@ -76,6 +81,12 @@ void response_redirect(Response* res, const char* url);
 // RFC: https://datatracker.ietf.org/doc/html/rfc7233 for more information about
 // range requests.
 int servefile(context_t* ctx, const char* filename);
+
+// Serve an already opened file. The file must be opened in read mode.
+// This is useful when the file is already opened by the caller and its not efficient to read
+// the contents of the file again.
+// The file is not closed by this function.
+int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* filename);
 
 #ifdef __cplusplus
 }

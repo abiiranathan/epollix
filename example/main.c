@@ -1,13 +1,35 @@
+#define _GNU_SOURCE 1
+
 #include "../include/epollix.h"
+
+#include <stdio.h>
 
 void index_page(context_t* ctx) {
     set_content_type(ctx->response, "text/html");
     servefile(ctx, "assets/index.html");
 }
 
+const char* filename = "/home/nabiizy/Videos/Movies/ANGRYBIRDS-2.mp4";
+FILE* file = NULL;
+off64_t size = 0;
+
+void open_movie(void) {
+    file = fopen(filename, "rb");
+    if (!file) {
+        LOG_ERROR("Unable to open file: %s", filename);
+        return;
+    }
+
+    // Get the file size
+    fseeko64(file, 0, SEEK_END);
+    size = ftello64(file);
+    fseeko64(file, 0, SEEK_SET);
+}
+
 void serve_movie(context_t* ctx) {
+    LOG_ASSERT(file != NULL, "File is not opened");
     set_content_type(ctx->response, "video/mp4");
-    servefile(ctx, "/home/nabiizy/Videos/Movies/ANGRYBIRDS-2.mp4");
+    serve_open_file(ctx, file, size, filename);
 }
 
 // GET /greet/{name}
@@ -239,6 +261,8 @@ int main(int argc, char** argv) {
         port = argv[1];
     }
 
+    open_movie();
+
     crypto_init();
 
     BasicAuthData *guest = NULL, *admin = NULL;
@@ -295,7 +319,7 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    EpollServer* server = epoll_server_create(0, port, cleanup);
+    EpollServer* server = epoll_server_create(4, port, cleanup);
     if (server == NULL) {
         LOG_FATAL("Failed to create server\n");
     }

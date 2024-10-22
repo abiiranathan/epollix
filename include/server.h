@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <solidc/arena.h>
 #include <solidc/threadpool.h>
 #include "request.h"
 #include "static.h"
@@ -17,6 +18,7 @@ typedef struct read_task {
     int client_fd;  // Client file descriptor
     int index;      // Index of the task in the tasks array. -1 means task if free.
     Request* req;   // Request object
+    Arena* arena;   // Arena for the request object and headers
 } read_task;
 
 // User-defined callback function will be called atexit.

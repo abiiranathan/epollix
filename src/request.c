@@ -27,11 +27,18 @@ const char* get_content_type(Request* req) {
 }
 
 const char* get_param(Request* req, const char* name) {
+    if (!req->route->params) {
+        return NULL;
+    }
     return get_path_param(req->route->params, name);
 }
 
 // Get the value of a query parameter by name.
 const char* get_query_param(Request* req, const char* name) {
+    if (!req->query_params) {
+        return NULL;
+    }
+
     return map_get(req->query_params, (void*)name);
 }
 
@@ -386,11 +393,50 @@ Route* route_notfound(Handler h) {
     return notFoundRoute;
 }
 
+#ifdef __AVX__
+#include <immintrin.h>
+
+static inline void fast_bzero(void* ptr, size_t size) {
+    char* p = (char*)ptr;
+    size_t vec_size = size & ~31ULL;
+    size_t rem_size = size & 31ULL;
+
+    __asm__ volatile(
+        "vxorps %%ymm0, %%ymm0, %%ymm0\n\t"
+        "mov %0, %%rax\n\t"
+        "shr $5, %%rax\n\t"
+        "jz 1f\n\t"
+        "0:\n\t"
+        "vmovdqu %%ymm0, (%1)\n\t"
+        "add $32, %1\n\t"
+        "dec %%rax\n\t"
+        "jnz 0b\n\t"
+        "1:\n\t"
+        "vzeroupper\n\t"
+        : "+r"(vec_size), "+r"(p)
+        :
+        : "rax", "ymm0", "memory");
+
+    // Handle remaining bytes
+    for (size_t i = 0; i < rem_size; ++i) {
+        p[i] = 0;
+    }
+}
+#endif
+
 // handle the request and send response.
 void process_request(Request* req) {
     int client_fd = req->client_fd;
     int epoll_fd = req->epoll_fd;
-    char headers[4096] = {};
+    char headers[4096];
+
+    // Check for AVX support
+#if defined(__AVX__)
+    fast_bzero(headers, sizeof(headers));
+    printf("Using AVX\n");
+#else
+    memset(headers, 0, sizeof(headers));
+#endif
 
     char* path = NULL;                  // Request path
     char* query = NULL;                 // Query string
@@ -421,7 +467,9 @@ void process_request(Request* req) {
         goto error;
     }
 
+    // memmem  is slower than strstr but safer!
     end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
+    // end_of_headers = strstr(headers, "\r\n\r\n");
     if (!end_of_headers) {
         http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
         goto error;

@@ -28,8 +28,14 @@ static void init_read_tasks(void) {
         // init read task
         memset(&read_tasks[i], -1, sizeof(read_task));
 
+        // create an arena for the request object and headers
+        read_tasks[i].arena = arena_create(sizeof(Request) + sizeof(header_t*) * MAX_REQ_HEADERS);
+        if (!read_tasks[i].arena) {
+            LOG_FATAL("Failed to create arena for request object\n");
+        }
+
         // init request object
-        read_tasks[i].req = (Request*)malloc(sizeof(Request));
+        read_tasks[i].req = (Request*)arena_alloc(read_tasks[i].arena, sizeof(Request));
         if (!read_tasks[i].req) {
             LOG_FATAL("Failed to allocate memory for request object\n");
         }
@@ -38,14 +44,14 @@ static void init_read_tasks(void) {
         memset(read_tasks[i].req, 0, sizeof(Request));
 
         // Allocate memory for the request headers array.
-        read_tasks[i].req->headers = (header_t**)malloc(sizeof(header_t*) * MAX_REQ_HEADERS);
+        read_tasks[i].req->headers = (header_t**)arena_alloc(read_tasks[i].arena, sizeof(header_t*) * MAX_REQ_HEADERS);
         if (!read_tasks[i].req->headers) {
             LOG_FATAL("Failed to allocate memory for request headers\n");
         }
 
         // Pre-allocate all the headers.
         for (size_t j = 0; j < MAX_REQ_HEADERS; j++) {
-            read_tasks[i].req->headers[j] = (header_t*)malloc(sizeof(header_t));
+            read_tasks[i].req->headers[j] = (header_t*)arena_alloc(read_tasks[i].arena, sizeof(header_t));
             if (!read_tasks[i].req->headers[j]) {
                 LOG_FATAL("Failed to allocate memory for request header\n");
             }
@@ -55,29 +61,20 @@ static void init_read_tasks(void) {
 
 static void free_read_tasks(void) {
     for (size_t i = 0; i < MAX_READ_TASKS; i++) {
-        if (read_tasks[i].req) {
-            for (size_t j = 0; j < MAX_REQ_HEADERS; j++) {
-                if (read_tasks[i].req->headers[j]) {
-                    free(read_tasks[i].req->headers[j]);
-                }
-            }
-
-            free(read_tasks[i].req->headers);
-            free(read_tasks[i].req);
+        if (read_tasks[i].arena) {
+            arena_destroy(read_tasks[i].arena);
         }
     }
 }
 
+// No need to lock since this is always called from the main thread.
 static read_task* get_read_task(void) {
-    pthread_mutex_lock(&read_tasks_mutex);
     for (size_t i = 0; i < MAX_READ_TASKS; i++) {
         if (read_tasks[i].index == -1) {
             read_tasks[i].index = i;
-            pthread_mutex_unlock(&read_tasks_mutex);
             return &read_tasks[i];
         }
     }
-    pthread_mutex_unlock(&read_tasks_mutex);
     return NULL;
 }
 
@@ -107,7 +104,6 @@ static void submit_read_task(void* arg) {
 
     if (task->req->route != NULL && task->client_fd != -1) {
         process_response(task->req);
-        // response sent successfully
     }
 
     // Put the task back in the pool
