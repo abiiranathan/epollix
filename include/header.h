@@ -14,9 +14,6 @@ typedef struct header {
     char value[MAX_HEADER_VALUE];  // header value
 } header_t;
 
-// Allocate a new header from name and value.
-header_t* header_new(const char* name, const char* value);
-
 // Parse header_t from http header string.
 header_t* header_fromstring(const char* str);
 

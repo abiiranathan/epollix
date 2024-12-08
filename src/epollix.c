@@ -36,11 +36,14 @@ void free_context(context_t* ctx) {
         return;
     }
 
-    free_reponse(ctx->response);
     request_destroy(ctx->request);
     if (ctx->locals) {
         map_destroy(ctx->locals, true);
         ctx->locals = NULL;
+    }
+
+    if (ctx->user_arena) {
+        arena_destroy(ctx->user_arena);
     }
 }
 

@@ -65,30 +65,6 @@ static void test_encode_uri(void) {
     LOG_INFO("test_encode_uri passed");
 }
 
-// bool set_header(context_t* ctx, const char* name, const char* value)
-static void test_header_setter_and_getters(void) {
-    Response* res = allocate_response(1);
-    LOG_ASSERT(res != NULL, "Failed to allocate response");
-    bool result = set_response_header(res, "Content-Type", "text/html");
-    LOG_ASSERT(result, "Failed to set header");
-    (void)result;
-
-    LOG_ASSERT(strcmp(res->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");
-    LOG_ASSERT(strcmp(res->headers[0]->value, "text/html") == 0, "Expected text/html");
-
-    const char* value = find_header(res->headers, res->header_count, "Content-Type");
-    LOG_ASSERT(value != NULL, "Failed to find header");
-    (void)value;
-
-    int index = find_header_index(res->headers, res->header_count, "Content-Type");
-    LOG_ASSERT(index == 0, "Failed to find header index");
-    (void)index;
-
-    free_reponse(res);
-
-    LOG_INFO("test_set_header passed");
-}
-
 // header_t header_fromstring(const char* str)
 static void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
@@ -163,7 +139,6 @@ int main(void) {
     test_parse_request_headers();
     test_decode_uri();
     test_encode_uri();
-    test_header_setter_and_getters();
     test_header_fromstring();
     test_parse_url_query_params();
     test_match_params();

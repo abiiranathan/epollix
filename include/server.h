@@ -1,6 +1,7 @@
 #ifndef BD7EB0BF_BCBB_4B11_A823_631B2A8D9532
 #define BD7EB0BF_BCBB_4B11_A823_631B2A8D9532
 
+#include "response.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,6 +19,7 @@ typedef struct read_task {
     int client_fd;  // Client file descriptor
     int index;      // Index of the task in the tasks array. -1 means task if free.
     Request* req;   // Request object
+    Response* res;  // Response object
     Arena* arena;   // Arena for the request object and headers
 } read_task;
 
@@ -35,6 +37,7 @@ typedef struct EpollServer {
 } EpollServer;
 
 // Create a new EpollServer. If num_workers is 0, we use the num_cpus on the target machine.
+// The best num_workers is between 2 and 4. Otherwise LOCK contension will increase latency.
 EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_func cf);
 
 // Start the server and listen on the configured port.

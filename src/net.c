@@ -36,7 +36,6 @@ void free_context(context_t* ctx) {
         return;
     }
 
-    free_reponse(ctx->response);
     request_destroy(ctx->request);
     if (ctx->locals) {
         map_destroy(ctx->locals, true);
@@ -46,16 +45,23 @@ void free_context(context_t* ctx) {
 
 // Add a value to the context. This is useful for sharing data between middleware.
 void set_context_value(context_t* ctx, const char* key, void* value) {
-    char* k = strdup(key);
-    if (!k) {
+    if (!ctx->locals)
+        return;
+
+    char* ctx_key = strdup(key);
+    if (!ctx_key) {
         LOG_ERROR("unable to allocate memory for key: %s", key);
         return;
     }
-    map_set(ctx->locals, k, value);
+
+    map_set(ctx->locals, ctx_key, value);
 }
 
 // Get a value from the context. Returns NULL if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key) {
+    if (!ctx->locals)
+        return NULL;
+
     return map_get(ctx->locals, (char*)key);
 }
 

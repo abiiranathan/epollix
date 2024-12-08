@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 
+#include <solidc/arena.h>
 #include <stdio.h>
 #include "net.h"
 
@@ -22,14 +23,8 @@ typedef struct response {
     header_t** headers;     // Response headers
 } Response;
 
-// Create a new response object.
-Response* allocate_response(int client_fd);
-
-// Free response obj
-void free_reponse(Response* res);
-
 // Process the response.
-void process_response(Request* req);
+void process_response(Request* req, Response* res, Arena* arena);
 
 // Set response header.
 bool set_response_header(Response* res, const char* name, const char* value);

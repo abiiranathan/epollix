@@ -1,8 +1,7 @@
 #define _GNU_SOURCE 1
 
-#include "../include/epollix.h"
-
 #include <stdio.h>
+#include "../include/epollix.h"
 
 void index_page(context_t* ctx) {
     set_content_type(ctx->response, "text/html");
@@ -192,11 +191,7 @@ typedef struct User {
 } User;
 
 static void api_users(context_t* ctx) {
-    User* users = (User*)malloc(sizeof(User) * 10);
-    if (users == NULL) {
-        send_string(ctx->response, "Failed to allocate memory for users");
-        return;
-    }
+    User* users = (User*)arena_alloc(ctx->user_arena, sizeof(User) * 10);
 
     for (int i = 0; i < 10; i++) {
         users[i].username = "user";
@@ -216,11 +211,11 @@ static void api_users(context_t* ctx) {
     }
 
     cJSON_AddItemToObject(root, "users", users_array);
+
     char* data = cJSON_Print(root);
     send_json_string(ctx->response, data);
 
     cJSON_Delete(root);
-    free(users);
     free(data);
 }
 
@@ -250,11 +245,9 @@ void cleanup(void) {
 }
 
 void spa_route(context_t* ctx) {
-    printf("Serving SPA route\n");
     servefile(ctx, "/home/nabiizy/Code/C/pdfsearch/frontend/build/index.html");
 }
 
-// ======================= END OF ROUTES ========================================
 int main(int argc, char** argv) {
     char* port = "3000";
     if (argc == 2) {
@@ -319,13 +312,12 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    EpollServer* server = epoll_server_create(4, port, cleanup);
+    EpollServer* server = epoll_server_create(2, port, cleanup);
     if (server == NULL) {
         LOG_FATAL("Failed to create server\n");
     }
 
     // Start the server
     epoll_server_listen(server);
-
     return 0;
 }

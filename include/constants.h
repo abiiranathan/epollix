@@ -35,7 +35,7 @@
 #endif
 
 #ifndef MAX_RES_HEADERS
-#define MAX_RES_HEADERS 8
+#define MAX_RES_HEADERS 12
 #endif
 
 // Size of the buffer to hold the response headers.

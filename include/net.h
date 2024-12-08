@@ -17,6 +17,11 @@ typedef struct epollix_context {
     map* locals;                       // user-data key-value store the context.
     struct MiddlewareContext* mw_ctx;  // Middleware context
     struct response* response;         // Response pointer
+
+    // The user can use this arena to allocate objects that will be automatically
+    // free after the request.
+    // usage: arena_alloc(ctx->user_arena);
+    Arena* user_arena;
 } context_t;
 
 void enable_keepalive(int sockfd);

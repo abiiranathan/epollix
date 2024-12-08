@@ -17,57 +17,18 @@
 #include "../include/fast_str.h"
 #include "../include/request.h"
 
-// Create a new response object.
-Response* allocate_response(int client_fd) {
-    Response* res = calloc(1, sizeof(Response));
-    if (res) {
-        res->client_fd = client_fd;
-        res->status = StatusOK;
-        res->data = NULL;
-        res->headers = (header_t**)calloc(MAX_RES_HEADERS, sizeof(header_t*));
-        if (res->headers) {
-            res->header_count = 0;
-            res->headers_sent = false;
-        } else {
-            perror("calloc");
-            free(res);
-        }
-    }
-    return res;
-}
-
-// Free response obj
-void free_reponse(Response* res) {
-    if (!res)
-        return;
-
-    for (size_t i = 0; i < res->header_count; ++i) {
-        free(res->headers[i]);
-    }
-
-    free(res->headers);
-    free(res);
-    res = NULL;
-}
-
+// Response headers are pre-allocated in the arena.
 bool set_response_header(Response* res, const char* name, const char* value) {
-    // Check if this header already exists
-    int index = find_header_index(res->headers, res->header_count, name);
-    if (index == -1) {
-        header_t* header = header_new(name, value);
-        if (header == NULL) {
-            LOG_ERROR("header_new() failed");
-            return false;
-        }
-        res->headers[res->header_count++] = header;
-    } else {
-        // Replace header value
-        header_t* h = res->headers[index];
+    if (res->header_count >= MAX_RES_HEADERS)
+        return false;
 
-        // Copy the new value to the header
-        strncpy(h->value, value, MAX_HEADER_VALUE - 1);
-        h->value[MAX_HEADER_VALUE - 1] = '\0';
-    }
+    // Access the next header.
+    header_t* header = res->headers[res->header_count++];
+    strncpy(header->name, name, MAX_HEADER_NAME - 1);
+    header->name[MAX_HEADER_NAME - 1] = '\0';
+
+    strncpy(header->value, value, MAX_HEADER_VALUE - 1);
+    header->value[MAX_HEADER_VALUE - 1] = '\0';
 
     if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
         res->content_type_set = true;
@@ -75,11 +36,20 @@ bool set_response_header(Response* res, const char* name, const char* value) {
     return true;
 }
 
-void process_response(Request* req) {
-    context_t ctx = {.request = req,
-                     .locals = map_create(8, key_compare_char_ptr),
-                     .response = allocate_response(req->client_fd)};
-    LOG_ASSERT(ctx.locals && ctx.response, "locals or response is NULL");
+void process_response(Request* req, Response* res, Arena* arena) {
+    res->client_fd = req->client_fd;
+    res->content_type_set = false;
+    res->status = StatusOK;
+
+    context_t ctx = {
+        .request = req,
+        .locals = map_create(8, key_compare_char_ptr),
+        .response = res,
+        .user_arena = arena_create(64 * 1024),
+    };
+
+    LOG_ASSERT(ctx.locals, "unable to allocate locals map");
+    LOG_ASSERT(ctx.user_arena, "unable to allocate user arena");
 
     Route* route = req->route;
 
@@ -104,19 +74,11 @@ void process_response(Request* req) {
     // if both global and route middleware are defined, combine them
     if (route->middleware_count > 0 && get_global_middleware_count() > 0) {
         // Allocate memory for the combined middleware
-        mw_ctx.middleware = merge_middleware(route, &mw_ctx);
-        if (mw_ctx.middleware == NULL) {
-            LOG_ERROR("error combining middleware");
-            http_error(req->client_fd, StatusInternalServerError, "error allocating middleware");
-            free_context(&ctx);
-            return;
-        }
+        mw_ctx.middleware = merge_middleware(route, &mw_ctx, arena);
+        LOG_ASSERT(mw_ctx.middleware, "error allocating memory for combined middleware");
 
         // Execute middleware chain
         execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
-
-        // Free the combined middleware
-        free(mw_ctx.middleware);
         free_context(&ctx);
         return;
     } else if (route->middleware_count > 0) {
@@ -222,6 +184,7 @@ static void write_headers(Response* res) {
         LOG_ERROR("No space for final CRLF");
         return;
     }
+
     memcpy(current, "\r\n", 2);
     current += 2;
     *current = '\0';
@@ -364,7 +327,7 @@ int response_end(Response* res) {
     return nbytes_sent;
 }
 
-// redirect to the given url with a 302 status code
+// redirect to the given url status code set in response. If not set, 303 is used.
 void response_redirect(Response* res, const char* url) {
     if (res->status < StatusMovedPermanently || res->status > StatusPermanentRedirect) {
         res->status = StatusSeeOther;

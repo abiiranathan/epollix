@@ -4,22 +4,6 @@
 #include <string.h>
 #include <strings.h>
 
-// Allocate a new header from name and value.
-// Returns NULL if allocation fails.
-header_t* header_new(const char* name, const char* value) {
-    header_t* header = (header_t*)malloc(sizeof(header_t));
-    if (!header) {
-        return NULL;
-    }
-
-    strncpy(header->name, name, MAX_HEADER_NAME - 1);
-    header->name[MAX_HEADER_NAME - 1] = '\0';
-
-    strncpy(header->value, value, MAX_HEADER_VALUE - 1);
-    header->value[MAX_HEADER_VALUE - 1] = '\0';
-    return header;
-}
-
 // Parse header_t from http header string.
 header_t* header_fromstring(const char* str) {
     const char* colon = strchr(str, ':');
