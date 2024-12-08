@@ -52,13 +52,11 @@ void* get_global_middleware_context(const char* key) {
 }
 
 // Combine global and route-specific middleware
-Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx) {
+Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx, Arena* arena) {
     size_t total_count = global_middleware_count + route->middleware_count;
-    Middleware* combined = (Middleware*)malloc(sizeof(Middleware) * total_count);
-    if (combined == NULL) {
-        LOG_ERROR("malloc failed");
+    Middleware* combined = (Middleware*)arena_alloc(arena, sizeof(Middleware) * total_count);
+    if (!combined)
         return NULL;
-    }
 
     uint8_t combined_count = 0;
 
@@ -143,6 +141,7 @@ void use_route_middleware(Route* route, int count, ...) {
     for (size_t i = route->middleware_count; i < new_count; i++) {
         ((Middleware*)(route->middleware))[i] = va_arg(args, Middleware);
     }
+
     route->middleware_count = new_count;
     va_end(args);
 }

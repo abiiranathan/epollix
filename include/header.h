@@ -5,20 +5,21 @@
 extern "C" {
 #endif
 
+#include <solidc/arena.h>
 #include <stddef.h>
 #include "constants.h"
 
 // Header struct contains header name and value.
 typedef struct header {
-    char name[MAX_HEADER_NAME];    // header name
-    char value[MAX_HEADER_VALUE];  // header value
+    char* name;   // header name
+    char* value;  // header value
 } header_t;
 
-// Allocate a new header from name and value.
-header_t* header_new(const char* name, const char* value);
+// Create a new header_t.
+header_t* header_new(const char* name, const char* value, Arena* arena);
 
 // Parse header_t from http header string.
-header_t* header_fromstring(const char* str);
+header_t* header_fromstring(const char* str, Arena* arena);
 
 // Find the header_t value matching the name in the array of headers.
 // Returns NULL if not found.

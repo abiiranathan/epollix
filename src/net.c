@@ -36,7 +36,6 @@ void free_context(context_t* ctx) {
         return;
     }
 
-    free_reponse(ctx->response);
     request_destroy(ctx->request);
     if (ctx->locals) {
         map_destroy(ctx->locals, true);
@@ -46,40 +45,24 @@ void free_context(context_t* ctx) {
 
 // Add a value to the context. This is useful for sharing data between middleware.
 void set_context_value(context_t* ctx, const char* key, void* value) {
-    char* k = strdup(key);
-    if (!k) {
+    if (!ctx->locals)
+        return;
+
+    char* ctx_key = strdup(key);
+    if (!ctx_key) {
         LOG_ERROR("unable to allocate memory for key: %s", key);
         return;
     }
-    map_set(ctx->locals, k, value);
+
+    map_set(ctx->locals, ctx_key, value);
 }
 
 // Get a value from the context. Returns NULL if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key) {
+    if (!ctx->locals)
+        return NULL;
+
     return map_get(ctx->locals, (char*)key);
-}
-
-// format_file_size returns a human-readable string representation of the file size.
-// The function returns a pointer to a static buffer that is overwritten on each call.
-// This means that it is not thread-safe.
-const char* format_file_size(off_t size) {
-    static char buf[32];
-    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
-
-    int i = 0;
-    double s = size;
-
-    while (s >= 1024 && i < 8) {
-        s /= 1024;
-        i++;
-    }
-
-    if (i == 0) {
-        snprintf(buf, sizeof(buf), "%ld %s", (long)size, units[i]);
-    } else {
-        snprintf(buf, sizeof(buf), "%.0f %s", s, units[i]);
-    }
-    return buf;
 }
 
 void enable_keepalive(int sockfd) {

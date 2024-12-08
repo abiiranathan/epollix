@@ -1,10 +1,10 @@
 #include "../include/route.h"
+#include "../include/fast_str.h"
 #include "../include/static.h"
 
 #include <solidc/filepath.h>
 #include <stdarg.h>
 
-// =================== STATIC GLOBALS ================================================
 static Route routeTable[MAX_ROUTES] = {};
 static size_t numRoutes = 0;
 
@@ -12,7 +12,6 @@ const char* get_route_pattern(Route* route) {
     return route->pattern;
 }
 
-// Default route matcher.
 Route* default_route_matcher(HttpMethod method, const char* path) {
     bool matches = false;
     for (size_t i = 0; i < numRoutes; i++) {
@@ -35,9 +34,6 @@ Route* default_route_matcher(HttpMethod method, const char* path) {
     return NULL;
 }
 
-// ================== Main program ===========================
-
-// ============ Registering routes ==========================
 // Helper function to register a new route
 static Route* registerRoute(HttpMethod method, const char* pattern, Handler handler, RouteType type) {
     if (numRoutes >= (size_t)MAX_ROUTES) {
@@ -60,7 +56,8 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->params->match_count = 0;
     memset(route->params->params, 0, sizeof(route->params->params));
 
-    if ((strstr("{", pattern) && !strstr("}", pattern)) || (strstr("}", pattern) && !strstr("{", pattern))) {
+    if ((boyer_moore_strstr("{", pattern) && !boyer_moore_strstr("}", pattern)) ||
+        (boyer_moore_strstr("}", pattern) && !boyer_moore_strstr("{", pattern))) {
         LOG_FATAL("Invalid path parameter in pattern: %s\n", pattern);
     }
 
@@ -124,7 +121,7 @@ Route* route_static(const char* pattern, const char* dir) {
     char* dirname = strdup(dir);
     LOG_ASSERT(dirname, "strdup failed");
 
-    if (strstr(dirname, "~")) {
+    if (boyer_moore_strstr(dirname, "~")) {
         free(dirname);
         dirname = filepath_expanduser(dir);
         LOG_ASSERT(dirname, "filepath_expanduser failed");
@@ -153,20 +150,16 @@ Route* route_static(const char* pattern, const char* dir) {
 static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const char* pattern, Handler handler,
                                  RouteType type) {
     char* route_pattern = (char*)malloc(strlen(group->prefix) + strlen(pattern) + 1);
-    if (!route_pattern) {
-        LOG_FATAL("Failed to allocate memory for route pattern\n");
-    }
+    LOG_ASSERT(route_pattern, "Failed to allocate memory for route pattern\n");
 
     int ret = snprintf(route_pattern, strlen(group->prefix) + strlen(pattern) + 1, "%s%s", group->prefix, pattern);
     if (ret < 0 || ret >= (int)(strlen(group->prefix) + strlen(pattern) + 1)) {
-        LOG_FATAL("Failed to concatenate route pattern\n");
+        LOG_FATAL("Failed to concatenate route pattern");
     }
 
     // realloc the routes array, may be null if this is the first route
     Route** new_routes = (Route**)realloc(group->routes, sizeof(Route*) * (group->count + 1));
-    if (!new_routes) {
-        LOG_FATAL("Failed to allocate memory for group routes\n");
-    }
+    LOG_ASSERT(new_routes, "Failed to allocate memory for group routes");
 
     // Update the routes array
     group->routes = new_routes;
@@ -218,7 +211,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     char* fullpath = strdup(dirname);
     LOG_ASSERT(fullpath != NULL, "strdup failed");
 
-    if (strstr(fullpath, "~")) {
+    if (boyer_moore_strstr(fullpath, "~")) {
         free(fullpath);
         fullpath = filepath_expanduser(dirname);
         LOG_ASSERT(fullpath != NULL, "filepath_expanduser failed");
@@ -232,8 +225,10 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     }
 
     size_t dirlen = strlen(fullpath);
+
+    // Remove trailing slash
     if (fullpath[dirlen - 1] == '/') {
-        fullpath[dirlen - 1] = '\0';  // Remove trailing slash
+        fullpath[dirlen - 1] = '\0';
     }
 
     Route* route = registerGroupRoute(group, M_GET, pattern, (Handler)staticFileHandler, StaticRoute);
@@ -251,14 +246,10 @@ void* route_middleware_context(context_t* ctx) {
 // Create a new RouteGroup.
 RouteGroup* route_group(const char* pattern) {
     RouteGroup* group = (RouteGroup*)malloc(sizeof(RouteGroup));
-    if (!group) {
-        LOG_FATAL("Failed to allocate memory for RouteGroup\n");
-    }
+    LOG_ASSERT(group, "Failed to allocate memory for RouteGroup\n");
 
     group->prefix = strdup(pattern);
-    if (!group->prefix) {
-        LOG_FATAL("Failed to allocate memory for RouteGroup prefix\n");
-    }
+    LOG_ASSERT(group->prefix, "Failed to allocate memory for RouteGroup prefix\n");
 
     group->middleware_count = 0;
     group->count = 0;
@@ -291,9 +282,7 @@ void use_group_middleware(RouteGroup* group, int count, ...) {
 
     uint8_t new_count = group->middleware_count + (uint8_t)count;
     Middleware* new_middleware = (Middleware*)realloc(group->middleware, sizeof(Middleware) * (size_t)new_count);
-    if (!new_middleware) {
-        LOG_FATAL("Failed to allocate memory for group middleware\n");
-    }
+    LOG_ASSERT(new_middleware, "Failed to allocate memory for group middleware\n");
 
     group->middleware = new_middleware;
 

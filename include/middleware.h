@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <inttypes.h>
+#include <solidc/arena.h>
 #include "params.h"
 #include "route.h"
 #include "types.h"
@@ -25,7 +26,7 @@ void middleware_init(void);
 void middleware_cleanup(void);
 
 // Combine global and route specific middleware.
-Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx);
+Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx, Arena* arena);
 
 // get_global_middleware_count returns the number of global middleware functions.
 size_t get_global_middleware_count(void);

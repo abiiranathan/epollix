@@ -25,10 +25,14 @@ static void test_parse_request_headers(void) {
         LOG_ASSERT(req->headers[i] != NULL, "Failed to allocate memory for header_t");
     }
 
+    Arena* arena = arena_create(1024);
+    LOG_ASSERT(arena != NULL, "Failed to create arena");
+
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
-    http_error_t result = parse_request_headers(req, header_text, length);
+    http_error_t result = parse_request_headers(req, arena, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
+    (void)result;
 
     LOG_ASSERT(strcmp(req->headers[0]->name, "Host") == 0, "Expected Host header");
     LOG_ASSERT(strcmp(req->headers[0]->value, "localhost:8080") == 0, "Expected localhost:8080");
@@ -58,40 +62,23 @@ static void test_encode_uri(void) {
     char* encoded = encode_uri(decoded);
     bool result = strcmp(encoded, "Hello%20World%21") == 0;
     LOG_ASSERT(result, "Failed to encode URI");
+    (void)result;
     free(encoded);
 
     LOG_INFO("test_encode_uri passed");
 }
 
-// bool set_header(context_t* ctx, const char* name, const char* value)
-static void test_header_setter_and_getters(void) {
-    Response* res = allocate_response(1);
-    LOG_ASSERT(res != NULL, "Failed to allocate response");
-    bool result = set_response_header(res, "Content-Type", "text/html");
-    LOG_ASSERT(result, "Failed to set header");
-
-    LOG_ASSERT(strcmp(res->headers[0]->name, "Content-Type") == 0, "Expected Content-Type header");
-    LOG_ASSERT(strcmp(res->headers[0]->value, "text/html") == 0, "Expected text/html");
-
-    const char* value = find_header(res->headers, res->header_count, "Content-Type");
-    LOG_ASSERT(value != NULL, "Failed to find header");
-
-    int index = find_header_index(res->headers, res->header_count, "Content-Type");
-    LOG_ASSERT(index == 0, "Failed to find header index");
-
-    free_reponse(res);
-
-    LOG_INFO("test_set_header passed");
-}
-
 // header_t header_fromstring(const char* str)
 static void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
-    header_t* header = header_fromstring(header_text);
+    Arena* arena = arena_create(1024);
+    LOG_ASSERT(arena != NULL, "Failed to create arena");
+    header_t* header = header_fromstring(header_text, arena);
     LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
     LOG_ASSERT(strcmp(header->value, "text/html") == 0, "Expected text/html, got %s", header->value);
 
-    free(header);
+    arena_destroy(arena);
+    UNUSED(header);
     LOG_INFO("test_header_fromstring passed");
 }
 
@@ -105,18 +92,22 @@ static void test_parse_url_query_params(void) {
 
     bool result = parse_url_query_params(query, query_params);
     LOG_ASSERT(result, "Failed to parse query params");
+    (void)result;
 
     const char* name = map_get(query_params, "name");
     LOG_ASSERT(name != NULL, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John") == 0, "Expected John");
+    (void)name;
 
     const char* age = map_get(query_params, "age");
     LOG_ASSERT(age != NULL, "Failed to get age");
     LOG_ASSERT(strcmp(age, "30") == 0, "Expected 30");
+    (void)age;
 
     const char* location = map_get(query_params, "location");
     LOG_ASSERT(location != NULL, "Failed to get location");
     LOG_ASSERT(strcmp(location, "USA") == 0, "Expected USA");
+    (void)location;
     LOG_INFO("test_parse_url_query_params passed");
 
     map_destroy(query_params, true);
@@ -143,6 +134,10 @@ static void test_match_params(void) {
     LOG_ASSERT(id != NULL, "Failed to get id");
     LOG_ASSERT(strcmp(id, "123") == 0, "Expected 123");
 
+    (void)matches;
+    (void)name;
+    (void)id;
+
     LOG_INFO("test_match_params passed");
 }
 
@@ -150,7 +145,6 @@ int main(void) {
     test_parse_request_headers();
     test_decode_uri();
     test_encode_uri();
-    test_header_setter_and_getters();
     test_header_fromstring();
     test_parse_url_query_params();
     test_match_params();

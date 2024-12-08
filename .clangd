@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: ["-xc", "-Wall", "-Werror", "-Wextra", "-std=c2x", "-ferror-limit=0", "-fblocks"]
+  Add: ["-xc", "-Wall", "-Werror", "-Wextra", "-std=c2x", "-ferror-limit=0", "-fblocks", "-mavx2", "-msse4.1"]
 
 Index:
   Background: Build

@@ -86,6 +86,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
         LOG_ERROR("Failed to allocate memory for files");
         return MEMORY_ALLOC_ERROR;
     }
+
     // zero out the memory
     memset(form->files, 0, INITIAL_FILE_CAPACITY * sizeof(FileHeader*));
 

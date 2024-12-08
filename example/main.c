@@ -1,11 +1,10 @@
 #define _GNU_SOURCE 1
 
+#include <stdio.h>
 #include "../include/epollix.h"
 
-#include <stdio.h>
-
 void index_page(context_t* ctx) {
-    set_content_type(ctx->response, "text/html");
+    set_content_type(ctx, "text/html");
     servefile(ctx, "assets/index.html");
 }
 
@@ -28,7 +27,7 @@ void open_movie(void) {
 
 void serve_movie(context_t* ctx) {
     LOG_ASSERT(file != NULL, "File is not opened");
-    set_content_type(ctx->response, "video/mp4");
+    set_content_type(ctx, "video/mp4");
     serve_open_file(ctx, file, size, filename);
 }
 
@@ -38,8 +37,8 @@ void handle_greet(context_t* ctx) {
     assert(name);
     printf("Hello %s\n", name);
 
-    set_response_header(ctx->response, "Content-Type", "text/plain");
-    send_response(ctx->response, name, strlen(name));
+    set_response_header(ctx, "Content-Type", "text/plain");
+    send_response(ctx, name, strlen(name));
 }
 
 // /POST /users/create
@@ -52,7 +51,7 @@ void handle_create_user(context_t* ctx) {
     if (!multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary))) {
         ctx->response->status = StatusBadRequest;
         const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
-        send_string(ctx->response, error);
+        send_string(ctx, error);
         return;
     }
 
@@ -61,7 +60,7 @@ void handle_create_user(context_t* ctx) {
     if (code != MULTIPART_OK) {
         ctx->response->status = StatusBadRequest;
         const char* error = multipart_error_message(code);
-        send_response(ctx->response, (char*)error, strlen(error));
+        send_response(ctx, (char*)error, strlen(error));
         return;
     }
 
@@ -101,7 +100,7 @@ void handle_create_user(context_t* ctx) {
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
         ctx->response->status = StatusInternalServerError;
-        send_string(ctx->response, "Internal Server Error");
+        send_string(ctx, "Internal Server Error");
         return;
     }
 
@@ -110,7 +109,7 @@ void handle_create_user(context_t* ctx) {
     if (jwt_err != JWT_SUCCESS) {
         LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
         ctx->response->status = StatusInternalServerError;
-        send_string(ctx->response, "Internal Server Error");
+        send_string(ctx, "Internal Server Error");
         return;
     }
 
@@ -127,7 +126,7 @@ void handle_create_user(context_t* ctx) {
     free(jwtToken);
 
     char* data = cJSON_Print(json);
-    send_json_string(ctx->response, data);
+    send_json_string(ctx, data);
     free(data);
 
     cJSON_Delete(json);
@@ -136,14 +135,14 @@ void handle_create_user(context_t* ctx) {
 
 // GET /users/register
 void render_register_form(context_t* ctx) {
-    set_content_type(ctx->response, "text/html");
+    set_content_type(ctx, "text/html");
     servefile(ctx, "./assets/register_user.html");
 }
 
 // Beared Authenticated route
 void protected_route(context_t* ctx) {
     const JWTPayload* payload = get_jwt_payload(ctx);
-    send_string_f(ctx->response, "Protected route:\nYour username is: %s\n", payload->sub);
+    send_string_f(ctx, "Protected route:\nYour username is: %s\n", payload->sub);
 }
 
 void* send_time(void* arg) {
@@ -158,7 +157,7 @@ void* send_time(void* arg) {
         timeinfo = localtime(&rawtime);
         strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
 
-        int ret = response_send_chunk(ctx->response, buffer, strlen(buffer));
+        int ret = response_send_chunk(ctx, buffer, strlen(buffer));
         if (ret < 0) {
             break;
         }
@@ -177,12 +176,12 @@ void chunked_response(context_t* ctx) {
     pthread_t thread;
     pthread_create(&thread, NULL, send_time, ctx);
     pthread_join(thread, NULL);
-    response_end(ctx->response);
+    response_end(ctx);
 }
 
 static void api_index(context_t* ctx) {
     char* data = "{\"message\": \"Welcome to the API\"}";
-    send_json(ctx->response, data, strlen(data));
+    send_json(ctx, data, strlen(data));
 }
 
 typedef struct User {
@@ -192,11 +191,7 @@ typedef struct User {
 } User;
 
 static void api_users(context_t* ctx) {
-    User* users = (User*)malloc(sizeof(User) * 10);
-    if (users == NULL) {
-        send_string(ctx->response, "Failed to allocate memory for users");
-        return;
-    }
+    User* users = (User*)arena_alloc(ctx->user_arena, sizeof(User) * 10);
 
     for (int i = 0; i < 10; i++) {
         users[i].username = "user";
@@ -216,11 +211,11 @@ static void api_users(context_t* ctx) {
     }
 
     cJSON_AddItemToObject(root, "users", users_array);
+
     char* data = cJSON_Print(root);
-    send_json_string(ctx->response, data);
+    send_json_string(ctx, data);
 
     cJSON_Delete(root);
-    free(users);
     free(data);
 }
 
@@ -230,7 +225,7 @@ static void api_user_by_id(context_t* ctx) {
 
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "{\"user\": \"%s\"}", id);
-    send_json_string(ctx->response, buffer);
+    send_json_string(ctx, buffer);
 }
 
 void gzip_route(context_t* ctx) {
@@ -239,8 +234,8 @@ void gzip_route(context_t* ctx) {
     size_t compressed_data_len = 0;
     gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
 
-    set_response_header(ctx->response, "Content-Encoding", "gzip");
-    send_response(ctx->response, (void*)compressed_data, compressed_data_len);
+    set_response_header(ctx, "Content-Encoding", "gzip");
+    send_response(ctx, (void*)compressed_data, compressed_data_len);
 
     free(compressed_data);
 }
@@ -250,11 +245,9 @@ void cleanup(void) {
 }
 
 void spa_route(context_t* ctx) {
-    printf("Serving SPA route\n");
     servefile(ctx, "/home/nabiizy/Code/C/pdfsearch/frontend/build/index.html");
 }
 
-// ======================= END OF ROUTES ========================================
 int main(int argc, char** argv) {
     char* port = "3000";
     if (argc == 2) {
@@ -326,6 +319,5 @@ int main(int argc, char** argv) {
 
     // Start the server
     epoll_server_listen(server);
-
     return 0;
 }
