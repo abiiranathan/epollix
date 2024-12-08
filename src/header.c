@@ -29,7 +29,7 @@ header_t* header_fromstring(const char* str) {
 
     size_t name_length = colon - str;
     if (name_length >= MAX_HEADER_NAME) {
-        LOG_ERROR("Header name is too long. Max length is %d", MAX_HEADER_NAME - 1);
+        LOG_ERROR("Header name too long for %s, Max length is %d", str, MAX_HEADER_NAME - 1);
         return NULL;
     }
 
@@ -48,7 +48,7 @@ header_t* header_fromstring(const char* str) {
 
     size_t value_length = strlen(value_start);
     if (value_length >= MAX_HEADER_VALUE) {
-        LOG_ERROR("Header value is too long. Max length is %d", MAX_HEADER_VALUE - 1);
+        LOG_ERROR("Header value too long for %s, Max length is %d", str, MAX_HEADER_VALUE - 1);
         free(header);
         return NULL;
     }

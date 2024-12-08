@@ -59,29 +59,6 @@ void* get_context_value(context_t* ctx, const char* key) {
     return map_get(ctx->locals, (char*)key);
 }
 
-// format_file_size returns a human-readable string representation of the file size.
-// The function returns a pointer to a static buffer that is overwritten on each call.
-// This means that it is not thread-safe.
-const char* format_file_size(off_t size) {
-    static char buf[32];
-    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
-
-    int i = 0;
-    double s = size;
-
-    while (s >= 1024 && i < 8) {
-        s /= 1024;
-        i++;
-    }
-
-    if (i == 0) {
-        snprintf(buf, sizeof(buf), "%ld %s", (long)size, units[i]);
-    } else {
-        snprintf(buf, sizeof(buf), "%.0f %s", s, units[i]);
-    }
-    return buf;
-}
-
 void enable_keepalive(int sockfd) {
     int keepalive = 1;  // Enable keepalive
     int keepidle = 60;  // 60 seconds before sending keepalive probes

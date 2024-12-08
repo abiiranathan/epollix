@@ -1,12 +1,16 @@
 #include "../include/request.h"
+#include "../include/fast_str.h"
 #include "../include/middleware.h"
 #include "../include/route.h"
 
+#include <cpuid.h>
 #include <ctype.h>
 #include <errno.h>
+#include <immintrin.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <xmmintrin.h>
 
 // Not found route.
 Route* notFoundRoute = NULL;
@@ -197,7 +201,7 @@ static bool parse_request_line(char* headers, char** method, char** uri, char** 
     **http_version = '\0';
     (*http_version)++;
 
-    *header_start = strstr(*http_version, "\r\n");
+    *header_start = boyer_moore_strstr(*http_version, "\r\n");
     if (!*header_start)
         return false;
     **header_start = '\0';
@@ -393,36 +397,35 @@ Route* route_notfound(Handler h) {
     return notFoundRoute;
 }
 
-#ifdef __AVX__
-#include <immintrin.h>
+// Check if the CPU supports AVX
+int check_avx() {
+    unsigned int eax, ebx, ecx, edx;
+    __cpuid(1, eax, ebx, ecx, edx);
+    return ecx & bit_AVX;
+}
 
-static inline void fast_bzero(void* ptr, size_t size) {
+__attribute__((target("avx2"))) inline void fast_bzero(void* ptr, size_t size) {
+    // Use standard implementation if vector size is too small
+    if (size < 32) {
+        memset(ptr, 0, size);
+        return;
+    }
+
     char* p = (char*)ptr;
     size_t vec_size = size & ~31ULL;
     size_t rem_size = size & 31ULL;
 
-    __asm__ volatile(
-        "vxorps %%ymm0, %%ymm0, %%ymm0\n\t"
-        "mov %0, %%rax\n\t"
-        "shr $5, %%rax\n\t"
-        "jz 1f\n\t"
-        "0:\n\t"
-        "vmovdqu %%ymm0, (%1)\n\t"
-        "add $32, %1\n\t"
-        "dec %%rax\n\t"
-        "jnz 0b\n\t"
-        "1:\n\t"
-        "vzeroupper\n\t"
-        : "+r"(vec_size), "+r"(p)
-        :
-        : "rax", "ymm0", "memory");
+    __m256i zero = _mm256_setzero_si256();
+
+    for (size_t i = 0; i < vec_size; i += 32) {
+        _mm256_storeu_si256((__m256i*)(p + i), zero);
+    }
 
     // Handle remaining bytes
     for (size_t i = 0; i < rem_size; ++i) {
-        p[i] = 0;
+        p[vec_size + i] = 0;
     }
 }
-#endif
 
 // handle the request and send response.
 void process_request(Request* req) {
@@ -431,12 +434,11 @@ void process_request(Request* req) {
     char headers[4096];
 
     // Check for AVX support
-#if defined(__AVX__)
-    fast_bzero(headers, sizeof(headers));
-    printf("Using AVX\n");
-#else
+    // if (check_avx()) {
+    //     fast_bzero(headers, sizeof(headers));
+    // } else {
     memset(headers, 0, sizeof(headers));
-#endif
+    // }
 
     char* path = NULL;                  // Request path
     char* query = NULL;                 // Query string
@@ -469,7 +471,6 @@ void process_request(Request* req) {
 
     // memmem  is slower than strstr but safer!
     end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
-    // end_of_headers = strstr(headers, "\r\n\r\n");
     if (!end_of_headers) {
         http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
         goto error;
@@ -506,18 +507,11 @@ void process_request(Request* req) {
     }
 
     free(path);
-    if (query) {
-        free(query);
-    }
     return;  // success, return early to avoid cleanup code
 
 error:
     if (path) {
         free(path);
-    }
-
-    if (query) {
-        free(query);
     }
     close_connection(client_fd, epoll_fd);
 }

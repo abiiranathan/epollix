@@ -1,4 +1,5 @@
 #include "../include/mime.h"
+#include "../include/fast_str.h"
 #include "../include/logging.h"
 
 #include <ctype.h>
@@ -203,14 +204,6 @@ static const MimeEntry mime_mapping[] = {
     {"azw", "application/vnd.amazon.ebook"},
     {"prc", "application/x-mobipocket-ebook"},
 
-    // Java Web Start
-    {"jnlp", "application/x-java-jnlp-file"},
-
-    // Illustration and Graphics
-    {"kil", "application/x-killustrator"},
-    {"kra", "application/x-krita"},
-    {"krz", "application/x-krita"},
-
     // Microsoft Windows Applications
     {"wmd", "application/x-ms-wmd"},
     {"wmz", "application/x-ms-wmz"},
@@ -274,7 +267,7 @@ const char* get_mimetype(char* filename) {
 
     // Get the file extension.
     char *ptr, *start = filename, *last = NULL;
-    while ((ptr = strstr(start, "."))) {
+    while ((ptr = boyer_moore_strstr(start, "."))) {
         last = ptr;
         start++;
     }

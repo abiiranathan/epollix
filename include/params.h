@@ -8,11 +8,6 @@ extern "C" {
 #include <stdbool.h>
 #include <stddef.h>
 
-// Define STRICT_SLASH to match the trailing slash in the URL
-#ifndef STRICT_SLASH
-#define STRICT_SLASH 0
-#endif
-
 // Maximum length of a parameter name
 #ifndef MAX_PARAM_NAME
 #define MAX_PARAM_NAME 32

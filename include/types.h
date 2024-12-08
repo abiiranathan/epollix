@@ -14,6 +14,7 @@ extern "C" {
 #include "mime.h"
 #include "params.h"
 #include "status.h"
+#include "urlencoded.h"
 
 typedef enum RouteType { NormalRoute, StaticRoute } RouteType;
 

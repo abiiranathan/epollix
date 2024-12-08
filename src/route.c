@@ -1,4 +1,5 @@
 #include "../include/route.h"
+#include "../include/fast_str.h"
 #include "../include/static.h"
 
 #include <solidc/filepath.h>
@@ -60,7 +61,8 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->params->match_count = 0;
     memset(route->params->params, 0, sizeof(route->params->params));
 
-    if ((strstr("{", pattern) && !strstr("}", pattern)) || (strstr("}", pattern) && !strstr("{", pattern))) {
+    if ((boyer_moore_strstr("{", pattern) && !boyer_moore_strstr("}", pattern)) ||
+        (boyer_moore_strstr("}", pattern) && !boyer_moore_strstr("{", pattern))) {
         LOG_FATAL("Invalid path parameter in pattern: %s\n", pattern);
     }
 
@@ -124,7 +126,7 @@ Route* route_static(const char* pattern, const char* dir) {
     char* dirname = strdup(dir);
     LOG_ASSERT(dirname, "strdup failed");
 
-    if (strstr(dirname, "~")) {
+    if (boyer_moore_strstr(dirname, "~")) {
         free(dirname);
         dirname = filepath_expanduser(dir);
         LOG_ASSERT(dirname, "filepath_expanduser failed");
@@ -218,7 +220,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     char* fullpath = strdup(dirname);
     LOG_ASSERT(fullpath != NULL, "strdup failed");
 
-    if (strstr(fullpath, "~")) {
+    if (boyer_moore_strstr(fullpath, "~")) {
         free(fullpath);
         fullpath = filepath_expanduser(dirname);
         LOG_ASSERT(fullpath != NULL, "filepath_expanduser failed");

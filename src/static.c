@@ -43,6 +43,25 @@ static inline void append_or_error(Response* res, Arena* arena, cstr* response, 
     }
 }
 
+// Write human readable file size to buffer. A good buffer size is like >= 32.
+static void format_file_size(off_t size, char* buf, size_t buffer_size) {
+    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+
+    int i = 0;
+    double s = size;
+
+    while (s >= 1024 && i < 8) {
+        s /= 1024;
+        i++;
+    }
+
+    if (i == 0) {
+        snprintf(buf, buffer_size, "%ld %s", (long)size, units[i]);
+    } else {
+        snprintf(buf, buffer_size, "%.0f %s", s, units[i]);
+    }
+}
+
 static void serve_directory_listing(Response* res, const char* dirname, const char* base_prefix) {
     DIR* dir;
     struct dirent* ent;
@@ -138,7 +157,9 @@ static void serve_directory_listing(Response* res, const char* dirname, const ch
                         append_or_error(res, arena, html_response, "<td>Directory</td>");
                     } else {
                         append_or_error(res, arena, html_response, "<td>");
-                        append_or_error(res, arena, html_response, format_file_size(st.st_size));
+                        char fs[32];
+                        format_file_size(st.st_size, fs, sizeof(fs));
+                        append_or_error(res, arena, html_response, fs);
                         append_or_error(res, arena, html_response, "</td>");
                     }
                 } else {

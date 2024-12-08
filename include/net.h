@@ -33,11 +33,6 @@ void http_error(int client_fd, http_status status, const char* message);
 // Returns the IP address of the client.
 char* get_ip_address(context_t* ctx);
 
-// format_file_size returns a human-readable string representation of the file size.
-// The function returns a pointer to a static buffer that is overwritten on each call.
-// This means that it is not thread-safe.
-const char* format_file_size(off_t size);
-
 // Add a value to the context. This is useful for sharing data between middleware.
 // The key must be a null-terminated string. The value can be any
 // heap-allocated pointer. If the key already exists, the value is replaced.

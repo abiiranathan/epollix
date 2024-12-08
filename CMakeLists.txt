@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.30.0)
 project(epollix VERSION 0.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 23)
@@ -47,6 +47,7 @@ set(SOURCES
     src/server.c
     src/static.c
     src/status.c
+    src/fast_str.c
 )
 
 # Add the middleware sources
@@ -78,6 +79,7 @@ set(HEADERS
     include/response.h
     include/server.h
     include/epollix.h
+    include/fast_str.h
 )
 
 # Include "include/automem.h" if using GCC or Clang and not in C++ mode
@@ -114,13 +116,13 @@ target_compile_options(epollix PUBLIC -Wall -Wextra -Werror)
 # Or sudo apt-get install libblocksruntime-dev
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     message(STATUS "Using Clang, adding -fblocks support")
-    target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)
+    target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks -mavx2 -msse4.1)
     target_link_libraries(epollix PUBLIC BlocksRuntime)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # If in release mode, add some security flags
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         message(STATUS "Using GCC, adding security flags")
-        target_compile_options(epollix PUBLIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC)
+        target_compile_options(epollix PUBLIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC -mavx2 -msse4.1)
     endif()
 endif()
 

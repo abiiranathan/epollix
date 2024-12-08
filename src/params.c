@@ -10,7 +10,8 @@
 * The pattern can contain parameters in the form of {name}. The function extracts the
 * parameter name and value from the URL and stores them in the PathParams struct.
 * Regex is not supported in this implementation.
-* By default the function is strict and requires the URL to match the pattern exactly.
+* The function is lax and ignores the trailing slash in the pattern and URL.
+* e.g /about/ and /about are considered equal.
 * The maximum number of parameters is defined by MAX_PARAMS, maximum parameter name
 * length is defined by MAX_PARAM_NAME, and maximum parameter value length is defined
 * by MAX_PARAM_VALUE. The function returns true if the pattern and URL match, false otherwise.
@@ -31,83 +32,80 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
     const char* url_ptr = url_path;
     pathParams->match_count = 0;
 
-    while (*pattern_ptr != '\0' && *url_ptr != '\0') {
+    // Early return if there are no parameters in the pattern
+    if (!strchr(pattern, '{')) {
+        // Compare ignoring trailing slashes
+        size_t lpattern = strlen(pattern_ptr);
+        size_t lurl = strlen(url_ptr);
+
+        // Skip trailing slash for the pattern
+        if (lpattern > 1 && pattern_ptr[lpattern - 1] == '/') {
+            lpattern--;
+        }
+
+        // Skip trailing slash for the URL
+        if (lurl > 1 && url_ptr[lurl - 1] == '/') {
+            lurl--;
+        }
+        return lpattern == lurl && strncmp(pattern_ptr, url_ptr, lpattern) == 0;
+    }
+
+    // Main matching logic with path parameters
+    while (*pattern_ptr && *url_ptr) {
         if (*pattern_ptr == '{') {
-            // Check if we have space to store more parameters
+            // Check for parameter space
             if (pathParams->match_count >= MAX_PARAMS) {
                 LOG_ERROR("PathParams size exceeded");
                 return false;
             }
 
-            // Start of a parameter in the pattern
+            // Extract parameter name
             pattern_ptr++;
-
-            // Find the end of the parameter name
             const char* brace_end = strchr(pattern_ptr, '}');
-            if (!brace_end) {
+            if (!brace_end)
                 return false;
-            }
 
-            // Copy the parameter name
             size_t param_name_len = brace_end - pattern_ptr;
-            if (param_name_len >= MAX_PARAM_NAME) {
+            if (param_name_len >= MAX_PARAM_NAME)
                 return false;
-            }
 
-            PathParam param = {0};
-            strncpy(param.name, pattern_ptr, param_name_len);
-            param.name[param_name_len] = '\0';
+            // Prepare parameter
+            PathParam* param = &pathParams->params[pathParams->match_count];
+            memcpy(param->name, pattern_ptr, param_name_len);
+            param->name[param_name_len] = '\0';
 
-            pattern_ptr = brace_end + 1;  // Move past the closing brace
+            pattern_ptr = brace_end + 1;
 
-            // Extract the parameter value from the URL
+            // Extract parameter value
             const char* value_start = url_ptr;
-            while (*url_ptr != '/' && *url_ptr != '\0') {
+            while (*url_ptr && *url_ptr != '/')
                 url_ptr++;
-            }
 
-            size_t value_length = url_ptr - value_start;
-            if (value_length >= MAX_PARAM_VALUE) {
+            size_t value_len = url_ptr - value_start;
+            if (value_len >= MAX_PARAM_VALUE)
                 return false;
-            }
 
-            strncpy(param.value, value_start, value_length);
-            param.value[value_length] = '\0';
-            pathParams->params[pathParams->match_count++] = param;
+            memcpy(param->value, value_start, value_len);
+            param->value[value_len] = '\0';
+
+            pathParams->match_count++;
         } else {
-            // Static part of the pattern, should match exactly with the URL
-            if (*pattern_ptr == *url_ptr) {
-                pattern_ptr++;
-                url_ptr++;
-            } else {
+            // Static comparison
+            if (*pattern_ptr != *url_ptr)
                 return false;
-            }
-        }
-    }
-
-    if (STRICT_SLASH) {
-        // Check if we consumed the entire URL and pattern strictly
-        if (*pattern_ptr != '\0' || *url_ptr != '\0') {
-            return false;
-        }
-
-    } else {
-        // Ignore trailing slashes in the pattern
-        while (*pattern_ptr == '/')
             pattern_ptr++;
-
-        // Ignore trailing slashes in the URL
-        while (*url_ptr == '/')
             url_ptr++;
-
-        // assert that we consumed the entire URL and pattern
-        if (*pattern_ptr != '\0' || *url_ptr != '\0') {
-            return false;
         }
     }
 
-    // we consumed the entire URL and pattern
-    return true;
+    // Ignore trailing slashes in both pattern and URL
+    while (*pattern_ptr == '/')
+        pattern_ptr++;
+
+    while (*url_ptr == '/')
+        url_ptr++;
+
+    return (*pattern_ptr == '\0' && *url_ptr == '\0');
 }
 
 const char* get_path_param(const PathParams* pathParams, const char* name) {

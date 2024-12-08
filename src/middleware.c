@@ -143,6 +143,7 @@ void use_route_middleware(Route* route, int count, ...) {
     for (size_t i = route->middleware_count; i < new_count; i++) {
         ((Middleware*)(route->middleware))[i] = va_arg(args, Middleware);
     }
+
     route->middleware_count = new_count;
     va_end(args);
 }

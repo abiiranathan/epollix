@@ -14,6 +14,7 @@
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "../include/fast_str.h"
 #include "../include/request.h"
 
 // Create a new response object.
@@ -133,6 +134,7 @@ void process_response(Request* req) {
     free_context(&ctx);
 }
 
+// Optimized header writing function
 static void write_headers(Response* res) {
     if (res->headers_sent)
         return;
@@ -143,27 +145,76 @@ static void write_headers(Response* res) {
     }
 
     char header_res[MAX_RES_HEADER_SIZE];
-    size_t remaining = sizeof(header_res);
     char* current = header_res;
+    size_t remaining = sizeof(header_res);
 
-    // Write status line
-    int ret = snprintf(current, remaining, "HTTP/1.1 %u %s\r\n", res->status, http_status_text(res->status));
-    if (ret < 0 || (size_t)ret >= remaining) {
-        LOG_ERROR("Status line truncated or error occurred");
-        return;
+    // Efficient status line writing
+    const char* status_text = http_status_text(res->status);
+
+    // Manually copy HTTP version
+    memcpy(current, "HTTP/1.1 ", 9);
+    current += 9;
+    remaining -= 9;
+
+    // Convert status code to string manually
+    unsigned int status = res->status;
+    char status_code[4];
+    int status_len = 0;
+    do {
+        status_code[status_len++] = '0' + (status % 10);
+        status /= 10;
+    } while (status > 0);
+
+    // Reverse the status code string
+    for (int i = 0; i < status_len / 2; i++) {
+        char temp = status_code[i];
+        status_code[i] = status_code[status_len - 1 - i];
+        status_code[status_len - 1 - i] = temp;
     }
-    current += ret;
-    remaining -= ret;
+
+    // Copy status code
+    memcpy(current, status_code, status_len);
+    current += status_len;
+    remaining -= status_len;
+
+    // Add space
+    *current++ = ' ';
+    remaining--;
+
+    // Copy status text
+    size_t status_text_len = strlen(status_text);
+    memcpy(current, status_text, status_text_len);
+    current += status_text_len;
+    remaining -= status_text_len;
+
+    // Add CRLF
+    memcpy(current, "\r\n", 2);
+    current += 2;
+    remaining -= 2;
 
     // Add headers
     for (size_t i = 0; i < res->header_count; i++) {
-        ret = snprintf(current, remaining, "%s: %s\r\n", res->headers[i]->name, res->headers[i]->value);
-        if (ret < 0 || (size_t)ret >= remaining) {
-            LOG_ERROR("Header truncated or error occurred");
-            return;
-        }
-        current += ret;
-        remaining -= ret;
+        // Copy header name
+        size_t name_len = strlen(res->headers[i]->name);
+        memcpy(current, res->headers[i]->name, name_len);
+        current += name_len;
+        remaining -= name_len;
+
+        // Add ": "
+        memcpy(current, ": ", 2);
+        current += 2;
+        remaining -= 2;
+
+        // Copy header value
+        size_t value_len = strlen(res->headers[i]->value);
+        memcpy(current, res->headers[i]->value, value_len);
+        current += value_len;
+        remaining -= value_len;
+
+        // Add CRLF
+        memcpy(current, "\r\n", 2);
+        current += 2;
+        remaining -= 2;
     }
 
     // Append the end of the headers
@@ -179,8 +230,8 @@ static void write_headers(Response* res) {
     int nbytes_sent = sendall(res->client_fd, header_res, strlen(header_res));
     if (nbytes_sent == -1) {
         if (errno == EBADF) {
-            // Can happend if the client closes the connection before the response is sent.
-            // we can safely ignore this error.
+            // Can happen if the client closes the connection before the response is sent.
+            // We can safely ignore this error.
         } else {
             LOG_ERROR("%s, fd: %d", strerror(errno), res->client_fd);
         }
@@ -458,7 +509,7 @@ int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* fi
 
 // Parses the Range header and extracts start and end values
 bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range) {
-    if (strstr(range_header, "bytes=") != NULL) {
+    if (boyer_moore_strstr(range_header, "bytes=") != NULL) {
         if (sscanf(range_header, "bytes=%ld-%ld", start, end) == 2) {
             *has_end_range = true;
             return true;
