@@ -18,25 +18,23 @@
 #include "../include/request.h"
 
 // Response headers are pre-allocated in the arena.
-bool set_response_header(Response* res, const char* name, const char* value) {
-    if (res->header_count >= MAX_RES_HEADERS)
+bool set_response_header(context_t* ctx, const char* name, const char* value) {
+    if (ctx->response->header_count >= MAX_RES_HEADERS)
         return false;
 
-    // Access the next header.
-    header_t* header = res->headers[res->header_count++];
-    strncpy(header->name, name, MAX_HEADER_NAME - 1);
-    header->name[MAX_HEADER_NAME - 1] = '\0';
-
-    strncpy(header->value, value, MAX_HEADER_VALUE - 1);
-    header->value[MAX_HEADER_VALUE - 1] = '\0';
+    header_t* header = header_new(name, value, ctx->user_arena);
+    if (!header) {
+        return false;
+    }
+    ctx->response->headers[ctx->response->header_count++] = header;
 
     if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
-        res->content_type_set = true;
+        ctx->response->content_type_set = true;
     }
     return true;
 }
 
-void process_response(Request* req, Response* res, Arena* arena) {
+void process_response(Request* req, Response* res, Arena* ctx_arena, Arena* user_arena) {
     res->client_fd = req->client_fd;
     res->content_type_set = false;
     res->status = StatusOK;
@@ -45,7 +43,7 @@ void process_response(Request* req, Response* res, Arena* arena) {
         .request = req,
         .locals = map_create(8, key_compare_char_ptr),
         .response = res,
-        .user_arena = arena_create(64 * 1024),
+        .user_arena = user_arena,
     };
 
     LOG_ASSERT(ctx.locals, "unable to allocate locals map");
@@ -74,7 +72,7 @@ void process_response(Request* req, Response* res, Arena* arena) {
     // if both global and route middleware are defined, combine them
     if (route->middleware_count > 0 && get_global_middleware_count() > 0) {
         // Allocate memory for the combined middleware
-        mw_ctx.middleware = merge_middleware(route, &mw_ctx, arena);
+        mw_ctx.middleware = merge_middleware(route, &mw_ctx, ctx_arena);
         LOG_ASSERT(mw_ctx.middleware, "error allocating memory for combined middleware");
 
         // Execute middleware chain
@@ -97,13 +95,13 @@ void process_response(Request* req, Response* res, Arena* arena) {
 }
 
 // Optimized header writing function
-static void write_headers(Response* res) {
-    if (res->headers_sent)
+static void write_headers(context_t* ctx) {
+    if (ctx->response->headers_sent)
         return;
 
     // Set default status code
-    if (res->status == 0) {
-        res->status = StatusOK;
+    if (ctx->response->status == 0) {
+        ctx->response->status = StatusOK;
     }
 
     char header_res[MAX_RES_HEADER_SIZE];
@@ -111,7 +109,7 @@ static void write_headers(Response* res) {
     size_t remaining = sizeof(header_res);
 
     // Efficient status line writing
-    const char* status_text = http_status_text(res->status);
+    const char* status_text = http_status_text(ctx->response->status);
 
     // Manually copy HTTP version
     memcpy(current, "HTTP/1.1 ", 9);
@@ -119,7 +117,7 @@ static void write_headers(Response* res) {
     remaining -= 9;
 
     // Convert status code to string manually
-    unsigned int status = res->status;
+    unsigned int status = ctx->response->status;
     char status_code[4];
     int status_len = 0;
     do {
@@ -155,10 +153,10 @@ static void write_headers(Response* res) {
     remaining -= 2;
 
     // Add headers
-    for (size_t i = 0; i < res->header_count; i++) {
+    for (size_t i = 0; i < ctx->response->header_count; i++) {
         // Copy header name
-        size_t name_len = strlen(res->headers[i]->name);
-        memcpy(current, res->headers[i]->name, name_len);
+        size_t name_len = strlen(ctx->response->headers[i]->name);
+        memcpy(current, ctx->response->headers[i]->name, name_len);
         current += name_len;
         remaining -= name_len;
 
@@ -168,8 +166,8 @@ static void write_headers(Response* res) {
         remaining -= 2;
 
         // Copy header value
-        size_t value_len = strlen(res->headers[i]->value);
-        memcpy(current, res->headers[i]->value, value_len);
+        size_t value_len = strlen(ctx->response->headers[i]->value);
+        memcpy(current, ctx->response->headers[i]->value, value_len);
         current += value_len;
         remaining -= value_len;
 
@@ -190,54 +188,48 @@ static void write_headers(Response* res) {
     *current = '\0';
 
     // Send the response headers
-    int nbytes_sent = sendall(res->client_fd, header_res, strlen(header_res));
+    int nbytes_sent = sendall(ctx->response->client_fd, header_res, strlen(header_res));
     if (nbytes_sent == -1) {
         if (errno == EBADF) {
             // Can happen if the client closes the connection before the response is sent.
             // We can safely ignore this error.
         } else {
-            LOG_ERROR("%s, fd: %d", strerror(errno), res->client_fd);
+            LOG_ERROR("%s, fd: %d", strerror(errno), ctx->response->client_fd);
         }
     }
-    res->headers_sent = nbytes_sent != -1;
+    ctx->response->headers_sent = nbytes_sent != -1;
 }
 
-void send_status(Response* res, http_status code) {
-    res->status = code;
-    write_headers(res);
+void send_status(context_t* ctx, http_status code) {
+    ctx->response->status = code;
+    write_headers(ctx);
 }
 
 // Send the response to the client.
 // Returns the number of bytes sent or -1 on error.
-int send_response(Response* res, const char* data, size_t len) {
-    char content_len[24];
-    int ret = snprintf(content_len, sizeof(content_len), "%ld", len);
-
-    // This invariant must be respected.
-    if (ret >= (int)sizeof(content_len)) {
-        LOG_ERROR("Warning: send_response(): truncation of content_len");
-    }
-
-    set_response_header(res, "Content-Length", content_len);
-    write_headers(res);
-    return sendall(res->client_fd, data, len);
+int send_response(context_t* ctx, const char* data, size_t len) {
+    char content_len[32];
+    snprintf(content_len, sizeof(content_len), "%ld", len);
+    set_response_header(ctx, "Content-Length", content_len);
+    write_headers(ctx);
+    return sendall(ctx->response->client_fd, data, len);
 }
 
-int send_json(Response* res, const char* data, size_t len) {
-    set_response_header(res, CONTENT_TYPE_HEADER, "application/json");
-    return send_response(res, data, len);
+int send_json(context_t* ctx, const char* data, size_t len) {
+    set_response_header(ctx, CONTENT_TYPE_HEADER, "application/json");
+    return send_response(ctx, data, len);
 }
 
 // Send null-terminated JSON string.
-int send_json_string(Response* res, const char* data) {
-    return send_json(res, data, strlen(data));
+int send_json_string(context_t* ctx, const char* data) {
+    return send_json(ctx, data, strlen(data));
 }
 
-int send_string(Response* res, const char* data) {
-    return send_response(res, data, strlen(data));
+int send_string(context_t* ctx, const char* data) {
+    return send_response(ctx, data, strlen(data));
 }
 
-__attribute__((format(printf, 2, 3))) int send_string_f(Response* res, const char* fmt, ...) {
+__attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     char* buffer = NULL;
@@ -265,7 +257,7 @@ __attribute__((format(printf, 2, 3))) int send_string_f(Response* res, const cha
     va_end(args);
 
     // Send the response
-    int result = send_response(res, buffer, len);
+    int result = send_response(ctx, buffer, len);
 
     // Free the allocated buffer
     free(buffer);
@@ -276,11 +268,11 @@ __attribute__((format(printf, 2, 3))) int send_string_f(Response* res, const cha
 // Returns the number of bytes written.
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
-int response_send_chunk(Response* res, const char* data, size_t len) {
-    if (!res->headers_sent) {
-        res->status = StatusOK;
-        set_response_header(res, "Transfer-Encoding", "chunked");
-        write_headers(res);
+int response_send_chunk(context_t* ctx, const char* data, size_t len) {
+    if (!ctx->response->headers_sent) {
+        ctx->response->status = StatusOK;
+        set_response_header(ctx, "Transfer-Encoding", "chunked");
+        write_headers(ctx);
     }
 
     // Send the chunked header
@@ -289,37 +281,37 @@ int response_send_chunk(Response* res, const char* data, size_t len) {
     if (ret >= (int)sizeof(chunked_header)) {
         LOG_ERROR("chunked header truncated");
         // end the chunked response
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
-    int nbytes_sent = send(res->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
+    int nbytes_sent = send(ctx->response->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
     if (nbytes_sent == -1) {
         perror("error sending chunked header");
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
     // Send the chunked data
-    nbytes_sent = sendall(res->client_fd, data, len);
+    nbytes_sent = sendall(ctx->response->client_fd, data, len);
     if (nbytes_sent == -1) {
         perror("error sending chunked data");
-        response_end(res);
+        response_end(ctx);
         return -1;
     }
 
     // Send end of chunk: Send the chunk's CRLF (carriage return and line feed)
-    if (send(res->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
+    if (send(ctx->response->client_fd, "\r\n", 2, MSG_NOSIGNAL) == -1) {
         perror("error send end of chunk sentinel");
-        response_end(res);
+        response_end(ctx);
         return false;
     };
     return nbytes_sent;
 }
 
 // End the chunked response. Must be called after all chunks have been sent.
-int response_end(Response* res) {
-    int nbytes_sent = sendall(res->client_fd, "0\r\n\r\n", 5);
+int response_end(context_t* ctx) {
+    int nbytes_sent = sendall(ctx->response->client_fd, "0\r\n\r\n", 5);
     if (nbytes_sent == -1) {
         perror("error sending end of chunked response");
         return -1;
@@ -328,18 +320,18 @@ int response_end(Response* res) {
 }
 
 // redirect to the given url status code set in response. If not set, 303 is used.
-void response_redirect(Response* res, const char* url) {
-    if (res->status < StatusMovedPermanently || res->status > StatusPermanentRedirect) {
-        res->status = StatusSeeOther;
+void response_redirect(context_t* ctx, const char* url) {
+    if (ctx->response->status < StatusMovedPermanently || ctx->response->status > StatusPermanentRedirect) {
+        ctx->response->status = StatusSeeOther;
     }
 
-    set_response_header(res, "Location", url);
-    write_headers(res);
+    set_response_header(ctx, "Location", url);
+    write_headers(ctx);
 }
 
 // Write headers for the Content-Range and Accept-Ranges.
 // Also sets the status code for partial content.
-static void send_range_headers(Response* res, ssize_t start, ssize_t end, off64_t file_size) {
+static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64_t file_size) {
     int ret;
     char content_len[24];
     ret = snprintf(content_len, sizeof(content_len), "%ld", end - start + 1);
@@ -349,8 +341,8 @@ static void send_range_headers(Response* res, ssize_t start, ssize_t end, off64_
         LOG_FATAL("send_range_headers(): truncation of content_len\n");
     }
 
-    set_response_header(res, "Accept-Ranges", "bytes");
-    set_response_header(res, "Content-Length", content_len);
+    set_response_header(ctx, "Accept-Ranges", "bytes");
+    set_response_header(ctx, "Content-Length", content_len);
 
     char content_range_str[128];
     ret = snprintf(content_range_str, sizeof(content_range_str), "bytes %ld-%ld/%ld", start, end, file_size);
@@ -359,8 +351,8 @@ static void send_range_headers(Response* res, ssize_t start, ssize_t end, off64_
         LOG_FATAL("send_range_headers(): truncation of content_range_str\n");
     }
 
-    set_response_header(res, "Content-Range", content_range_str);
-    res->status = StatusPartialContent;
+    set_response_header(ctx, "Content-Range", content_range_str);
+    ctx->response->status = StatusPartialContent;
 }
 
 // ==================== sendfile =============================
@@ -368,24 +360,23 @@ static void send_range_headers(Response* res, ssize_t start, ssize_t end, off64_
 bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range);
 bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t file_size);
 ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request);
-void set_content_disposition(Response* res, const char* filename);
+void set_content_disposition(context_t* ctx, const char* filename);
 
 // Main function to serve a file
 int servefile(context_t* ctx, const char* filename) {
-    Response* res = ctx->response;
     Request* req = ctx->request;
 
     // Guess content-type if not already set
-    if (!res->content_type_set) {
-        set_response_header(res, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
+    if (!ctx->response->content_type_set) {
+        set_response_header(ctx, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
     }
 
     // Open the file with fopen64 to support large files
     FILE* file = fopen64(filename, "rb");
     if (!file) {
         LOG_ERROR("Unable to open file: %s", filename);
-        res->status = StatusInternalServerError;
-        write_headers(res);
+        ctx->response->status = StatusInternalServerError;
+        write_headers(ctx);
         return -1;
     }
 
@@ -395,8 +386,8 @@ int servefile(context_t* ctx, const char* filename) {
     if (file_size == -1) {
         perror("ftello64");
         LOG_ERROR("Unable to get file size: %s", filename);
-        res->status = StatusInternalServerError;
-        write_headers(res);
+        ctx->response->status = StatusInternalServerError;
+        write_headers(ctx);
         return -1;
     }
     fseeko64(file, 0, SEEK_SET);
@@ -410,21 +401,21 @@ int servefile(context_t* ctx, const char* filename) {
         range_valid = validate_range(has_end_range, &start, &end, file_size);
         if (!range_valid) {
             fclose(file);
-            res->status = StatusRequestedRangeNotSatisfiable;
-            write_headers(res);
+            ctx->response->status = StatusRequestedRangeNotSatisfiable;
+            write_headers(ctx);
             return -1;
         }
-        send_range_headers(res, start, end, file_size);
+        send_range_headers(ctx, start, end, file_size);
     } else {
         // Set content length for non-range requests
         char content_len_str[32];
         snprintf(content_len_str, sizeof(content_len_str), "%ld", file_size);
-        set_response_header(res, "Content-Length", content_len_str);
-        set_content_disposition(res, filename);
+        set_response_header(ctx, "Content-Length", content_len_str);
+        set_content_disposition(ctx, filename);
     }
 
-    write_headers(res);
-    ssize_t total_bytes_sent = send_file_content(res->client_fd, file, start, end, range_valid);
+    write_headers(ctx);
+    ssize_t total_bytes_sent = send_file_content(ctx->response->client_fd, file, start, end, range_valid);
 
     fclose(file);
     return total_bytes_sent;
@@ -435,12 +426,11 @@ int servefile(context_t* ctx, const char* filename) {
 // the contents of the file again.
 // The file is not closed by this function.
 int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* filename) {
-    Response* res = ctx->response;
     Request* req = ctx->request;
 
     // Guess content-type if not already set
-    if (!res->content_type_set) {
-        set_response_header(res, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
+    if (!ctx->response->content_type_set) {
+        set_response_header(ctx, CONTENT_TYPE_HEADER, get_mimetype((char*)filename));
     }
 
     // Handle range requests
@@ -452,21 +442,21 @@ int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* fi
         range_valid = validate_range(has_end_range, &start, &end, file_size);
         if (!range_valid) {
             fclose(file);
-            res->status = StatusRequestedRangeNotSatisfiable;
-            write_headers(res);
+            ctx->response->status = StatusRequestedRangeNotSatisfiable;
+            write_headers(ctx);
             return -1;
         }
-        send_range_headers(res, start, end, file_size);
+        send_range_headers(ctx, start, end, file_size);
     } else {
         // Set content length for non-range requests
         char content_len_str[32];
         snprintf(content_len_str, sizeof(content_len_str), "%ld", file_size);
-        set_response_header(res, "Content-Length", content_len_str);
-        set_content_disposition(res, filename);
+        set_response_header(ctx, "Content-Length", content_len_str);
+        set_content_disposition(ctx, filename);
     }
 
-    write_headers(res);
-    ssize_t total_bytes_sent = send_file_content(res->client_fd, file, start, end, range_valid);
+    write_headers(ctx);
+    ssize_t total_bytes_sent = send_file_content(ctx->response->client_fd, file, start, end, range_valid);
     return total_bytes_sent;
 }
 
@@ -563,14 +553,14 @@ ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end,
 }
 
 // Sets the Content-Disposition header for the response
-void set_content_disposition(Response* res, const char* filename) {
+void set_content_disposition(context_t* ctx, const char* filename) {
     char content_disposition[512];
     char base_name[256];
     filepath_basename(filename, base_name, sizeof(base_name));
     snprintf(content_disposition, sizeof(content_disposition), "inline; filename=\"%s\"", base_name);
-    set_response_header(res, "Content-Disposition", content_disposition);
+    set_response_header(ctx, "Content-Disposition", content_disposition);
 }
 
-void set_content_type(Response* res, const char* content_type) {
-    set_response_header(res, CONTENT_TYPE_HEADER, content_type);
+void set_content_type(context_t* ctx, const char* content_type) {
+    set_response_header(ctx, CONTENT_TYPE_HEADER, content_type);
 }

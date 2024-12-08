@@ -19,17 +19,6 @@
 #define IDLE_TIMEOUT 5
 #endif
 
-// Maximum length of a header name.
-#ifndef MAX_HEADER_NAME
-#define MAX_HEADER_NAME 32
-#endif
-
-// Maximum length of a header value.
-// Something reasonably long to accommodate JWT tokens, and cookies :)
-#ifndef MAX_HEADER_VALUE
-#define MAX_HEADER_VALUE 512
-#endif
-
 #ifndef MAX_REQ_HEADERS
 #define MAX_REQ_HEADERS 32
 #endif
@@ -73,8 +62,6 @@
 
 #define ERR_MEMORY_ALLOC_FAILED "Memory allocation failed\n"
 #define ERR_TOO_MANY_HEADERS "Too many headers\n"
-#define ERR_HEADER_NAME_TOO_LONG "Header name too long\n"
-#define ERR_HEADER_VALUE_TOO_LONG "Header value too long\n"
 #define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
 #define ERR_INVALID_STATUS_LINE "Invalid http status line\n"
 #define ERR_METHOD_NOT_ALLOWED "Method not allowed\n"

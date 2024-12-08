@@ -57,16 +57,16 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
     return 0;
 }
 
-static void userUnathorized(Response* res) {
-    res->status = StatusUnauthorized;
-    set_response_header(res, "WWW-Authenticate", "Basic realm=\"Protected\"");
-    send_string(res, "Unauthorized");
+static void userUnathorized(context_t* ctx) {
+    ctx->response->status = StatusUnauthorized;
+    set_response_header(ctx, "WWW-Authenticate", "Basic realm=\"Protected\"");
+    send_string(ctx, "Unauthorized");
 }
 
 static void handle(context_t* ctx, Handler next, BasicAuthData* auth_data) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
     if (auth_header == NULL) {
-        userUnathorized(ctx->response);
+        userUnathorized(ctx);
         return;
     }
 
@@ -92,13 +92,13 @@ unauthorized:
     if (password) {
         free(password);
     }
-    userUnathorized(ctx->response);
+    userUnathorized(ctx);
 }
 
 void route_basic_auth(context_t* ctx, Handler next) {
     BasicAuthData* auth_data = (BasicAuthData*)route_middleware_context(ctx);
     if (auth_data == NULL) {
-        userUnathorized(ctx->response);
+        userUnathorized(ctx);
         return;
     }
     handle(ctx, next, auth_data);
@@ -107,7 +107,7 @@ void route_basic_auth(context_t* ctx, Handler next) {
 void global_basic_auth(context_t* ctx, Handler next) {
     BasicAuthData* auth_data = (BasicAuthData*)get_global_middleware_context(BASIC_AUTH_KEY);
     if (auth_data == NULL) {
-        userUnathorized(ctx->response);
+        userUnathorized(ctx);
         return;
     }
     handle(ctx, next, auth_data);

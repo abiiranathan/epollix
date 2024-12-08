@@ -11,29 +11,29 @@
 #define BEARER_LEN 7
 #define JWT_PAYLOAD_CONTEXT_NAME "JWT_PAYLOAD_CONTEXT_NAME"
 
-void handleUnauthorized(Response* res) {
-    res->status = StatusUnauthorized;
-    send_string(res, "Unauthorized");
+void handleUnauthorized(context_t* ctx) {
+    ctx->response->status = StatusUnauthorized;
+    send_string(ctx, "Unauthorized");
 }
 
 void BearerAuthMiddleware(context_t* ctx, Handler next) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
     if (auth_header == NULL) {
         LOG_ERROR("Authorization header is missing");
-        handleUnauthorized(ctx->response);
+        handleUnauthorized(ctx);
         return;
     }
 
     const char* secret = secure_getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
-        handleUnauthorized(ctx->response);
+        handleUnauthorized(ctx);
         return;
     }
 
     const char* token = boyer_moore_strstr(auth_header, BEARER);
     if (token == NULL) {
-        handleUnauthorized(ctx->response);
+        handleUnauthorized(ctx);
         return;
     }
 
@@ -43,7 +43,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     JWTPayload* payload = (JWTPayload*)malloc(sizeof(JWTPayload));
     if (!payload) {
         LOG_ERROR("Failed to allocate memory for JWT payload");
-        handleUnauthorized(ctx->response);
+        handleUnauthorized(ctx);
         return;
     }
 
@@ -53,7 +53,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
         free(payload);
         payload = NULL;
         LOG_ERROR("Invalid JWT token: %s", token);
-        handleUnauthorized(ctx->response);
+        handleUnauthorized(ctx);
         return;
     }
 

@@ -41,10 +41,6 @@ void free_context(context_t* ctx) {
         map_destroy(ctx->locals, true);
         ctx->locals = NULL;
     }
-
-    if (ctx->user_arena) {
-        arena_destroy(ctx->user_arena);
-    }
 }
 
 // Add a value to the context. This is useful for sharing data between middleware.

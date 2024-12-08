@@ -22,40 +22,31 @@ pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
 cleanup_func user_cleanup_func = NULL;  // User-defined cleanup function
 EpollServer* srv = NULL;                // global server object
 
+void initTask(read_task* task) {
+    task->req = (Request*)arena_alloc(task->arena, sizeof(Request));
+    LOG_ASSERT(task->req, "Failed to allocate memory for request");
+    memset(task->req, 0, sizeof(Request));
+
+    // Allocate memory for the request headers array.
+    task->req->headers = (header_t**)arena_alloc(task->arena, sizeof(header_t*) * MAX_REQ_HEADERS);
+    LOG_ASSERT(task->req->headers, "Failed to allocate memory for request headers");
+
+    // Allocate response object
+    task->res = arena_alloc(task->arena, sizeof(Response));
+    LOG_ASSERT(task->res, "Failed to allocate response object");
+
+    // Allocate memory for the request headers array.
+    task->res->headers = (header_t**)arena_alloc(task->arena, sizeof(header_t*) * MAX_RES_HEADERS);
+    LOG_ASSERT(task->res->headers, "Failed to allocate memory for response headers");
+}
+
 static void init_read_tasks(void) {
     for (size_t i = 0; i < MAX_READ_TASKS; i++) {
         memset(&read_tasks[i], -1, sizeof(read_task));
 
         read_tasks[i].arena = arena_create(BUFSIZ);
         LOG_ASSERT(read_tasks[i].arena, "failed to create read task arena");
-
-        read_tasks[i].req = (Request*)arena_alloc(read_tasks[i].arena, sizeof(Request));
-        LOG_ASSERT(read_tasks[i].req, "Failed to allocate memory for request");
-        memset(read_tasks[i].req, 0, sizeof(Request));
-
-        // Allocate memory for the request headers array.
-        read_tasks[i].req->headers = (header_t**)arena_alloc(read_tasks[i].arena, sizeof(header_t*) * MAX_REQ_HEADERS);
-        LOG_ASSERT(read_tasks[i].req->headers, "Failed to allocate memory for request headers");
-
-        // Pre-allocate all the headers.
-        for (size_t j = 0; j < MAX_REQ_HEADERS; j++) {
-            read_tasks[i].req->headers[j] = (header_t*)arena_alloc(read_tasks[i].arena, sizeof(header_t));
-            LOG_ASSERT(read_tasks[i].req->headers[j], "Failed to allocate memory for request header");
-        }
-
-        // Allocate response object
-        read_tasks[i].res = arena_alloc(read_tasks[i].arena, sizeof(Response));
-        LOG_ASSERT(read_tasks[i].res, "Failed to allocate response object");
-
-        // Allocate memory for the request headers array.
-        read_tasks[i].res->headers = (header_t**)arena_alloc(read_tasks[i].arena, sizeof(header_t*) * MAX_RES_HEADERS);
-        LOG_ASSERT(read_tasks[i].res->headers, "Failed to allocate memory for response headers");
-
-        // Pre-Allocate response headers
-        for (size_t k = 0; k < MAX_RES_HEADERS; k++) {
-            read_tasks[i].res->headers[k] = (header_t*)arena_alloc(read_tasks[i].arena, sizeof(header_t));
-            LOG_ASSERT(read_tasks[i].req->headers[k], "Failed to allocate memory for response header");
-        }
+        initTask(&read_tasks[i]);
     }
 }
 
@@ -86,8 +77,13 @@ static void put_read_task(read_task* task) {
         task->req->path = NULL;
     }
 
-    // Reset header count.
+    // Reset request.
     task->req->header_count = 0;
+    task->req->path = NULL;
+    task->req->route = NULL;
+    task->req->method = M_INVALID;
+
+    // Reset the client fd and epoll fd.
     task->client_fd = -1;
     task->epoll_fd = -1;
 
@@ -99,22 +95,41 @@ static void put_read_task(read_task* task) {
     task->res->headers = res_headers;
     task->res->header_count = 0;
 
+    // Reset the arena.
+    arena_reset(task->arena);
+
+    // Re-initialize the task
+    initTask(task);
+
     // Make task available.
     task->index = -1;
 }
 
 static void submit_read_task(void* arg) {
     read_task* task = (read_task*)arg;
+
     task->req->client_fd = task->client_fd;
     task->req->epoll_fd = task->epoll_fd;
-    process_request(task->req);
+
+    // Create a new arena for the user allocated memory.
+    // task->arena is used for reading the request headers and middleware processing.
+    Arena* user_arena = arena_create(1 * 1024 * 1024);
+    if (user_arena == NULL) {
+        http_error(task->client_fd, StatusBadRequest, ERR_MEMORY_ALLOC_FAILED);
+        return;
+    }
+
+    process_request(task->req, task->arena);
 
     if (task->req->route != NULL && task->client_fd != -1) {
-        process_response(task->req, task->res, task->arena);
+        process_response(task->req, task->res, task->arena, user_arena);
     }
 
     // Put the task back in the pool
     put_read_task(task);
+
+    // Destroy the user arena
+    arena_destroy(user_arena);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {

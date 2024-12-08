@@ -25,9 +25,12 @@ static void test_parse_request_headers(void) {
         LOG_ASSERT(req->headers[i] != NULL, "Failed to allocate memory for header_t");
     }
 
+    Arena* arena = arena_create(1024);
+    LOG_ASSERT(arena != NULL, "Failed to create arena");
+
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
-    http_error_t result = parse_request_headers(req, header_text, length);
+    http_error_t result = parse_request_headers(req, arena, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
     (void)result;
 
@@ -68,11 +71,14 @@ static void test_encode_uri(void) {
 // header_t header_fromstring(const char* str)
 static void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
-    header_t* header = header_fromstring(header_text);
+    Arena* arena = arena_create(1024);
+    LOG_ASSERT(arena != NULL, "Failed to create arena");
+    header_t* header = header_fromstring(header_text, arena);
     LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
     LOG_ASSERT(strcmp(header->value, "text/html") == 0, "Expected text/html, got %s", header->value);
 
-    free(header);
+    arena_destroy(arena);
+    UNUSED(header);
     LOG_INFO("test_header_fromstring passed");
 }
 
