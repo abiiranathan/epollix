@@ -33,7 +33,6 @@ endif()
 add_subdirectory(deps/libbcrypt)
 
 set(SOURCES
-    src/epollix.c
     src/header.c
     src/method.c
     src/middleware.c

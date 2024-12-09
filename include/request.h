@@ -28,8 +28,14 @@ typedef enum {
     http_memory_alloc_failed,
 } http_error_t;
 
+// Create a new request object.
+Request* request_new(int client_fd, int epoll_fd);
+
+// Free up resources allocated by the request.
+void request_destroy(Request* req);
+
 // Parse request headers from text.
-http_error_t parse_request_headers(Request* req, Arena* arena, const char* header_text, size_t length);
+http_error_t parse_request_headers(Request* req, const char* header_text, size_t length);
 
 // Parse URL query parameters from a query string.
 // Populates the map.
@@ -55,14 +61,11 @@ char* encode_uri(const char* str);
 void decode_uri(const char* src, char* dst, size_t dst_size);
 
 // Handle Request and send response to the client.
-void process_request(Request* req, Arena* arena);
+void process_request(Request* req);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns NULL.
 Route* route_notfound(Handler h);
-
-// Free up resources allocated by the request.
-void request_destroy(Request* req);
 
 #ifdef __cplusplus
 }

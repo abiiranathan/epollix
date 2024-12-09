@@ -191,8 +191,7 @@ typedef struct User {
 } User;
 
 static void api_users(context_t* ctx) {
-    User* users = (User*)arena_alloc(ctx->user_arena, sizeof(User) * 10);
-
+    User users[10] = {0};
     for (int i = 0; i < 10; i++) {
         users[i].username = "user";
         users[i].email = "randomemail@gmail.com";

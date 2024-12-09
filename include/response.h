@@ -23,8 +23,14 @@ typedef struct response {
     header_t** headers;     // Response headers
 } Response;
 
+// Create a new response object.
+Response* response_new(int client_fd);
+
+// Free response and allocated headers + body(optionally).
+void response_destroy(Response* res);
+
 // Process the response.
-void process_response(Request* req, Response* res, Arena* ctx_arena, Arena* user_arena);
+void process_response(Request* req, Response* res);
 
 // Set response header.
 bool set_response_header(context_t* ctx, const char* name, const char* value);

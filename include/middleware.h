@@ -26,7 +26,7 @@ void middleware_init(void);
 void middleware_cleanup(void);
 
 // Combine global and route specific middleware.
-Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx, Arena* arena);
+Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx);
 
 // get_global_middleware_count returns the number of global middleware functions.
 size_t get_global_middleware_count(void);

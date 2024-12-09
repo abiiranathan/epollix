@@ -17,11 +17,9 @@ extern "C" {
 typedef struct read_task {
     int epoll_fd;   // Epoll file descriptor
     int client_fd;  // Client file descriptor
-    int index;      // Index of the task in the tasks array. -1 means task if free.
     Request* req;   // Request object
     Response* res;  // Response object
-    Arena* arena;   // Arena for the request object and headers
-} read_task;
+} Task;
 
 // User-defined callback function will be called atexit.
 typedef void (*cleanup_func)(void);

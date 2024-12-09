@@ -17,15 +17,58 @@
 #include "../include/fast_str.h"
 #include "../include/request.h"
 
+// Create a new response object.
+Response* response_new(int client_fd) {
+    Response* res = malloc(sizeof(Response));
+    if (!res) {
+        return NULL;
+    }
+
+    res->client_fd = client_fd;
+    res->status = StatusOK;
+    res->data = NULL;
+    res->headers_sent = false;
+    res->chunked = false;
+    res->content_type_set = false;
+    res->header_count = 0;
+    res->headers = (header_t**)calloc(MAX_RES_HEADERS, sizeof(header_t*));
+    if (!res->headers) {
+        free(res);
+        return NULL;
+    }
+
+    return res;
+}
+
+// Free response and allocated headers.
+void response_destroy(Response* res) {
+    if (!res)
+        return;
+
+    for (size_t i = 0; i < res->header_count; ++i) {
+        free(res->headers[i]->name);
+        free(res->headers[i]->value);
+        free(res->headers[i]);
+    }
+
+    free(res->headers);
+    free(res);
+    res = NULL;
+}
+
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
     if (ctx->response->header_count >= MAX_RES_HEADERS)
         return false;
 
-    header_t* header = header_new(name, value, ctx->user_arena);
+    header_t* header = malloc(sizeof(header_t));
     if (!header) {
+        perror("malloc");
         return false;
     }
+    header->name = strdup(name);
+    header->value = strdup(value);
+
     ctx->response->headers[ctx->response->header_count++] = header;
 
     if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
@@ -34,7 +77,7 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
     return true;
 }
 
-void process_response(Request* req, Response* res, Arena* ctx_arena, Arena* user_arena) {
+void process_response(Request* req, Response* res) {
     res->client_fd = req->client_fd;
     res->content_type_set = false;
     res->status = StatusOK;
@@ -43,7 +86,6 @@ void process_response(Request* req, Response* res, Arena* ctx_arena, Arena* user
         .request = req,
         .locals = map_create(8, key_compare_char_ptr),
         .response = res,
-        .user_arena = user_arena,
     };
 
     LOG_ASSERT(ctx.locals, "unable to allocate locals map");
@@ -72,11 +114,12 @@ void process_response(Request* req, Response* res, Arena* ctx_arena, Arena* user
     // if both global and route middleware are defined, combine them
     if (route->middleware_count > 0 && get_global_middleware_count() > 0) {
         // Allocate memory for the combined middleware
-        mw_ctx.middleware = merge_middleware(route, &mw_ctx, ctx_arena);
+        mw_ctx.middleware = merge_middleware(route, &mw_ctx);
         LOG_ASSERT(mw_ctx.middleware, "error allocating memory for combined middleware");
 
         // Execute middleware chain
         execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
+        free(mw_ctx.middleware);
         free_context(&ctx);
         return;
     } else if (route->middleware_count > 0) {

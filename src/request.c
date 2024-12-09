@@ -18,7 +18,56 @@ Route* notFoundRoute = NULL;
 typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderState;
 
 extern void http_error(int client_fd, http_status status, const char* message);
-extern void close_connection(int client_fd, int epoll_fd);
+
+// Create a new request object.
+Request* request_new(int client_fd, int epoll_fd) {
+    Request* req = (Request*)malloc(sizeof(Request));
+    if (!req) {
+        return NULL;
+    }
+
+    req->client_fd = client_fd;
+    req->epoll_fd = epoll_fd;
+    req->path = NULL;
+    req->method = M_INVALID;
+    req->route = NULL;
+    req->content_length = 0;
+    req->body = NULL;
+    req->header_count = 0;
+    req->query_params = NULL;
+
+    req->headers = (header_t**)calloc(MAX_REQ_HEADERS, sizeof(header_t*));
+    if (!req->headers) {
+        free(req);
+        return NULL;
+    }
+    return req;
+}
+
+// Clean up resources allocated for the request
+void request_destroy(Request* req) {
+    if (!req)
+        return;
+
+    if (req->path)
+        free(req->path);
+
+    if (req->body)
+        free(req->body);
+
+    if (req->query_params)
+        map_destroy(req->query_params, true);
+
+    for (size_t i = 0; i < req->header_count; ++i) {
+        free(req->headers[i]->name);
+        free(req->headers[i]->value);
+        free(req->headers[i]);
+    }
+
+    free(req->headers);
+    free(req);
+    req = NULL;
+}
 
 // Get request header value by name.
 const char* get_request_header(Request* req, const char* name) {
@@ -59,7 +108,7 @@ static const char* http_error_string(http_error_t code) {
     return "success";
 }
 
-http_error_t parse_request_headers(Request* req, Arena* arena, const char* header_text, size_t length) {
+http_error_t parse_request_headers(Request* req, const char* header_text, size_t length) {
     const char* ptr = header_text;
     const char* end = ptr + length;
 
@@ -74,7 +123,7 @@ http_error_t parse_request_headers(Request* req, Arena* arena, const char* heade
             break;
 
         size_t name_len = colon - ptr;
-        char* name = arena_alloc(arena, name_len + 1);
+        char* name = malloc(name_len + 1);
         if (!name) {
             return http_memory_alloc_failed;
         }
@@ -93,20 +142,24 @@ http_error_t parse_request_headers(Request* req, Arena* arena, const char* heade
             break;
 
         size_t value_len = eol - ptr;
-        char* value = arena_alloc(arena, value_len + 1);
+        char* value = malloc(value_len + 1);
         if (!value) {
+            free(name);
             return http_memory_alloc_failed;
         }
 
         memcpy(value, ptr, value_len);
         value[value_len] = '\0';
 
-        header_t* header = header_new(name, value, arena);
+        header_t* header = malloc(sizeof(header_t));
         if (!header) {
+            free(name);
+            free(value);
             return http_memory_alloc_failed;
         }
 
-        // Add the header to the request
+        header->name = name;
+        header->value = value;
         req->headers[req->header_count++] = header;
 
         ptr = eol + 2;  // Skip CRLF
@@ -344,36 +397,6 @@ void initialize_request(Request* req, uint8_t* body, size_t content_length, map*
     LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
 }
 
-// Clean up resources allocated for the request
-void request_destroy(Request* req) {
-    if (!req) {
-        return;
-    }
-
-    if (req->path) {
-        free(req->path);
-        req->path = NULL;
-    }
-
-    if (req->client_fd != -1 && req->epoll_fd != -1) {
-        close_connection(req->client_fd, req->epoll_fd);
-        req->client_fd = -1;
-        req->epoll_fd = -1;
-    }
-
-    if (req->body) {
-        free(req->body);
-        req->body = NULL;
-    }
-
-    if (req->query_params) {
-        map_destroy(req->query_params, true);
-        req->query_params = NULL;
-    }
-
-    req = NULL;
-}
-
 // Handle the case when a route is not found
 bool handle_not_found(Request* req, const char* method, const char* http_version, const char* path) {
     if (notFoundRoute) {
@@ -428,17 +451,10 @@ __attribute__((target("avx2"))) inline void fast_bzero(void* ptr, size_t size) {
 }
 
 // handle the request and send response.
-void process_request(Request* req, Arena* arena) {
+void process_request(Request* req) {
     int client_fd = req->client_fd;
-    int epoll_fd = req->epoll_fd;
-    char headers[4096];
 
-    // Check for AVX support
-    // if (check_avx()) {
-    //     fast_bzero(headers, sizeof(headers));
-    // } else {
-    memset(headers, 0, sizeof(headers));
-    // }
+    char headers[4096] = {};
 
     char* path = NULL;                  // Request path
     char* query = NULL;                 // Query string
@@ -500,18 +516,17 @@ void process_request(Request* req, Arena* arena) {
     }
 
     initialize_request(req, body, body_size, query_params, httpMethod, http_version, path);
-    code = parse_request_headers(req, arena, header_start, header_capacity - 4);
+    code = parse_request_headers(req, header_start, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
         goto error;
     }
 
     free(path);
-    return;  // success, return early to avoid cleanup code
+    return;
 
 error:
     if (path) {
         free(path);
     }
-    close_connection(client_fd, epoll_fd);
 }

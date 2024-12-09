@@ -17,119 +17,56 @@
 #include <sys/sendfile.h>
 #include <unistd.h>
 
-static read_task read_tasks[MAX_READ_TASKS] = {0};
-pthread_mutex_t read_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void close_connection(int client_fd, int epoll_fd) {
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+}
+
 cleanup_func user_cleanup_func = NULL;  // User-defined cleanup function
 EpollServer* srv = NULL;                // global server object
 
-void initTask(read_task* task) {
-    task->req = (Request*)arena_alloc(task->arena, sizeof(Request));
-    LOG_ASSERT(task->req, "Failed to allocate memory for request");
-    memset(task->req, 0, sizeof(Request));
+// Allocate memory for new task.
+Task* newTask(int client_fd, int epoll_fd) {
+    Task* task = (Task*)malloc(sizeof(Task));
+    if (task == NULL) {
+        return NULL;
+    }
 
-    // Allocate memory for the request headers array.
-    task->req->headers = (header_t**)arena_alloc(task->arena, sizeof(header_t*) * MAX_REQ_HEADERS);
-    LOG_ASSERT(task->req->headers, "Failed to allocate memory for request headers");
+    task->client_fd = client_fd;
+    task->epoll_fd = epoll_fd;
+
+    // Allocate memory for the request object
+    task->req = request_new(client_fd, epoll_fd);
+    if (!task->req) {
+        free(task);
+        return NULL;
+    }
 
     // Allocate response object
-    task->res = arena_alloc(task->arena, sizeof(Response));
-    LOG_ASSERT(task->res, "Failed to allocate response object");
+    task->res = response_new(client_fd);
+    if (!task->res) {
+        request_destroy(task->req);
+        free(task);
+        return NULL;
+    }
 
-    // Allocate memory for the request headers array.
-    task->res->headers = (header_t**)arena_alloc(task->arena, sizeof(header_t*) * MAX_RES_HEADERS);
-    LOG_ASSERT(task->res->headers, "Failed to allocate memory for response headers");
+    return task;
 }
 
-static void init_read_tasks(void) {
-    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
-        memset(&read_tasks[i], -1, sizeof(read_task));
-
-        read_tasks[i].arena = arena_create(BUFSIZ);
-        LOG_ASSERT(read_tasks[i].arena, "failed to create read task arena");
-        initTask(&read_tasks[i]);
-    }
+void freeTask(Task* task) {
+    request_destroy(task->req);
+    response_destroy(task->res);
+    free(task);
 }
 
-static void free_read_tasks(void) {
-    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
-        if (read_tasks[i].arena) {
-            arena_destroy(read_tasks[i].arena);
-        }
+static void handleConnection(void* arg) {
+    Task* task = (Task*)arg;
+    process_request(task->req);
+    if (task->req->route != NULL) {
+        process_response(task->req, task->res);
     }
-}
-
-// No need to lock since this is always called from the main thread.
-static read_task* get_read_task(void) {
-    for (size_t i = 0; i < MAX_READ_TASKS; i++) {
-        if (read_tasks[i].index == -1) {
-            read_tasks[i].index = i;
-            return &read_tasks[i];
-        }
-    }
-    return NULL;
-}
-
-// Put the read task back in the pool without freeing the request object.
-static void put_read_task(read_task* task) {
-    // Free the request path.
-    if (task->req->path) {
-        free(task->req->path);
-        task->req->path = NULL;
-    }
-
-    // Reset request.
-    task->req->header_count = 0;
-    task->req->path = NULL;
-    task->req->route = NULL;
-    task->req->method = M_INVALID;
-
-    // Reset the client fd and epoll fd.
-    task->client_fd = -1;
-    task->epoll_fd = -1;
-
-    // Keep a copy of response headers, otherwise memset would zero them.
-    header_t** res_headers = task->res->headers;
-
-    // Reset response
-    memset(task->res, 0, sizeof(Response));
-    task->res->headers = res_headers;
-    task->res->header_count = 0;
-
-    // Reset the arena.
-    arena_reset(task->arena);
-
-    // Re-initialize the task
-    initTask(task);
-
-    // Make task available.
-    task->index = -1;
-}
-
-static void submit_read_task(void* arg) {
-    read_task* task = (read_task*)arg;
-
-    task->req->client_fd = task->client_fd;
-    task->req->epoll_fd = task->epoll_fd;
-
-    // Create a new arena for the user allocated memory.
-    // task->arena is used for reading the request headers and middleware processing.
-    Arena* user_arena = arena_create(1 * 1024 * 1024);
-    if (user_arena == NULL) {
-        http_error(task->client_fd, StatusBadRequest, ERR_MEMORY_ALLOC_FAILED);
-        return;
-    }
-
-    process_request(task->req, task->arena);
-
-    if (task->req->route != NULL && task->client_fd != -1) {
-        process_response(task->req, task->res, task->arena, user_arena);
-    }
-
-    // Put the task back in the pool
-    put_read_task(task);
-
-    // Destroy the user arena
-    arena_destroy(user_arena);
+    close_connection(task->client_fd, task->epoll_fd);
+    freeTask(task);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -219,11 +156,6 @@ static int setup_server_socket(const char* port) {
     return sfd;
 }
 
-void close_connection(int client_fd, int epoll_fd) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-    close(client_fd);
-}
-
 // Create a new EpollServer.
 EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_func cf) {
     EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
@@ -251,7 +183,6 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_f
         return NULL;
     }
 
-    init_read_tasks();
     middleware_init();
 
     // Create an epoll instance
@@ -363,7 +294,7 @@ int epoll_server_listen(EpollServer* server) {
                     ret = set_nonblocking(client_fd);
                     if (ret == -1) {
                         LOG_ERROR("Failed to set non-blocking on client socket\n");
-                        continue;
+                        break;
                     }
 
                     event.data.fd = client_fd;
@@ -390,7 +321,7 @@ int epoll_server_listen(EpollServer* server) {
             } else {
                 // client socket is ready for reading
                 if (events[i].events & EPOLLIN) {
-                    read_task* task = get_read_task();  // Get a free read task from the pool
+                    Task* task = newTask(events[i].data.fd, server->epoll_fd);
                     if (!task) {
                         LOG_ERROR("Failed to get a free task from the pool");
                         http_error(events[i].data.fd, StatusInternalServerError, "Internal server error");
@@ -398,9 +329,7 @@ int epoll_server_listen(EpollServer* server) {
                         continue;
                     }
 
-                    task->client_fd = events[i].data.fd;
-                    task->epoll_fd = server->epoll_fd;
-                    threadpool_add_task(server->pool, submit_read_task, task);
+                    threadpool_add_task(server->pool, handleConnection, task);
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
                     close_connection(events[i].data.fd, server->epoll_fd);
                 }
@@ -435,8 +364,6 @@ static void epoll_server_shutdown(EpollServer* server) {
     }
 
     free(server);
-
-    free_read_tasks();
 }
 
 // Destructor extension for gcc and clang.

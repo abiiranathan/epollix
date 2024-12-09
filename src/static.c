@@ -35,8 +35,8 @@ static void send_error_page(context_t* ctx, http_status status) {
     free(error_page);
 }
 
-static inline void append_or_error(context_t* ctx, cstr* response, const char* str) {
-    if (!cstr_append(ctx->user_arena, response, str)) {
+static inline void append_or_error(context_t* ctx, Arena* arena, cstr* response, const char* str) {
+    if (!cstr_append(arena, response, str)) {
         LOG_ERROR("Failed to append to response\n");
         send_error_page(ctx, StatusInternalServerError);
         return;
@@ -66,7 +66,14 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     DIR* dir;
     struct dirent* ent;
 
-    cstr* html_response = cstr_from(ctx->user_arena,
+    Arena* arena = arena_create(1 * 1024 * 1024);
+    if (!arena) {
+        LOG_ERROR("Failed to create arena\n");
+        send_error_page(ctx, StatusInternalServerError);
+        return;
+    }
+
+    cstr* html_response = cstr_from(arena,
                                     "<html>"
                                     "<head>"
                                     "<style>"
@@ -88,12 +95,13 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     if (!html_response) {
         LOG_ERROR("Failed to create cstr\n");
         send_error_page(ctx, StatusInternalServerError);
+        arena_destroy(arena);
         return;
     }
 
     // Create breadcrumbs
-    append_or_error(ctx, html_response, "<div class=\"breadcrumbs\">");
-    append_or_error(ctx, html_response, "<a href=\"/\">Home</a>");
+    append_or_error(ctx, arena, html_response, "<div class=\"breadcrumbs\">");
+    append_or_error(ctx, arena, html_response, "<a href=\"/\">Home</a>");
 
     char* path = strdup(base_prefix);
     if (!path) {
@@ -101,6 +109,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Failed to allocate memory for path");
+        arena_destroy(arena);
         return;
     }
 
@@ -110,35 +119,34 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     while (token) {
         strcat(breadcrumb_path, "/");
         strcat(breadcrumb_path, token);
-        append_or_error(ctx, html_response, " / <a href=\"");
-        append_or_error(ctx, html_response, breadcrumb_path);
-        append_or_error(ctx, html_response, "\">");
-        append_or_error(ctx, html_response, token);
-        append_or_error(ctx, html_response, "</a>");
+        append_or_error(ctx, arena, html_response, " / <a href=\"");
+        append_or_error(ctx, arena, html_response, breadcrumb_path);
+        append_or_error(ctx, arena, html_response, "\">");
+        append_or_error(ctx, arena, html_response, token);
+        append_or_error(ctx, arena, html_response, "</a>");
         token = strtok(NULL, "/");
     }
     free(path);
 
-    append_or_error(ctx, html_response, "</div>");
-
-    append_or_error(ctx, html_response,
+    append_or_error(ctx, arena, html_response, "</div>");
+    append_or_error(ctx, arena, html_response,
                     "<table>"
                     "<tr><th>Name</th><th>Size</th></tr>");
 
     if ((dir = opendir(dirname)) != NULL) {
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
-                append_or_error(ctx, html_response, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"");
+                append_or_error(ctx, arena, html_response, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"");
                 // Add base prefix if we are not using / as static prefix.
                 if (strcmp(base_prefix, "/") != 0) {
-                    append_or_error(ctx, html_response, base_prefix);
+                    append_or_error(ctx, arena, html_response, base_prefix);
                 }
 
-                append_or_error(ctx, html_response, "/");
-                append_or_error(ctx, html_response, ent->d_name);
-                append_or_error(ctx, html_response, "\">");
-                append_or_error(ctx, html_response, ent->d_name);
-                append_or_error(ctx, html_response, "</a></td>");
+                append_or_error(ctx, arena, html_response, "/");
+                append_or_error(ctx, arena, html_response, ent->d_name);
+                append_or_error(ctx, arena, html_response, "\">");
+                append_or_error(ctx, arena, html_response, ent->d_name);
+                append_or_error(ctx, arena, html_response, "</a></td>");
 
                 char filepath[MAX_PATH_LEN] = {0};
                 snprintf(filepath, MAX_PATH_LEN, "%s/%s", dirname, ent->d_name);
@@ -146,18 +154,18 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
                 struct stat st;
                 if (stat(filepath, &st) == 0) {
                     if (S_ISDIR(st.st_mode)) {
-                        append_or_error(ctx, html_response, "<td>Directory</td>");
+                        append_or_error(ctx, arena, html_response, "<td>Directory</td>");
                     } else {
-                        append_or_error(ctx, html_response, "<td>");
+                        append_or_error(ctx, arena, html_response, "<td>");
                         char fs[32];
                         format_file_size(st.st_size, fs, sizeof(fs));
-                        append_or_error(ctx, html_response, fs);
-                        append_or_error(ctx, html_response, "</td>");
+                        append_or_error(ctx, arena, html_response, fs);
+                        append_or_error(ctx, arena, html_response, "</td>");
                     }
                 } else {
-                    append_or_error(ctx, html_response, "<td>Unknown</td>");
+                    append_or_error(ctx, arena, html_response, "<td>Unknown</td>");
                 }
-                append_or_error(ctx, html_response, "</tr>");
+                append_or_error(ctx, arena, html_response, "</tr>");
             }
         }
         closedir(dir);
@@ -166,13 +174,15 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Unable to open directory");
+        arena_destroy(arena);
         return;
     }
 
-    append_or_error(ctx, html_response, "</table></body></html>");
+    append_or_error(ctx, arena, html_response, "</table></body></html>");
     set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->response->status = StatusOK;
     send_string(ctx, html_response->data);
+    arena_destroy(arena);
 }
 
 void staticFileHandler(context_t* ctx) {

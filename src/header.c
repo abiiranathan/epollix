@@ -4,41 +4,40 @@
 #include <string.h>
 #include <strings.h>
 
-header_t* header_new(const char* name, const char* value, Arena* arena) {
-    header_t* header = arena_alloc(arena, sizeof(header_t));
+header_t* header_new(const char* name, const char* value) {
+    header_t* header = malloc(sizeof(header_t));
     if (!header) {
         return NULL;
     }
 
-    header->name = arena_alloc(arena, strlen(name) + 1);
-    if (!header->name) {
-        return NULL;
-    }
-    strcpy(header->name, name);
-
-    header->value = arena_alloc(arena, strlen(value) + 1);
-    if (!header->value) {
-        return NULL;
-    }
-    strcpy(header->value, value);
-
+    header->name = strdup(name);
+    header->value = strdup(value);
     return header;
 }
 
+void header_free(header_t* header) {
+    if (!header)
+        return;
+    free(header->name);
+    free(header->value);
+    free(header);
+    header = NULL;
+}
+
 // Parse header_t from http header string.
-header_t* header_fromstring(const char* str, Arena* arena) {
+header_t* header_fromstring(const char* str) {
     const char* colon = strchr(str, ':');
     if (!colon || colon == str) {
         return NULL;
     }
 
     size_t name_length = colon - str;
-    header_t* header = arena_alloc(arena, sizeof(header_t));
+    header_t* header = malloc(sizeof(header_t));
     if (!header) {
         return NULL;
     }
 
-    char* name = arena_alloc(arena, name_length + 1);
+    char* name = malloc(name_length + 1);
     if (!name) {
         return NULL;
     }
@@ -52,7 +51,7 @@ header_t* header_fromstring(const char* str, Arena* arena) {
     }
 
     size_t value_length = strlen(value_start);
-    char* value = arena_alloc(arena, value_length + 1);
+    char* value = malloc(value_length + 1);
     if (!value) {
         return NULL;
     }

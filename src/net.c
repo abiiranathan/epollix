@@ -36,11 +36,13 @@ void free_context(context_t* ctx) {
         return;
     }
 
-    request_destroy(ctx->request);
     if (ctx->locals) {
         map_destroy(ctx->locals, true);
         ctx->locals = NULL;
     }
+
+    ctx->mw_ctx = NULL;
+    ctx = NULL;
 }
 
 // Add a value to the context. This is useful for sharing data between middleware.
