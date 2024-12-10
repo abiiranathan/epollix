@@ -89,8 +89,6 @@ void process_response(Request* req, Response* res) {
     };
 
     LOG_ASSERT(ctx.locals, "unable to allocate locals map");
-    LOG_ASSERT(ctx.user_arena, "unable to allocate user arena");
-
     Route* route = req->route;
 
     // If no middleware is defined, execute the handler directly
