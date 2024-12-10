@@ -13,18 +13,18 @@ extern "C" {
 #include "net.h"
 
 typedef struct response {
-    int client_fd;          // Client fd.
-    http_status status;     // Status code
-    uint8_t* data;          // Response data as bytes.
-    bool headers_sent;      // Headers already sent
-    bool chunked;           // Is a chunked transfer
-    bool content_type_set;  // Whether content type header is set
-    size_t header_count;    // Number of headers set.
-    header_t** headers;     // Response headers
+    int client_fd;                      // Client fd.
+    http_status status;                 // Status code
+    uint8_t* data;                      // Response data as bytes.
+    bool headers_sent;                  // Headers already sent
+    bool chunked;                       // Is a chunked transfer
+    bool content_type_set;              // Whether content type header is set
+    size_t header_count;                // Number of headers set.
+    header_t headers[MAX_RES_HEADERS];  // Response headers
 } Response;
 
 // Create a new response object.
-bool response_init(Response* res, int client_fd);
+void response_init(Response* res, int client_fd);
 
 // Free response and allocated headers.
 // The response itself is on the stack and should not be freed.

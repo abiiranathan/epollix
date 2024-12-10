@@ -21,7 +21,6 @@ typedef struct epollix_context {
 
 void enable_keepalive(int sockfd);
 int set_nonblocking(int sock);
-void free_context(context_t* ctx);
 
 // Like send(2) but sends the data on connected socket fd in chunks if larger than 4K.
 // Adds MSG_NOSIGNAL to send flags to ignore sigpipe.

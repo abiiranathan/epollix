@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    EpollServer* server = epoll_server_create(4, port, cleanup);
+    EpollServer* server = epoll_server_create(2, port, cleanup);
     if (server == NULL) {
         LOG_FATAL("Failed to create server\n");
     }

@@ -30,21 +30,6 @@ int set_nonblocking(int sock) {
     return 0;
 }
 
-// Free epollix context resources.
-void free_context(context_t* ctx) {
-    if (!ctx) {
-        return;
-    }
-
-    if (ctx->locals) {
-        map_destroy(ctx->locals, true);
-        ctx->locals = NULL;
-    }
-
-    ctx->mw_ctx = NULL;
-    ctx = NULL;
-}
-
 // Add a value to the context. This is useful for sharing data between middleware.
 void set_context_value(context_t* ctx, const char* key, void* value) {
     if (!ctx->locals)

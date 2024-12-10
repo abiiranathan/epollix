@@ -9,17 +9,17 @@ extern "C" {
 #include "types.h"
 
 typedef struct request {
-    int client_fd;          // Peer connection file descriptor
-    int epoll_fd;           // epoll file descriptor
-    char* path;             // Request path and query string (dynamically allocated)
-    HttpMethod method;      // Http request method as an integer enum
-    struct Route* route;    // Matching route
-    size_t content_length;  // Content length or size of body
-    uint8_t* body;          // Body of the request (dynamically allocated)
-    char http_version[12];  // Http version (e.g., "HTTP/1.1")
-    uint8_t header_count;   // Number of headers
-    header_t** headers;     // Request headers (dynamically allocated)
-    map* query_params;      // Query parameters (consider replacing with a more efficient structure)
+    int client_fd;                      // Peer connection file descriptor
+    int epoll_fd;                       // epoll file descriptor
+    char* path;                         // Request path and query string (dynamically allocated)
+    HttpMethod method;                  // Http request method as an integer enum
+    struct Route* route;                // Matching route
+    size_t content_length;              // Content length or size of body
+    uint8_t* body;                      // Body of the request (dynamically allocated)
+    char http_version[12];              // Http version (e.g., "HTTP/1.1")
+    uint8_t header_count;               // Number of headers
+    header_t headers[MAX_REQ_HEADERS];  // Request headers
+    map* query_params;                  // Query parameters (consider replacing with a more efficient structure)
 } Request;
 
 typedef enum {
@@ -29,7 +29,7 @@ typedef enum {
 } http_error_t;
 
 // Initialize a new request object and allocate headers array.
-bool request_init(Request* req, int client_fd, int epoll_fd);
+void request_init(Request* req, int client_fd, int epoll_fd);
 
 // Free up resources allocated by the request.
 // The request itself is on the stack and should not be freed.

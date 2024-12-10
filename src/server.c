@@ -43,31 +43,21 @@ void freeTask(Task* task) {
 
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
-
     Request req = {0};
     Response res = {0};
-    bool initialized = false;
-
-    initialized = request_init(&req, task->client_fd, task->epoll_fd);
-    if (!initialized) {
-        LOG_ERROR("Failed to initialize request\n");
-        close_connection(task->client_fd, task->epoll_fd);
-        freeTask(task);
-        return;
-    }
-
-    initialized = response_init(&res, task->client_fd);
-    if (!initialized) {
-        LOG_ERROR("Failed to initialize response\n");
-        close_connection(task->client_fd, task->epoll_fd);
-        request_destroy(&req);
-        freeTask(task);
-        return;
-    }
-
+    request_init(&req, task->client_fd, task->epoll_fd);
+    response_init(&res, task->client_fd);
     process_request(&req);
+
     if (req.route != NULL) {
+        // shutdown read end of the socket
+        shutdown(task->client_fd, SHUT_RD);
+
+        // process the request
         process_response(&req, &res);
+
+        // shutdown write end of the socket
+        shutdown(task->client_fd, SHUT_WR);
     }
 
     close_connection(task->client_fd, task->epoll_fd);
@@ -304,6 +294,7 @@ int epoll_server_listen(EpollServer* server) {
                         break;
                     }
 
+                    // Add client socket to epoll
                     event.data.fd = client_fd;
                     event.events = EPOLLIN | EPOLLET | EPOLLHUP | EPOLLERR | EPOLLONESHOT;
                     ret = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, client_fd, &event);

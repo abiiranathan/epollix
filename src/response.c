@@ -17,7 +17,7 @@
 #include "../include/request.h"
 
 // Create a new response object.
-bool response_init(Response* res, int client_fd) {
+void response_init(Response* res, int client_fd) {
     res->client_fd = client_fd;
     res->status = StatusOK;
     res->data = NULL;
@@ -25,18 +25,15 @@ bool response_init(Response* res, int client_fd) {
     res->chunked = false;
     res->content_type_set = false;
     res->header_count = 0;
-    res->headers = (header_t**)calloc(MAX_RES_HEADERS, sizeof(header_t*));
-    return res->headers != NULL;
+    memset(res->headers, 0, sizeof res->headers);
 }
 
 // Free response and allocated headers.
 void response_destroy(Response* res) {
     for (size_t i = 0; i < res->header_count; ++i) {
-        free(res->headers[i]->name);
-        free(res->headers[i]->value);
-        free(res->headers[i]);
+        free(res->headers[i].name);
+        free(res->headers[i].value);
     }
-    free(res->headers);
 }
 
 // Response headers are pre-allocated in the arena.
@@ -44,14 +41,8 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
     if (ctx->response->header_count >= MAX_RES_HEADERS)
         return false;
 
-    header_t* header = malloc(sizeof(header_t));
-    if (!header) {
-        perror("malloc");
-        return false;
-    }
-    header->name = strdup(name);
-    header->value = strdup(value);
-
+    header_t header = {.name = strdup(name), .value = strdup(value)};
+    // TODO: handle potential alloc failure
     ctx->response->headers[ctx->response->header_count++] = header;
 
     if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
@@ -67,18 +58,19 @@ void process_response(Request* req, Response* res) {
 
     context_t ctx = {
         .request = req,
-        .locals = map_create(8, key_compare_char_ptr),
+        .locals = map_create(4, key_compare_char_ptr),
         .response = res,
     };
 
-    LOG_ASSERT(ctx.locals, "unable to allocate locals map");
+    LOG_ASSERT(ctx.locals, "unable to allocate context locals");
+
     Route* route = req->route;
 
     // If no middleware is defined, execute the handler directly
     size_t globalCount = get_global_middleware_count();
     if (route->middleware_count == 0 && globalCount == 0) {
         route->handler(&ctx);
-        free_context(&ctx);
+        map_destroy(ctx.locals, true);
         return;
     }
 
@@ -101,7 +93,7 @@ void process_response(Request* req, Response* res) {
         // Execute middleware chain
         execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
         free(mw_ctx.middleware);
-        free_context(&ctx);
+        map_destroy(ctx.locals, true);
         return;
     } else if (route->middleware_count > 0) {
         mw_ctx.middleware = (Middleware*)route->middleware;
@@ -113,9 +105,7 @@ void process_response(Request* req, Response* res) {
 
     // Execute middleware chain and handler
     execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
-
-    // free the context
-    free_context(&ctx);
+    map_destroy(ctx.locals, true);
 }
 
 // Optimized header writing function
@@ -179,8 +169,8 @@ static void write_headers(context_t* ctx) {
     // Add headers
     for (size_t i = 0; i < ctx->response->header_count; i++) {
         // Copy header name
-        size_t name_len = strlen(ctx->response->headers[i]->name);
-        memcpy(current, ctx->response->headers[i]->name, name_len);
+        size_t name_len = strlen(ctx->response->headers[i].name);
+        memcpy(current, ctx->response->headers[i].name, name_len);
         current += name_len;
         remaining -= name_len;
 
@@ -190,8 +180,8 @@ static void write_headers(context_t* ctx) {
         remaining -= 2;
 
         // Copy header value
-        size_t value_len = strlen(ctx->response->headers[i]->value);
-        memcpy(current, ctx->response->headers[i]->value, value_len);
+        size_t value_len = strlen(ctx->response->headers[i].value);
+        memcpy(current, ctx->response->headers[i].value, value_len);
         current += value_len;
         remaining -= value_len;
 

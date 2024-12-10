@@ -19,7 +19,7 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
-bool request_init(Request* req, int client_fd, int epoll_fd) {
+void request_init(Request* req, int client_fd, int epoll_fd) {
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
     req->path = NULL;
@@ -29,9 +29,7 @@ bool request_init(Request* req, int client_fd, int epoll_fd) {
     req->body = NULL;
     req->header_count = 0;
     req->query_params = NULL;
-
-    req->headers = (header_t**)calloc(MAX_REQ_HEADERS, sizeof(header_t*));
-    return req->headers != NULL;
+    memset(req->headers, 0, sizeof req->headers);
 }
 
 // Clean up resources allocated for the request.
@@ -47,12 +45,9 @@ void request_destroy(Request* req) {
         map_destroy(req->query_params, true);
 
     for (size_t i = 0; i < req->header_count; ++i) {
-        free(req->headers[i]->name);
-        free(req->headers[i]->value);
-        free(req->headers[i]);
+        free(req->headers[i].name);
+        free(req->headers[i].value);
     }
-
-    free(req->headers);
 }
 
 // Get request header value by name.
@@ -136,17 +131,7 @@ http_error_t parse_request_headers(Request* req, const char* header_text, size_t
 
         memcpy(value, ptr, value_len);
         value[value_len] = '\0';
-
-        header_t* header = malloc(sizeof(header_t));
-        if (!header) {
-            free(name);
-            free(value);
-            return http_memory_alloc_failed;
-        }
-
-        header->name = name;
-        header->value = value;
-        req->headers[req->header_count++] = header;
+        req->headers[req->header_count++] = (header_t){.name = name, .value = value};
 
         ptr = eol + 2;  // Skip CRLF
     }
