@@ -51,26 +51,13 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
     return true;
 }
 
-void process_response(Request* req, Response* res) {
-    res->client_fd = req->client_fd;
-    res->content_type_set = false;
-    res->status = StatusOK;
-
-    context_t ctx = {
-        .request = req,
-        .locals = map_create(4, key_compare_char_ptr),
-        .response = res,
-    };
-
-    LOG_ASSERT(ctx.locals, "unable to allocate context locals");
-
-    Route* route = req->route;
+void process_response(context_t* ctx) {
+    Route* route = ctx->request->route;
 
     // If no middleware is defined, execute the handler directly
     size_t globalCount = get_global_middleware_count();
     if (route->middleware_count == 0 && globalCount == 0) {
-        route->handler(&ctx);
-        map_destroy(ctx.locals, true);
+        route->handler(ctx);
         return;
     }
 
@@ -82,7 +69,7 @@ void process_response(Request* req, Response* res) {
         .middleware = NULL,
     };
 
-    ctx.mw_ctx = &mw_ctx;
+    ctx->mw_ctx = &mw_ctx;
 
     // if both global and route middleware are defined, combine them
     if (route->middleware_count > 0 && get_global_middleware_count() > 0) {
@@ -91,9 +78,8 @@ void process_response(Request* req, Response* res) {
         LOG_ASSERT(mw_ctx.middleware, "error allocating memory for combined middleware");
 
         // Execute middleware chain
-        execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
+        execute_middleware(ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
         free(mw_ctx.middleware);
-        map_destroy(ctx.locals, true);
         return;
     } else if (route->middleware_count > 0) {
         mw_ctx.middleware = (Middleware*)route->middleware;
@@ -104,8 +90,7 @@ void process_response(Request* req, Response* res) {
     }
 
     // Execute middleware chain and handler
-    execute_middleware(&ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
-    map_destroy(ctx.locals, true);
+    execute_middleware(ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
 }
 
 // Optimized header writing function

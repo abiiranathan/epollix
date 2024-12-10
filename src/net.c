@@ -32,24 +32,31 @@ int set_nonblocking(int sock) {
 
 // Add a value to the context. This is useful for sharing data between middleware.
 void set_context_value(context_t* ctx, const char* key, void* value) {
-    if (!ctx->locals)
-        return;
-
-    char* ctx_key = strdup(key);
-    if (!ctx_key) {
-        LOG_ERROR("unable to allocate memory for key: %s", key);
+    if (ctx->locals_count >= MAX_CONTEXT_LOCALS) {
+        LOG_ERROR("context value limit reached");
         return;
     }
 
-    map_set(ctx->locals, ctx_key, value);
+    ctx->locals[ctx->locals_count].key = strdup(key);
+    ctx->locals[ctx->locals_count].value = value;
+    ctx->locals_count++;
+}
+
+void free_locals(context_t* ctx) {
+    for (size_t i = 0; i < ctx->locals_count; ++i) {
+        free(ctx->locals[i].key);
+        free(ctx->locals[i].value);
+    }
 }
 
 // Get a value from the context. Returns NULL if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key) {
-    if (!ctx->locals)
-        return NULL;
-
-    return map_get(ctx->locals, (char*)key);
+    for (size_t i = 0; i < ctx->locals_count; ++i) {
+        if (strcmp(ctx->locals[i].key, key) == 0) {
+            return ctx->locals[i].value;
+        }
+    }
+    return NULL;
 }
 
 void enable_keepalive(int sockfd) {

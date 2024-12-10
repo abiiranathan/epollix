@@ -31,7 +31,7 @@ void response_init(Response* res, int client_fd);
 void response_destroy(Response* res);
 
 // Process the response.
-void process_response(Request* req, Response* res);
+void process_response(context_t* ctx);
 
 // Set response header.
 bool set_response_header(context_t* ctx, const char* name, const char* value);

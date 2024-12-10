@@ -27,6 +27,10 @@
 #define MAX_RES_HEADERS 12
 #endif
 
+#ifndef MAX_CONTEXT_LOCALS
+#define MAX_CONTEXT_LOCALS 8
+#endif
+
 // Size of the buffer to hold the response headers.
 #ifndef MAX_RES_HEADER_SIZE
 #define MAX_RES_HEADER_SIZE 512

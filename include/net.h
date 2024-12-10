@@ -11,13 +11,19 @@ extern "C" {
 #include "multipart.h"
 #include "request.h"
 
+typedef struct ctx_value {
+    char* key;    // Key for the value
+    void* value;  // Value to store
+} ctx_value;
+
 // epollix context containing response primitives and request state.
 typedef struct epollix_context {
-    Request* request;                  // Pointer to the request
-    map* locals;                       // user-data key-value store the context.
-    struct MiddlewareContext* mw_ctx;  // Middleware context
-    struct response* response;         // Response pointer
-} context_t;
+    Request* request;                      // Pointer to the request
+    struct MiddlewareContext* mw_ctx;      // Middleware context
+    struct response* response;             // Response pointer
+    ctx_value locals[MAX_CONTEXT_LOCALS];  // Local context values
+    size_t locals_count;                   // Number of local context values
+} context_t __attribute__((aligned(64)));
 
 void enable_keepalive(int sockfd);
 int set_nonblocking(int sock);
@@ -40,6 +46,8 @@ void set_context_value(context_t* ctx, const char* key, void* value);
 // Get a value stored by  a call to `set_context_value` from the context.
 // Returns NULL if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key);
+
+void free_locals(context_t* ctx);
 
 #ifdef __cplusplus
 }

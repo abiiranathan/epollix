@@ -53,8 +53,9 @@ static void handleConnection(void* arg) {
         // shutdown read end of the socket
         shutdown(task->client_fd, SHUT_RD);
 
-        // process the request
-        process_response(&req, &res);
+        context_t ctx = {.request = &req, .response = &res, .mw_ctx = NULL, .locals_count = 0};
+        process_response(&ctx);
+        free_locals(&ctx);
 
         // shutdown write end of the socket
         shutdown(task->client_fd, SHUT_WR);
