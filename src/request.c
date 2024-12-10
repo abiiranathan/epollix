@@ -19,12 +19,7 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
-Request* request_new(int client_fd, int epoll_fd) {
-    Request* req = (Request*)malloc(sizeof(Request));
-    if (!req) {
-        return NULL;
-    }
-
+bool request_init(Request* req, int client_fd, int epoll_fd) {
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
     req->path = NULL;
@@ -36,18 +31,12 @@ Request* request_new(int client_fd, int epoll_fd) {
     req->query_params = NULL;
 
     req->headers = (header_t**)calloc(MAX_REQ_HEADERS, sizeof(header_t*));
-    if (!req->headers) {
-        free(req);
-        return NULL;
-    }
-    return req;
+    return req->headers != NULL;
 }
 
-// Clean up resources allocated for the request
+// Clean up resources allocated for the request.
+// The request itself is on the stack and should not be freed.
 void request_destroy(Request* req) {
-    if (!req)
-        return;
-
     if (req->path)
         free(req->path);
 
@@ -64,8 +53,6 @@ void request_destroy(Request* req) {
     }
 
     free(req->headers);
-    free(req);
-    req = NULL;
 }
 
 // Get request header value by name.

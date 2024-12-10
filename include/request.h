@@ -28,10 +28,11 @@ typedef enum {
     http_memory_alloc_failed,
 } http_error_t;
 
-// Create a new request object.
-Request* request_new(int client_fd, int epoll_fd);
+// Initialize a new request object and allocate headers array.
+bool request_init(Request* req, int client_fd, int epoll_fd);
 
 // Free up resources allocated by the request.
+// The request itself is on the stack and should not be freed.
 void request_destroy(Request* req);
 
 // Parse request headers from text.

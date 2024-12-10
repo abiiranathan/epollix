@@ -17,8 +17,6 @@ extern "C" {
 typedef struct read_task {
     int epoll_fd;   // Epoll file descriptor
     int client_fd;  // Client file descriptor
-    Request* req;   // Request object
-    Response* res;  // Response object
 } Task;
 
 // User-defined callback function will be called atexit.

@@ -17,12 +17,7 @@
 #include "../include/request.h"
 
 // Create a new response object.
-Response* response_new(int client_fd) {
-    Response* res = malloc(sizeof(Response));
-    if (!res) {
-        return NULL;
-    }
-
+bool response_init(Response* res, int client_fd) {
     res->client_fd = client_fd;
     res->status = StatusOK;
     res->data = NULL;
@@ -31,28 +26,17 @@ Response* response_new(int client_fd) {
     res->content_type_set = false;
     res->header_count = 0;
     res->headers = (header_t**)calloc(MAX_RES_HEADERS, sizeof(header_t*));
-    if (!res->headers) {
-        free(res);
-        return NULL;
-    }
-
-    return res;
+    return res->headers != NULL;
 }
 
 // Free response and allocated headers.
 void response_destroy(Response* res) {
-    if (!res)
-        return;
-
     for (size_t i = 0; i < res->header_count; ++i) {
         free(res->headers[i]->name);
         free(res->headers[i]->value);
         free(res->headers[i]);
     }
-
     free(res->headers);
-    free(res);
-    res = NULL;
 }
 
 // Response headers are pre-allocated in the arena.

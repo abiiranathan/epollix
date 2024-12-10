@@ -34,37 +34,45 @@ Task* newTask(int client_fd, int epoll_fd) {
 
     task->client_fd = client_fd;
     task->epoll_fd = epoll_fd;
-
-    // Allocate memory for the request object
-    task->req = request_new(client_fd, epoll_fd);
-    if (!task->req) {
-        free(task);
-        return NULL;
-    }
-
-    // Allocate response object
-    task->res = response_new(client_fd);
-    if (!task->res) {
-        request_destroy(task->req);
-        free(task);
-        return NULL;
-    }
     return task;
 }
 
 void freeTask(Task* task) {
-    request_destroy(task->req);
-    response_destroy(task->res);
     free(task);
 }
 
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
-    process_request(task->req);
-    if (task->req->route != NULL) {
-        process_response(task->req, task->res);
+
+    Request req = {0};
+    Response res = {0};
+    bool initialized = false;
+
+    initialized = request_init(&req, task->client_fd, task->epoll_fd);
+    if (!initialized) {
+        LOG_ERROR("Failed to initialize request\n");
+        close_connection(task->client_fd, task->epoll_fd);
+        freeTask(task);
+        return;
     }
+
+    initialized = response_init(&res, task->client_fd);
+    if (!initialized) {
+        LOG_ERROR("Failed to initialize response\n");
+        close_connection(task->client_fd, task->epoll_fd);
+        request_destroy(&req);
+        freeTask(task);
+        return;
+    }
+
+    process_request(&req);
+    if (req.route != NULL) {
+        process_response(&req, &res);
+    }
+
     close_connection(task->client_fd, task->epoll_fd);
+    request_destroy(&req);
+    response_destroy(&res);
     freeTask(task);
 }
 

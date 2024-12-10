@@ -143,6 +143,5 @@ int main(void) {
     test_header_fromstring();
     test_parse_url_query_params();
     test_match_params();
-
     return 0;
 }
