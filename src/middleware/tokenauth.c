@@ -4,7 +4,6 @@
 #include "../include/middleware/tokenauth.h"
 #include <stdlib.h>
 #include <string.h>
-#include "../include/fast_str.h"
 #include "../include/response.h"
 
 #define BEARER "Bearer "
@@ -31,7 +30,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
         return;
     }
 
-    const char* token = boyer_moore_strstr(auth_header, BEARER);
+    const char* token = strstr(auth_header, BEARER);
     if (token == NULL) {
         handleUnauthorized(ctx);
         return;

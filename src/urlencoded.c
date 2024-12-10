@@ -1,5 +1,4 @@
 #include "../include/urlencoded.h"
-#include "../include/fast_str.h"
 
 // Parse x-www-form-urlencoded form from request and return map containing fields.
 // All keys and values are char*.
@@ -9,7 +8,7 @@ map* parse_urlencoded_form(const char* url) {
         return NULL;
     }
 
-    char* q = boyer_moore_strstr(url, "?");
+    char* q = strstr(url, "?");
     if (!q)
         return NULL;
     q++;

@@ -1,5 +1,4 @@
 #include "../include/mime.h"
-#include "../include/fast_str.h"
 #include "../include/logging.h"
 
 #include <ctype.h>
@@ -267,7 +266,7 @@ const char* get_mimetype(char* filename) {
 
     // Get the file extension.
     char *ptr, *start = filename, *last = NULL;
-    while ((ptr = boyer_moore_strstr(start, "."))) {
+    while ((ptr = strstr(start, "."))) {
         last = ptr;
         start++;
     }

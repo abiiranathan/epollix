@@ -14,7 +14,6 @@
 #include <sys/sendfile.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "../include/fast_str.h"
 #include "../include/request.h"
 
 // Create a new response object.
@@ -503,7 +502,7 @@ int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* fi
 
 // Parses the Range header and extracts start and end values
 bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range) {
-    if (boyer_moore_strstr(range_header, "bytes=") != NULL) {
+    if (strstr(range_header, "bytes=") != NULL) {
         if (sscanf(range_header, "bytes=%ld-%ld", start, end) == 2) {
             *has_end_range = true;
             return true;

@@ -46,7 +46,6 @@ set(SOURCES
     src/server.c
     src/static.c
     src/status.c
-    src/fast_str.c
 )
 
 # Add the middleware sources
@@ -78,7 +77,6 @@ set(HEADERS
     include/response.h
     include/server.h
     include/epollix.h
-    include/fast_str.h
 )
 
 # Include "include/automem.h" if using GCC or Clang and not in C++ mode

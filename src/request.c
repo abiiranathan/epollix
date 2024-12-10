@@ -1,5 +1,4 @@
 #include "../include/request.h"
-#include "../include/fast_str.h"
 #include "../include/middleware.h"
 #include "../include/route.h"
 
@@ -254,7 +253,7 @@ static bool parse_request_line(char* headers, char** method, char** uri, char** 
     **http_version = '\0';
     (*http_version)++;
 
-    *header_start = boyer_moore_strstr(*http_version, "\r\n");
+    *header_start = strstr(*http_version, "\r\n");
     if (!*header_start)
         return false;
     **header_start = '\0';

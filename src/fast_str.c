@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Boyer-Moore implementation for strstr
-char* boyer_moore_strstr(const char* haystack, const char* needle) {
+char* strstr(const char* haystack, const char* needle) {
     if (!haystack || !needle) {
         return NULL;
     }
@@ -115,7 +115,7 @@ int main() {
     const char* haystack = "This is a simple example for Boyer-Moore strstr implementation.";
     const char* needle = "Boyer-Moore";
 
-    char* result = boyer_moore_strstr(haystack, needle);
+    char* result = strstr(haystack, needle);
 
     if (result) {
         printf("Found at position: %ld\n", result - haystack);

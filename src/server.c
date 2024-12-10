@@ -49,7 +49,6 @@ Task* newTask(int client_fd, int epoll_fd) {
         free(task);
         return NULL;
     }
-
     return task;
 }
 
