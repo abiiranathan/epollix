@@ -37,10 +37,6 @@ Task* newTask(int client_fd, int epoll_fd) {
     return task;
 }
 
-void freeTask(Task* task) {
-    free(task);
-}
-
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
     Request req = {0};
@@ -52,8 +48,7 @@ static void handleConnection(void* arg) {
     if (req.route != NULL) {
         // shutdown read end of the socket
         shutdown(task->client_fd, SHUT_RD);
-
-        context_t ctx = {.request = &req, .response = &res, .mw_ctx = NULL, .locals_count = 0};
+        context_t ctx = {.request = &req, .response = &res};
         process_response(&ctx);
         free_locals(&ctx);
 
@@ -64,7 +59,7 @@ static void handleConnection(void* arg) {
     close_connection(task->client_fd, task->epoll_fd);
     request_destroy(&req);
     response_destroy(&res);
-    freeTask(task);
+    free(task);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {

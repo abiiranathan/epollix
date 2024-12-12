@@ -190,6 +190,11 @@ typedef struct User {
     char* password;
 } User;
 
+void user_route_mw(context_t* ctx, Handler next) {
+    puts("calling next handler");
+    next(ctx);
+}
+
 static void api_users(context_t* ctx) {
     User users[10] = {0};
     for (int i = 0; i < 10; i++) {
@@ -263,7 +268,7 @@ int main(int argc, char** argv) {
     setenv(JWT_TOKEN_SECRET, "super_jwt_token_secret", 1);
 
     // Logging middleware
-    // set_log_file(stdout);
+    set_log_file(stdout);
     // use_global_middleware(1, epollix_logger);
 
     // We need a way to associate the BasicAuthData to a route since C has no support for closures.
@@ -307,11 +312,12 @@ int main(int argc, char** argv) {
     // Create a route group
     RouteGroup* group = route_group("/api/v1");
     route_group_get(group, "/", api_index);
-    route_group_get(group, "/users", api_users);
+    Route* ur = route_group_get(group, "/users", api_users);
+    use_route_middleware(ur, 1, user_route_mw);
     route_group_get(group, "/users/{id}", api_user_by_id);
     route_group_free(group);
 
-    EpollServer* server = epoll_server_create(2, port, cleanup);
+    EpollServer* server = epoll_server_create(4, port, cleanup);
     if (server == NULL) {
         LOG_FATAL("Failed to create server\n");
     }

@@ -51,56 +51,29 @@ void* get_global_middleware_context(const char* key) {
     return map_get(global_middleware_context, (char*)key);
 }
 
-// Combine global and route-specific middleware
-Middleware* merge_middleware(Route* route, MiddlewareContext* mw_ctx) {
-    size_t total_count = global_middleware_count + route->middleware_count;
-    Middleware* combined = (Middleware*)malloc(sizeof(Middleware) * total_count);
-    if (!combined)
-        return NULL;
-
-    uint8_t combined_count = 0;
-
-    // Add global middleware
-    for (size_t i = 0; i < (size_t)global_middleware_count; i++) {
-        combined[combined_count++] = global_middleware[i];
-    }
-
-    // Add route middleware.
-    for (size_t i = 0; i < (size_t)route->middleware_count; i++) {
-        combined[combined_count++] = ((Middleware*)(route->middleware))[i];
-    }
-
-    mw_ctx->middleware = combined;
-    mw_ctx->count = combined_count;    // Set total mw count for the context.
-    mw_ctx->index = 0;                 // Initialize middlewares traversed to 0
-    mw_ctx->handler = route->handler;  // Store a reference to handler
-    return combined;
-}
-
 // get_global_middleware_count returns the number of global middleware functions.
-size_t get_global_middleware_count(void) {
+inline size_t get_global_middleware_count(void) {
     return global_middleware_count;
 }
 
 // get_global_middleware returns the global middleware functions.
-Middleware* get_global_middleware(void) {
+inline Middleware* get_global_middleware(void) {
     return global_middleware;
 }
 
 static void middleware_next(context_t* ctx) {
     MiddlewareContext* mw_ctx = ctx->mw_ctx;
-    execute_middleware(ctx, mw_ctx->middleware, mw_ctx->count, (mw_ctx->index++), mw_ctx->handler);
+    mw_ctx->index++;
+    execute_middleware_chain(ctx, mw_ctx);
 }
 
-void execute_middleware(context_t* ctx, Middleware* middleware, size_t count, size_t index, Handler handler) {
-    if (index < count) {
+// Advance middleware group without calling the handler.
+void execute_middleware_chain(context_t* ctx, MiddlewareContext* mw_ctx) {
+    if (mw_ctx->index < mw_ctx->count) {
         // Execute the next middleware in the chain
-        middleware[index](ctx, middleware_next);
+        mw_ctx->middleware[mw_ctx->index](ctx, middleware_next);
         return;
     }
-
-    // Call the handler if all middleware have been executed
-    handler(ctx);
 }
 
 // ================ Middleware logic ==================

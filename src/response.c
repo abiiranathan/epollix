@@ -62,35 +62,28 @@ void process_response(context_t* ctx) {
     }
 
     // Define middleware context
-    MiddlewareContext mw_ctx = {
-        .count = 0,
-        .index = 0,
-        .handler = route->handler,
-        .middleware = NULL,
-    };
+    MiddlewareContext mw_ctx = {};
 
+    // Store middleware context in request context.
     ctx->mw_ctx = &mw_ctx;
 
-    // if both global and route middleware are defined, combine them
-    if (route->middleware_count > 0 && get_global_middleware_count() > 0) {
-        // Allocate memory for the combined middleware
-        mw_ctx.middleware = merge_middleware(route, &mw_ctx);
-        LOG_ASSERT(mw_ctx.middleware, "error allocating memory for combined middleware");
-
-        // Execute middleware chain
-        execute_middleware(ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
-        free(mw_ctx.middleware);
-        return;
-    } else if (route->middleware_count > 0) {
-        mw_ctx.middleware = (Middleware*)route->middleware;
-        mw_ctx.count = route->middleware_count;
-    } else if (globalCount > 0) {
-        mw_ctx.middleware = get_global_middleware();
+    if (globalCount > 0) {
+        // Execute global middleware
         mw_ctx.count = globalCount;
+        mw_ctx.middleware = get_global_middleware();
+        execute_middleware_chain(ctx, &mw_ctx);
     }
 
-    // Execute middleware chain and handler
-    execute_middleware(ctx, mw_ctx.middleware, mw_ctx.count, 0, route->handler);
+    if (route->middleware_count) {
+        // Execute route specific middleware
+        mw_ctx.middleware = route->middleware;
+        mw_ctx.count = route->middleware_count;
+        mw_ctx.index = 0;
+        execute_middleware_chain(ctx, &mw_ctx);
+    }
+
+    // Call the handler
+    route->handler(ctx);
 }
 
 // Optimized header writing function
