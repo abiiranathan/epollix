@@ -4,26 +4,6 @@
 #include <string.h>
 #include <strings.h>
 
-header_t* header_new(const char* name, const char* value) {
-    header_t* header = malloc(sizeof(header_t));
-    if (!header) {
-        return NULL;
-    }
-
-    header->name = strdup(name);
-    header->value = strdup(value);
-    return header;
-}
-
-void header_free(header_t* header) {
-    if (!header)
-        return;
-    free(header->name);
-    free(header->value);
-    free(header);
-    header = NULL;
-}
-
 // Parse header_t from http header string.
 header_t* header_fromstring(const char* str) {
     const char* colon = strchr(str, ':');

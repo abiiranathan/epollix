@@ -89,18 +89,34 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
 
 // Sends an error message to the client before the request is parsed.
 void http_error(int client_fd, http_status status, const char* message) {
-    char* reply = NULL;
+    char reply[1024];
     const char* status_str = http_status_text(status);
-    char* fmt = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
+    const char* fmt = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
 
-    int ret = asprintf(&reply, fmt, status, status_str, strlen(message), message);
-    if (ret == -1) {
+    // 20 is a safe margin for status and other formatting
+    size_t max_message_length = sizeof(reply) - strlen(fmt) - 20;
+    size_t message_length = strlen(message);
+
+    if (message_length >= max_message_length) {
+        // use asprintf to allocate memory for the message if it's too long
+        char* msg = NULL;
+        int ret = asprintf(&msg, fmt, status, status_str, message_length, message);
+        if (ret < 0) {
+            LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
+            return;
+        }
+
+        sendall(client_fd, msg, strlen(msg));
+        return;
+    }
+
+    int ret = snprintf(reply, sizeof(reply), fmt, status, status_str, message_length, message);
+    if (ret < 0 || (size_t)ret >= sizeof(reply)) {
         LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
         return;
     }
 
     sendall(client_fd, reply, strlen(reply));
-    free(reply);
 }
 
 static int setup_server_socket(const char* port) {
@@ -358,6 +374,7 @@ static void epoll_server_shutdown(EpollServer* server) {
     }
 
     free(server);
+    server = NULL;
 }
 
 // Destructor extension for gcc and clang.
