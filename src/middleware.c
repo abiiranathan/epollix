@@ -74,6 +74,9 @@ void execute_middleware_chain(context_t* ctx, MiddlewareContext* mw_ctx) {
         mw_ctx->middleware[mw_ctx->index](ctx, middleware_next);
         return;
     }
+
+    // Execute the handler
+    mw_ctx->handler(ctx);
 }
 
 // ================ Middleware logic ==================

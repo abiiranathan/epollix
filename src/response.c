@@ -52,38 +52,43 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
 }
 
 void process_response(context_t* ctx) {
+    size_t globalCount = get_global_middleware_count();
     Route* route = ctx->request->route;
 
-    // If no middleware is defined, execute the handler directly
-    size_t globalCount = get_global_middleware_count();
+    // Directly execute the handler if no middleware
     if (route->middleware_count == 0 && globalCount == 0) {
         route->handler(ctx);
         return;
     }
 
     // Define middleware context
-    MiddlewareContext mw_ctx = {};
+    MiddlewareContext mw_ctx = {
+        .handler = route->handler,
+        .index = 0,
+        .count = globalCount + route->middleware_count,
+    };
+
+    // Combine global and route middleware
+    Middleware* combined_middleware = malloc(sizeof(Middleware) * mw_ctx.count);
+    if (!combined_middleware) {
+        LOG_ERROR("Failed to allocate memory for combined middleware");
+        http_error(ctx->response->client_fd, StatusInternalServerError, "Internal server error");
+        return;
+    }
+
+    memcpy(combined_middleware, get_global_middleware(), globalCount * sizeof(Middleware));
+    memcpy(combined_middleware + globalCount, route->middleware, route->middleware_count * sizeof(Middleware));
+
+    mw_ctx.middleware = combined_middleware;
 
     // Store middleware context in request context.
     ctx->mw_ctx = &mw_ctx;
 
-    if (globalCount > 0) {
-        // Execute global middleware
-        mw_ctx.count = globalCount;
-        mw_ctx.middleware = get_global_middleware();
-        execute_middleware_chain(ctx, &mw_ctx);
-    }
+    // Execute middleware chain
+    execute_middleware_chain(ctx, &mw_ctx);
 
-    if (route->middleware_count) {
-        // Execute route specific middleware
-        mw_ctx.middleware = route->middleware;
-        mw_ctx.count = route->middleware_count;
-        mw_ctx.index = 0;
-        execute_middleware_chain(ctx, &mw_ctx);
-    }
-
-    // Call the handler
-    route->handler(ctx);
+    // Free combined middleware
+    free(combined_middleware);
 }
 
 // Optimized header writing function

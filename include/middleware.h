@@ -16,6 +16,7 @@ typedef struct MiddlewareContext {
     uint8_t count;           // Number of middleware functions
     uint8_t index;           // Current index in the middleware array
     Middleware* middleware;  // Array of middleware functions
+    Handler handler;         // Handler function
 } MiddlewareContext;
 
 // Initialize global middleware context.

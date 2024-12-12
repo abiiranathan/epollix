@@ -125,17 +125,27 @@ void epollix_logger(context_t* ctx, Handler next) {
     if (log_flags & LOG_LATENCY) {
         long seconds = end.tv_sec - start.tv_sec;
         long nanoseconds = end.tv_nsec - start.tv_nsec;
-        long microseconds = seconds * 1000000 + nanoseconds / 1000;
+
+        // Adjust nanoseconds if negative (borrow from seconds)
+        if (nanoseconds < 0) {
+            seconds--;
+            nanoseconds += 1000000000L;
+        }
+
+        long microseconds = nanoseconds / 1000;
         long milliseconds = microseconds / 1000;
 
-        if (seconds == 0 && milliseconds == 0) {
-            buffer_offset +=
-                snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldµs ", microseconds);
-        } else if (seconds >= 1) {
+        if (seconds > 0) {
             buffer_offset += snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%lds ", seconds);
-        } else {
+        } else if (milliseconds > 0) {
             buffer_offset +=
                 snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldms ", milliseconds);
+        } else if (microseconds > 0) {
+            buffer_offset +=
+                snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldµs ", microseconds);
+        } else {
+            buffer_offset +=
+                snprintf(log_buffer + buffer_offset, sizeof(log_buffer) - buffer_offset, "%ldns ", nanoseconds);
         }
     }
 

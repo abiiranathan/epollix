@@ -191,11 +191,12 @@ typedef struct User {
 } User;
 
 void user_route_mw(context_t* ctx, Handler next) {
-    puts("calling next handler");
     next(ctx);
 }
 
 static void api_users(context_t* ctx) {
+    sleep(1);
+
     User users[10] = {0};
     for (int i = 0; i < 10; i++) {
         users[i].username = "user";
@@ -269,7 +270,7 @@ int main(int argc, char** argv) {
 
     // Logging middleware
     set_log_file(stdout);
-    // use_global_middleware(1, epollix_logger);
+    use_global_middleware(1, epollix_logger);
 
     // We need a way to associate the BasicAuthData to a route since C has no support for closures.
     // we can use the set_mw_context function to set the BasicAuthData to a specific route.
