@@ -1,6 +1,10 @@
 #ifndef CE7D16EF_5604_4957_A4B1_24F7EC61C514
 #define CE7D16EF_5604_4957_A4B1_24F7EC61C514
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <cipherkit/jwt.h>
 #include "../net.h"
 
@@ -19,5 +23,9 @@ void BearerAuthMiddleware(context_t* ctx, Handler next);
 
 // Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.
 const JWTPayload* get_jwt_payload(context_t* ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CE7D16EF_5604_4957_A4B1_24F7EC61C514 */

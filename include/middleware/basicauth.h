@@ -3,6 +3,10 @@
 
 #define BASIC_AUTH_KEY "BasicAuthData"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "../net.h"
 
 typedef struct basic_auth_data BasicAuthData;
@@ -19,5 +23,9 @@ void route_basic_auth(context_t* ctx, Handler next);
 // using the set_global_middleware_context function using the key BASIC_AUTH_KEY macro
 // as the key.
 void global_basic_auth(context_t* ctx, Handler next);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* DF122B59_E09E_45EA_A842_517C7384D3EB */

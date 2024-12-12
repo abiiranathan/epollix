@@ -1,6 +1,9 @@
 #ifndef C2347D19_DD48_407D_8CD4_88B812043B24
 #define C2347D19_DD48_407D_8CD4_88B812043B24
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "../net.h"
 
 typedef enum {
@@ -38,5 +41,9 @@ void set_log_file(FILE* file);
 // You can customize the logger by setting the log flags using set_log_flags or append_log_flags.
 // The default is LOG_DEFAULT.
 void epollix_logger(context_t* ctx, Handler next);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* C2347D19_DD48_407D_8CD4_88B812043B24 */
