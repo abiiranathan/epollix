@@ -268,9 +268,9 @@ int main(int argc, char** argv) {
     // Set the JWT token secret used to sign the token for Bearer authentication
     setenv(JWT_TOKEN_SECRET, "super_jwt_token_secret", 1);
 
-    // Logging middleware
-    set_log_file(stdout);
-    use_global_middleware(1, epollix_logger);
+    // // Logging middleware
+    // set_log_file(stdout);
+    // use_global_middleware(1, epollix_logger);
 
     // We need a way to associate the BasicAuthData to a route since C has no support for closures.
     // we can use the set_mw_context function to set the BasicAuthData to a specific route.
