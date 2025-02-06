@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
-// #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
+#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
 #include <solidc/cstr.h>
 #include <solidc/filepath.h>
 #include <solidc/thread.h>
@@ -354,11 +354,11 @@ int epoll_server_listen(EpollServer* server) {
 
                     // Only disable based on configuation
                     // // Disable Nagle's algorithm for the client socket
-                    // int flag = 1;
-                    // setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+                    int flag = 1;
+                    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 
                     // Enable keepalive for the client socket
-                    // enable_keepalive(client_fd);
+                    enable_keepalive(client_fd);
 
                     // TODO: Pass timeout as a configuration
                     struct timeval timeout;
