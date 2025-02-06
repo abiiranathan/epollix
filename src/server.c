@@ -54,15 +54,20 @@ static void handleConnection(void* arg) {
 
     Request req;
     Response res;
+    MemoryPool* pool = mpool_create(2 * 1024 * 1024);
+    if (!pool) {
+        PutTask(task);
+        return;
+    }
 
     request_init(&req, task->client_fd, task->epoll_fd);
     response_init(&res, task->client_fd);
-    process_request(&req);
+    process_request(&req, pool);
 
     if (req.route != nullptr) {
         // shutdown read end of the socket
         shutdown(task->client_fd, SHUT_RD);
-        context_t ctx = {.request = &req, .response = &res};
+        context_t ctx = {.request = &req, .response = &res, .pool = pool};
         process_response(&ctx);
         free_locals(&ctx);
 
@@ -71,10 +76,15 @@ static void handleConnection(void* arg) {
     }
 
     close_connection(task->client_fd, task->epoll_fd);
-    request_destroy(&req);
-    response_destroy(&res);
+
+    // cleanup request params
+    if (req.query_params) {
+        map_destroy(req.query_params);
+    }
 
     PutTask(task);
+
+    mpool_destroy(pool);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {

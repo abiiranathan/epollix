@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <solidc/map.h>
+#include <solidc/memory_pool.h>
 #include <sys/types.h>
 #include "constants.h"
 #include "header.h"

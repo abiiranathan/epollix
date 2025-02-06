@@ -31,16 +31,12 @@ typedef enum {
 // Initialize a new request object and allocate headers array.
 void request_init(Request* req, int client_fd, int epoll_fd);
 
-// Free up resources allocated by the request.
-// The request itself is on the stack and should not be freed.
-void request_destroy(Request* req);
-
 // Parse request headers from text.
-http_error_t parse_request_headers(Request* req, const char* header_text, size_t length);
+http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* header_text, size_t length);
 
 // Parse URL query parameters from a query string.
 // Populates the map.
-bool parse_url_query_params(char* query, map* query_params);
+bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params);
 
 // Get request header value by name.
 const char* get_request_header(Request* req, const char* name);
@@ -62,7 +58,7 @@ char* encode_uri(const char* str);
 void decode_uri(const char* src, char* dst, size_t dst_size);
 
 // Handle Request and send response to the client.
-void process_request(Request* req);
+void process_request(Request* req, MemoryPool* pool);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns nullptr.

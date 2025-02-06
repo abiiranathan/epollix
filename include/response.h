@@ -26,10 +26,6 @@ typedef struct response {
 // Create a new response object.
 void response_init(Response* res, int client_fd);
 
-// Free response and allocated headers.
-// The response itself is on the stack and should not be freed.
-void response_destroy(Response* res);
-
 // Process the response.
 void process_response(context_t* ctx);
 

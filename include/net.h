@@ -23,6 +23,7 @@ typedef struct epollix_context {
     struct response* response;             // Response pointer
     ctx_value locals[MAX_CONTEXT_LOCALS];  // Local context values
     size_t locals_count;                   // Number of local context values
+    MemoryPool* pool;                      // Memory pool
 } context_t __attribute__((aligned(64)));
 
 void enable_keepalive(int sockfd);

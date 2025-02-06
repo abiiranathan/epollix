@@ -5,19 +5,19 @@
 #include <strings.h>
 
 // Parse header_t from http header string.
-header_t* header_fromstring(const char* str) {
+header_t* header_fromstring(MemoryPool* pool, const char* str) {
     const char* colon = strchr(str, ':');
     if (!colon || colon == str) {
         return nullptr;
     }
 
     size_t name_length = colon - str;
-    header_t* header = malloc(sizeof(header_t));
+    header_t* header = mpool_alloc(pool, sizeof(header_t));
     if (!header) {
         return nullptr;
     }
 
-    char* name = malloc(name_length + 1);
+    char* name = mpool_alloc(pool, name_length + 1);
     if (!name) {
         return nullptr;
     }
@@ -31,7 +31,7 @@ header_t* header_fromstring(const char* str) {
     }
 
     size_t value_length = strlen(value_start);
-    char* value = malloc(value_length + 1);
+    char* value = mpool_alloc(pool, value_length + 1);
     if (!value) {
         return nullptr;
     }
@@ -42,7 +42,7 @@ header_t* header_fromstring(const char* str) {
     return header;
 }
 
-char* find_header(header_t* headers, size_t count, const char* name) {
+const char* find_header(header_t* headers, size_t count, const char* name) {
     for (size_t i = 0; i < count; ++i) {
         if (strcasecmp(headers[i].name, name) == 0) {
             return headers[i].value;

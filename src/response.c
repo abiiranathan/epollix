@@ -1,7 +1,7 @@
+#include <memory_pool.h>
 #define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 
-#include "../include/response.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "../include/request.h"
+#include "../include/response.h"
 
 // Create a new response object.
 void response_init(Response* res, int client_fd) {
@@ -28,21 +29,19 @@ void response_init(Response* res, int client_fd) {
     memset(res->headers, 0, sizeof res->headers);
 }
 
-// Free response and allocated headers.
-void response_destroy(Response* res) {
-    for (size_t i = 0; i < res->header_count; ++i) {
-        free(res->headers[i].name);
-        free(res->headers[i].value);
-    }
-}
-
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
     if (ctx->response->header_count >= MAX_RES_HEADERS)
         return false;
 
-    header_t header = {.name = strdup(name), .value = strdup(value)};
-    // TODO: handle potential alloc failure
+    header_t header = {
+        .name = mpool_copy_str(ctx->pool, name),
+        .value = mpool_copy_str(ctx->pool, value),
+    };
+
+    if (!header.name || !header.value)
+        return false;
+
     ctx->response->headers[ctx->response->header_count++] = header;
 
     if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
@@ -69,7 +68,7 @@ void process_response(context_t* ctx) {
     };
 
     // Combine global and route middleware
-    Middleware* combined_middleware = malloc(sizeof(Middleware) * mw_ctx.count);
+    Middleware* combined_middleware = mpool_alloc(ctx->pool, sizeof(Middleware) * mw_ctx.count);
     if (!combined_middleware) {
         LOG_ERROR("Failed to allocate memory for combined middleware");
         http_error(ctx->response->client_fd, StatusInternalServerError, "Internal server error");
@@ -86,9 +85,6 @@ void process_response(context_t* ctx) {
 
     // Execute middleware chain
     execute_middleware_chain(ctx, &mw_ctx);
-
-    // Free combined middleware
-    free(combined_middleware);
 }
 
 static void write_headers(context_t* ctx) {

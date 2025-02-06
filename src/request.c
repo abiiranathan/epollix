@@ -1,13 +1,15 @@
+#include <memory_pool.h>
 #define _GNU_SOURCE
 
-#include "../include/request.h"
 #include "../include/middleware.h"
+#include "../include/request.h"
 #include "../include/route.h"
 
 #include <cpuid.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -30,24 +32,6 @@ void request_init(Request* req, int client_fd, int epoll_fd) {
     req->header_count = 0;
     req->query_params = nullptr;
     memset(req->headers, 0, sizeof req->headers);
-}
-
-// Clean up resources allocated for the request.
-// The request itself is on the stack and should not be freed.
-void request_destroy(Request* req) {
-    if (req->path)
-        free(req->path);
-
-    if (req->body)
-        free(req->body);
-
-    if (req->query_params)
-        map_destroy(req->query_params);
-
-    for (size_t i = 0; i < req->header_count; ++i) {
-        free(req->headers[i].name);
-        free(req->headers[i].value);
-    }
 }
 
 // Get request header value by name.
@@ -89,7 +73,7 @@ static const char* http_error_string(http_error_t code) {
     return "success";
 }
 
-http_error_t parse_request_headers(Request* req, const char* header_text, size_t length) {
+http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* header_text, size_t length) {
     const char* ptr = header_text;
     const char* end = ptr + length;
 
@@ -104,7 +88,7 @@ http_error_t parse_request_headers(Request* req, const char* header_text, size_t
             break;
 
         size_t name_len = colon - ptr;
-        char* name = malloc(name_len + 1);
+        char* name = mpool_alloc(pool, name_len + 1);
         if (!name) {
             return http_memory_alloc_failed;
         }
@@ -123,9 +107,8 @@ http_error_t parse_request_headers(Request* req, const char* header_text, size_t
             break;
 
         size_t value_len = eol - ptr;
-        char* value = malloc(value_len + 1);
+        char* value = mpool_alloc(pool, value_len + 1);
         if (!value) {
-            free(name);
             return http_memory_alloc_failed;
         }
 
@@ -243,13 +226,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     return strtoul(content_length_header + 15, nullptr, 10);
 }
 
-bool parse_url_query_params(char* query, map* query_params) {
-    map* queryParams = map_create(0, key_compare_char_ptr, true);
-    if (!queryParams) {
-        LOG_ERROR("Unable to allocate queryParams");
-        return false;
-    }
-
+bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params) {
     char* key = nullptr;
     char* value = nullptr;
     char *save_ptr, *save_ptr2;
@@ -261,17 +238,14 @@ bool parse_url_query_params(char* query, map* query_params) {
         value = strtok_r(nullptr, "=", &save_ptr2);
 
         if (key != nullptr && value != nullptr) {
-            char* queryName = strdup(key);
+            char* queryName = mpool_copy_str(pool, key);
             if (queryName == nullptr) {
-                perror("strdup");
                 success = false;
                 break;
             }
 
-            char* queryValue = strdup(value);
+            char* queryValue = mpool_copy_str(pool, value);
             if (queryValue == nullptr) {
-                free(queryName);
-                perror("strdup");
                 success = false;
                 break;
             }
@@ -284,10 +258,10 @@ bool parse_url_query_params(char* query, map* query_params) {
 }
 
 // Parse the URI, extracting path and query parameters
-static bool parse_uri(const char* decoded_uri, char** path, char** query, map** query_params) {
-    *path = strdup(decoded_uri);
+static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, char** query, map** query_params) {
+    // *path = strdup(decoded_uri);
+    *path = mpool_copy_str(pool, decoded_uri);
     if (!*path) {
-        LOG_ERROR("strdup failed");
         return false;
     }
 
@@ -296,14 +270,14 @@ static bool parse_uri(const char* decoded_uri, char** path, char** query, map** 
         **query = '\0';
         (*query)++;
 
-        *query_params = map_create(0, key_compare_char_ptr, true);
+        // key and value are allocated in pool and thus should not be freed.
+        bool free_entries = false;
+        *query_params = map_create(4, key_compare_char_ptr, free_entries);
         if (!*query_params) {
-            free(*path);
             return false;
         }
 
-        if (!parse_url_query_params(*query, *query_params)) {
-            free(*path);
+        if (!parse_url_query_params(pool, *query, *query_params)) {
             map_destroy(*query_params);
             return false;
         }
@@ -315,9 +289,9 @@ static bool parse_uri(const char* decoded_uri, char** path, char** query, map** 
 }
 
 // Allocate memory for the body and read it from the socket
-bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
+bool allocate_and_read_body(MemoryPool* pool, int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
                             const char* initial_body) {
-    *body = (uint8_t*)malloc(body_size + 1);
+    *body = (uint8_t*)mpool_alloc(pool, body_size + 1);
     if (!*body)
         return false;
 
@@ -336,7 +310,6 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
                 continue;
             } else {
                 perror("recv");
-                free(*body);
                 *body = nullptr;
                 return false;
             }
@@ -352,8 +325,8 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
 }
 
 // Initialize the request structure with parsed data
-void initialize_request(Request* req, uint8_t* body, size_t content_length, map* query_params, HttpMethod httpMethod,
-                        const char* http_version, const char* path) {
+void initialize_request(MemoryPool* pool, Request* req, uint8_t* body, size_t content_length, map* query_params,
+                        HttpMethod httpMethod, const char* http_version, const char* path) {
 
     req->body = body;
     req->content_length = content_length;
@@ -364,7 +337,7 @@ void initialize_request(Request* req, uint8_t* body, size_t content_length, map*
     strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
     req->http_version[sizeof(req->http_version) - 1] = '\0';
 
-    req->path = strdup(path);
+    req->path = mpool_copy_str(pool, path);
     LOG_ASSERT(req->path != nullptr, "malloc failed to allocate request path");
 }
 
@@ -399,7 +372,7 @@ int check_avx() {
 }
 
 // handle the request and send response.
-void process_request(Request* req) {
+void process_request(Request* req, MemoryPool* pool) {
     int client_fd = req->client_fd;
 
     char headers[4096];
@@ -417,27 +390,29 @@ void process_request(Request* req) {
 
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (inital_size <= 0) {
-        goto error;
+        http_error(client_fd, StatusBadRequest, "Error receiving data from client socket");
+        return;
     }
+
     headers[inital_size] = '\0';
 
     char *method, *uri, *http_version, *header_start, *end_of_headers;
     if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        goto error;
+        return;
     }
 
     httpMethod = method_fromstring(method);
     if (httpMethod == M_INVALID) {
         http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        goto error;
+        return;
     }
 
     // memmem  is slower than strstr but safer!
     end_of_headers = (char*)memmem(headers, inital_size, "\r\n\r\n", 4);
     if (!end_of_headers) {
         http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
-        goto error;
+        return;
     }
 
     header_capacity = end_of_headers - headers + 4;
@@ -445,36 +420,28 @@ void process_request(Request* req) {
 
     decode_uri(uri, decoded_uri, sizeof(decoded_uri));
 
-    if (!parse_uri(decoded_uri, &path, &query, &query_params)) {
+    if (!parse_uri(pool, decoded_uri, &path, &query, &query_params)) {
         http_error(client_fd, StatusInternalServerError, "error parsing query params");
-        goto error;
+        return;
     }
 
     req->route = default_route_matcher(httpMethod, path);
     if (req->route == nullptr && !handle_not_found(req, method, http_version, path)) {
-        goto error;
+        return;
     }
 
     total_read = inital_size - header_capacity;
     if (!is_safe_method(httpMethod) && body_size > 0) {
-        if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
+        if (!allocate_and_read_body(pool, client_fd, &body, body_size, total_read, headers + header_capacity)) {
             http_error(client_fd, StatusInternalServerError, "Failed to read request body");
-            goto error;
+            return;
         }
     }
 
-    initialize_request(req, body, body_size, query_params, httpMethod, http_version, path);
-    code = parse_request_headers(req, header_start, header_capacity - 4);
+    initialize_request(pool, req, body, body_size, query_params, httpMethod, http_version, path);
+
+    code = parse_request_headers(pool, req, header_start, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
-        goto error;
-    }
-
-    free(path);
-    return;
-
-error:
-    if (path) {
-        free(path);
     }
 }
