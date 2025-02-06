@@ -18,9 +18,9 @@
 #include <unistd.h>
 
 cleanup_func user_cleanup_func = nullptr;  // User-defined cleanup function
-EpollServer* srv = nullptr;
+EpollServer* srv = nullptr;                // global server object
 
-#define TASK_CAPACITY (MAXEVENTS / 2)  // global server object
+#define TASK_CAPACITY (MAXEVENTS / 2)
 Task taskPool[TASK_CAPACITY];
 
 static void initTasks(void) {

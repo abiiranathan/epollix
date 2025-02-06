@@ -11,7 +11,7 @@ static void test_parse_request_headers(void) {
     req->body = nullptr;
     req->content_length = 0;
     req->route = nullptr;
-    req->query_params = map_create(10, key_compare_char_ptr);
+    req->query_params = map_create(10, key_compare_char_ptr, true);
     req->header_count = 0;
     req->path = nullptr;
     req->method = M_GET;
@@ -73,7 +73,7 @@ static void test_header_fromstring(void) {
 
 // bool parse_url_query_params(char* query, map* query_params)
 static void test_parse_url_query_params(void) {
-    map* query_params = map_create(10, key_compare_char_ptr);
+    map* query_params = map_create(10, key_compare_char_ptr, true);
     LOG_ASSERT(query_params != nullptr, "Failed to create map for query_params");
 
     char* query = strdup("name=John&age=30&location=USA");
@@ -99,7 +99,7 @@ static void test_parse_url_query_params(void) {
     (void)location;
     LOG_INFO("test_parse_url_query_params passed");
 
-    map_destroy(query_params, true);
+    map_destroy(query_params);
     free(query);
 }
 

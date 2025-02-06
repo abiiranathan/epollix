@@ -42,7 +42,7 @@ void request_destroy(Request* req) {
         free(req->body);
 
     if (req->query_params)
-        map_destroy(req->query_params, true);
+        map_destroy(req->query_params);
 
     for (size_t i = 0; i < req->header_count; ++i) {
         free(req->headers[i].name);
@@ -244,7 +244,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
 }
 
 bool parse_url_query_params(char* query, map* query_params) {
-    map* queryParams = map_create(0, key_compare_char_ptr);
+    map* queryParams = map_create(0, key_compare_char_ptr, true);
     if (!queryParams) {
         LOG_ERROR("Unable to allocate queryParams");
         return false;
@@ -287,7 +287,7 @@ bool parse_url_query_params(char* query, map* query_params) {
 static bool parse_uri(const char* decoded_uri, char** path, char** query, map** query_params) {
     *path = strdup(decoded_uri);
     if (!*path) {
-        LOG_ERROR("malloc failed");
+        LOG_ERROR("strdup failed");
         return false;
     }
 
@@ -296,7 +296,7 @@ static bool parse_uri(const char* decoded_uri, char** path, char** query, map** 
         **query = '\0';
         (*query)++;
 
-        *query_params = map_create(0, key_compare_char_ptr);
+        *query_params = map_create(0, key_compare_char_ptr, true);
         if (!*query_params) {
             free(*path);
             return false;
@@ -304,7 +304,7 @@ static bool parse_uri(const char* decoded_uri, char** path, char** query, map** 
 
         if (!parse_url_query_params(*query, *query_params)) {
             free(*path);
-            map_destroy(*query_params, true);
+            map_destroy(*query_params);
             return false;
         }
     } else {
