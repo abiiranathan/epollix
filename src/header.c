@@ -42,10 +42,10 @@ header_t* header_fromstring(MemoryPool* pool, const char* str) {
     return header;
 }
 
-const char* find_header(header_t* headers, size_t count, const char* name) {
+const char* find_header(header_t** headers, size_t count, const char* name) {
     for (size_t i = 0; i < count; ++i) {
-        if (strcasecmp(headers[i].name, name) == 0) {
-            return headers[i].value;
+        if (strcasecmp(headers[i]->name, name) == 0) {
+            return headers[i]->value;
         }
     }
     return nullptr;

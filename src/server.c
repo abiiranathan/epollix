@@ -56,12 +56,22 @@ static void handleConnection(void* arg) {
     Response res;
     MemoryPool* pool = mpool_create(2 * 1024 * 1024);
     if (!pool) {
+        close_connection(task->client_fd, task->epoll_fd);
         PutTask(task);
         return;
     }
 
-    request_init(&req, task->client_fd, task->epoll_fd);
-    response_init(&res, task->client_fd);
+    if (!request_init(pool, &req, task->client_fd, task->epoll_fd)) {
+        close_connection(task->client_fd, task->epoll_fd);
+        PutTask(task);
+    }
+
+    if (!response_init(pool, &res, task->client_fd)) {
+        close_connection(task->client_fd, task->epoll_fd);
+        PutTask(task);
+        return;
+    };
+
     process_request(&req, pool);
 
     if (req.route != nullptr) {

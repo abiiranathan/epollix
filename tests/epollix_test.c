@@ -11,6 +11,9 @@ static void test_parse_request_headers(void) {
     Request* req = (Request*)malloc(sizeof(Request));
     LOG_ASSERT(req != nullptr, "Failed to allocate memory for request");
 
+    MemoryPool* pool = mpool_create(4096);
+    LOG_ASSERT(pool != nullptr, "Memory pool alloc failed");
+
     req->body = nullptr;
     req->content_length = 0;
     req->route = nullptr;
@@ -18,15 +21,14 @@ static void test_parse_request_headers(void) {
     req->header_count = 0;
     req->path = nullptr;
     req->method = M_GET;
-    memset(req->headers, 0, sizeof req->headers);
+    req->header_capacity = 36;
+    req->headers = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
 
+    LOG_ASSERT(req->headers != nullptr, "Failed to create headers");
     LOG_ASSERT(req->query_params != nullptr, "Failed to create map for query_params");
 
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
-
-    MemoryPool* pool = mpool_create(4096);
-    LOG_ASSERT(pool != nullptr, "Memory pool alloc failed");
 
     http_error_t result = parse_request_headers(pool, req, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");

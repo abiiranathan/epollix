@@ -1,6 +1,7 @@
 #ifndef C4C2FBAD_C23C_4F88_95D5_67AAD2406076
 #define C4C2FBAD_C23C_4F88_95D5_67AAD2406076
 
+#include <stddef.h>
 #define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 
@@ -13,18 +14,20 @@ extern "C" {
 #include "net.h"
 
 typedef struct response {
-    int client_fd;                      // Client fd.
-    http_status status;                 // Status code
-    uint8_t* data;                      // Response data as bytes.
-    bool headers_sent;                  // Headers already sent
-    bool chunked;                       // Is a chunked transfer
-    bool content_type_set;              // Whether content type header is set
-    size_t header_count;                // Number of headers set.
-    header_t headers[MAX_RES_HEADERS];  // Response headers
+    int client_fd;          // Client fd.
+    http_status status;     // Status code
+    uint8_t* data;          // Response data as bytes.
+    bool headers_sent;      // Headers already sent
+    bool chunked;           // Is a chunked transfer
+    bool content_type_set;  // Whether content type header is set
+
+    size_t header_capacity;  // Capacity of headers
+    size_t header_count;     // Number of headers set.
+    header_t** headers;      // Response headers
 } Response;
 
 // Create a new response object.
-void response_init(Response* res, int client_fd);
+bool response_init(MemoryPool* pool, Response* res, int client_fd);
 
 // Process the response.
 void process_response(context_t* ctx);

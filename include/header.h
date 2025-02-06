@@ -22,7 +22,7 @@ header_t* header_fromstring(MemoryPool* pool, const char* str);
 
 // Find the header_t value matching the name in the array of headers.
 // Returns nullptr if not found.
-const char* find_header(header_t* headers, size_t count, const char* name);
+const char* find_header(header_t** headers, size_t count, const char* name);
 
 // Find the index of the header matching name or -1 if not found.
 int find_header_index(header_t** headers, size_t count, const char* name);

@@ -19,21 +19,8 @@
 #define IDLE_TIMEOUT 5
 #endif
 
-#ifndef MAX_REQ_HEADERS
-#define MAX_REQ_HEADERS 32
-#endif
-
-#ifndef MAX_RES_HEADERS
-#define MAX_RES_HEADERS 12
-#endif
-
 #ifndef MAX_CONTEXT_LOCALS
 #define MAX_CONTEXT_LOCALS 8
-#endif
-
-// Size of the buffer to hold the response headers.
-#ifndef MAX_RES_HEADER_SIZE
-#define MAX_RES_HEADER_SIZE 512
 #endif
 
 // Max directory name length

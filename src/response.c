@@ -1,7 +1,7 @@
-#include <memory_pool.h>
 #define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 
+#include "../include/response.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -15,10 +15,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "../include/request.h"
-#include "../include/response.h"
 
 // Create a new response object.
-void response_init(Response* res, int client_fd) {
+bool response_init(MemoryPool* pool, Response* res, int client_fd) {
     res->client_fd = client_fd;
     res->status = StatusOK;
     res->data = nullptr;
@@ -26,25 +25,38 @@ void response_init(Response* res, int client_fd) {
     res->chunked = false;
     res->content_type_set = false;
     res->header_count = 0;
-    memset(res->headers, 0, sizeof res->headers);
+    res->header_capacity = 16;
+    res->headers = mpool_alloc(pool, sizeof(header_t*) * res->header_capacity);
+    return res->headers != NULL;
 }
 
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
-    if (ctx->response->header_count >= MAX_RES_HEADERS)
+    header_t* header = mpool_alloc(ctx->pool, sizeof(header_t));
+    if (!header)
         return false;
 
-    header_t header = {
-        .name = mpool_copy_str(ctx->pool, name),
-        .value = mpool_copy_str(ctx->pool, value),
-    };
+    header->name = mpool_copy_str(ctx->pool, name);
+    header->value = mpool_copy_str(ctx->pool, value);
 
-    if (!header.name || !header.value)
+    if (!header->name || !header->value)
         return false;
+
+    // Reallocate the headers
+    if (ctx->response->header_count == ctx->response->header_capacity) {
+        size_t capacity = ctx->response->header_capacity * 2;
+        header_t** headers = mpool_alloc(ctx->pool, sizeof(header_t*) * capacity);
+        if (!headers) {
+            return false;
+        }
+
+        memcpy(headers, ctx->response->headers, sizeof(header_t*) * ctx->response->header_count);
+        ctx->response->headers = headers;
+    }
 
     ctx->response->headers[ctx->response->header_count++] = header;
 
-    if (strcasecmp(name, CONTENT_TYPE_HEADER) == 0) {
+    if (strcasecmp(header->name, CONTENT_TYPE_HEADER) == 0) {
         ctx->response->content_type_set = true;
     }
     return true;
@@ -96,7 +108,7 @@ static void write_headers(context_t* ctx) {
         ctx->response->status = StatusOK;
     }
 
-    char header_res[MAX_RES_HEADER_SIZE];
+    char header_res[2048];
     char* current = header_res;
     size_t remaining = sizeof(header_res);
 
@@ -129,8 +141,8 @@ static void write_headers(context_t* ctx) {
 
     // Process headers
     for (size_t i = 0; i < ctx->response->header_count; i++) {
-        const char* name = ctx->response->headers[i].name;
-        const char* value = ctx->response->headers[i].value;
+        const char* name = ctx->response->headers[i]->name;
+        const char* value = ctx->response->headers[i]->value;
         const size_t name_len = strlen(name);
         const size_t value_len = strlen(value);
         const size_t header_space = name_len + 2 + value_len + 2;  // "Name: Value\r\n"

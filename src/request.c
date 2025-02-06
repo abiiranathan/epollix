@@ -1,8 +1,7 @@
-#include <memory_pool.h>
 #define _GNU_SOURCE
 
-#include "../include/middleware.h"
 #include "../include/request.h"
+#include "../include/middleware.h"
 #include "../include/route.h"
 
 #include <cpuid.h>
@@ -21,7 +20,7 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
-void request_init(Request* req, int client_fd, int epoll_fd) {
+bool request_init(MemoryPool* pool, Request* req, int client_fd, int epoll_fd) {
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
     req->path = nullptr;
@@ -31,7 +30,9 @@ void request_init(Request* req, int client_fd, int epoll_fd) {
     req->body = nullptr;
     req->header_count = 0;
     req->query_params = nullptr;
-    memset(req->headers, 0, sizeof req->headers);
+    req->header_capacity = 36;
+    req->headers = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
+    return req->headers != NULL;
 }
 
 // Get request header value by name.
@@ -78,8 +79,16 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
     const char* end = ptr + length;
 
     while (ptr < end) {
-        if (req->header_count >= MAX_REQ_HEADERS) {
-            return http_max_headers_exceeded;
+        // Reallocate the headers
+        if (req->header_count == req->header_capacity) {
+            size_t capacity = req->header_capacity * 2;
+            header_t** headers = mpool_alloc(pool, sizeof(header_t*) * capacity);
+            if (!headers) {
+                return false;
+            }
+
+            memcpy(headers, req->headers, sizeof(header_t*) * req->header_count);
+            req->headers = headers;
         }
 
         // Parse header name
@@ -114,7 +123,15 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
 
         memcpy(value, ptr, value_len);
         value[value_len] = '\0';
-        req->headers[req->header_count++] = (header_t){.name = name, .value = value};
+
+        header_t* header = mpool_alloc(pool, sizeof(header_t*));
+        if (!header) {
+            return http_memory_alloc_failed;
+        }
+        header->name = name;
+        header->value = value;
+
+        req->headers[req->header_count++] = header;
 
         ptr = eol + 2;  // Skip CRLF
     }
