@@ -55,8 +55,6 @@ pkg_check_modules(CIPHERKIT cipherkit)
 
 if(CIPHERKIT_FOUND)
   message(STATUS "Cipherkit found, middleware and example will be built")
-else()
-  message(STATUS "Cipherkit not found; it will be downloaded and built via ExternalProject")
 endif()
 
 # -----------------------------------------------------------------------------
@@ -144,7 +142,8 @@ target_link_libraries(epollix PUBLIC
 
 if(CIPHERKIT_FOUND)
   target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
-  # This variable is defined for pkg-config below, if needed
+
+  # variable for the .pc file
   set(CIPHERKIT_LIBRARIES_PC "-lcipherkit -lssl -lcrypto -lsodium -lcjson")
 endif()
 
@@ -154,12 +153,10 @@ endif()
 target_compile_options(epollix PUBLIC -Wall -Wextra -Werror)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-  message(STATUS "Using Clang, adding -fblocks support")
   target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)
   target_link_libraries(epollix PUBLIC BlocksRuntime)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    message(STATUS "Using GCC, adding security flags")
     target_compile_options(epollix PUBLIC -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC)
   endif()
 endif()
