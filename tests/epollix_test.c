@@ -6,18 +6,18 @@
 // test parse request headers
 static void test_parse_request_headers(void) {
     Request* req = (Request*)malloc(sizeof(Request));
-    LOG_ASSERT(req != NULL, "Failed to allocate memory for request");
+    LOG_ASSERT(req != nullptr, "Failed to allocate memory for request");
 
-    req->body = NULL;
+    req->body = nullptr;
     req->content_length = 0;
-    req->route = NULL;
+    req->route = nullptr;
     req->query_params = map_create(10, key_compare_char_ptr);
     req->header_count = 0;
-    req->path = NULL;
+    req->path = nullptr;
     req->method = M_GET;
     memset(req->headers, 0, sizeof req->headers);
 
-    LOG_ASSERT(req->query_params != NULL, "Failed to create map for query_params");
+    LOG_ASSERT(req->query_params != nullptr, "Failed to create map for query_params");
 
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length = strlen(header_text);
@@ -74,27 +74,27 @@ static void test_header_fromstring(void) {
 // bool parse_url_query_params(char* query, map* query_params)
 static void test_parse_url_query_params(void) {
     map* query_params = map_create(10, key_compare_char_ptr);
-    LOG_ASSERT(query_params != NULL, "Failed to create map for query_params");
+    LOG_ASSERT(query_params != nullptr, "Failed to create map for query_params");
 
     char* query = strdup("name=John&age=30&location=USA");
-    LOG_ASSERT(query != NULL, "Failed to allocate memory for query");
+    LOG_ASSERT(query != nullptr, "Failed to allocate memory for query");
 
     bool result = parse_url_query_params(query, query_params);
     LOG_ASSERT(result, "Failed to parse query params");
     (void)result;
 
     const char* name = map_get(query_params, "name");
-    LOG_ASSERT(name != NULL, "Failed to get name");
+    LOG_ASSERT(name != nullptr, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John") == 0, "Expected John");
     (void)name;
 
     const char* age = map_get(query_params, "age");
-    LOG_ASSERT(age != NULL, "Failed to get age");
+    LOG_ASSERT(age != nullptr, "Failed to get age");
     LOG_ASSERT(strcmp(age, "30") == 0, "Expected 30");
     (void)age;
 
     const char* location = map_get(query_params, "location");
-    LOG_ASSERT(location != NULL, "Failed to get location");
+    LOG_ASSERT(location != nullptr, "Failed to get location");
     LOG_ASSERT(strcmp(location, "USA") == 0, "Expected USA");
     (void)location;
     LOG_INFO("test_parse_url_query_params passed");
@@ -117,10 +117,10 @@ static void test_match_params(void) {
     const char* name = get_path_param(&pathParams, "name");
     const char* id = get_path_param(&pathParams, "id");
 
-    LOG_ASSERT(name != NULL, "Failed to get name");
+    LOG_ASSERT(name != nullptr, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John Doe") == 0, "Expected John Doe");
 
-    LOG_ASSERT(id != NULL, "Failed to get id");
+    LOG_ASSERT(id != nullptr, "Failed to get id");
     LOG_ASSERT(strcmp(id, "123") == 0, "Expected 123");
 
     (void)matches;

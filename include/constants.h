@@ -5,7 +5,7 @@
 
 // Maximum number of epoll events to process in one go.
 #ifndef MAXEVENTS
-#define MAXEVENTS 128
+#define MAXEVENTS 4096
 #endif
 
 // Determines the buffer size to read from the socket initially.

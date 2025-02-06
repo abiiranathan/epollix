@@ -21,7 +21,7 @@ void enable_directory_browsing(bool enable) {
 
 static void send_error_page(context_t* ctx, http_status status) {
     const char* status_str = http_status_text(status);
-    char* error_page = NULL;
+    char* error_page = nullptr;
     int ret = asprintf(&error_page, "<html><head><title>%d %s</title></head><body><h1>%d %s</h1></body></html>", status,
                        status_str, status, status_str);
     if (ret == -1) {
@@ -124,7 +124,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         append_or_error(ctx, arena, html_response, "\">");
         append_or_error(ctx, arena, html_response, token);
         append_or_error(ctx, arena, html_response, "</a>");
-        token = strtok(NULL, "/");
+        token = strtok(nullptr, "/");
     }
     free(path);
 
@@ -133,8 +133,8 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
                     "<table>"
                     "<tr><th>Name</th><th>Size</th></tr>");
 
-    if ((dir = opendir(dirname)) != NULL) {
-        while ((ent = readdir(dir)) != NULL) {
+    if ((dir = opendir(dirname)) != nullptr) {
+        while ((ent = readdir(dir)) != nullptr) {
             if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
                 append_or_error(ctx, arena, html_response, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"");
                 // Add base prefix if we are not using / as static prefix.

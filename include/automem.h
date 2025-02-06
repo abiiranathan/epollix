@@ -26,7 +26,7 @@ static inline void automem_free(void* ptr) {
     void** p = (void**)ptr;
     if (*p) {
         free(*p);
-        *p = NULL;
+        *p = nullptr;
     }
 }
 
@@ -36,7 +36,7 @@ static inline void autoclose_file(void* ptr) {
     FILE** p = (FILE**)ptr;
     if (*p) {
         fclose(*p);
-        *p = NULL;
+        *p = nullptr;
     }
 }
 

@@ -20,7 +20,7 @@
 void response_init(Response* res, int client_fd) {
     res->client_fd = client_fd;
     res->status = StatusOK;
-    res->data = NULL;
+    res->data = nullptr;
     res->headers_sent = false;
     res->chunked = false;
     res->content_type_set = false;
@@ -91,12 +91,11 @@ void process_response(context_t* ctx) {
     free(combined_middleware);
 }
 
-// Optimized header writing function
 static void write_headers(context_t* ctx) {
     if (ctx->response->headers_sent)
         return;
 
-    // Set default status code
+    // Set default status code if not set
     if (ctx->response->status == 0) {
         ctx->response->status = StatusOK;
     }
@@ -105,95 +104,74 @@ static void write_headers(context_t* ctx) {
     char* current = header_res;
     size_t remaining = sizeof(header_res);
 
-    // Efficient status line writing
-    const char* status_text = http_status_text(ctx->response->status);
-
-    // Manually copy HTTP version
-    memcpy(current, "HTTP/1.1 ", 9);
-    current += 9;
-    remaining -= 9;
-
-    // Convert status code to string manually
+    // Precompute status code digits (3 characters)
     unsigned int status = ctx->response->status;
-    char status_code[4];
-    int status_len = 0;
-    do {
-        status_code[status_len++] = '0' + (status % 10);
-        status /= 10;
-    } while (status > 0);
+    char status_code[3] = {'0' + (status / 100), '0' + ((status / 10) % 10), '0' + (status % 10)};
 
-    // Reverse the status code string
-    for (int i = 0; i < status_len / 2; i++) {
-        char temp = status_code[i];
-        status_code[i] = status_code[status_len - 1 - i];
-        status_code[status_len - 1 - i] = temp;
-    }
-
-    // Copy status code
-    memcpy(current, status_code, status_len);
-    current += status_len;
-    remaining -= status_len;
-
-    // Add space
-    *current++ = ' ';
-    remaining--;
-
-    // Copy status text
+    // Get status text and length
+    const char* status_text = http_status_text(status);
     size_t status_text_len = strlen(status_text);
-    memcpy(current, status_text, status_text_len);
-    current += status_text_len;
-    remaining -= status_text_len;
 
-    // Add CRLF
-    memcpy(current, "\r\n", 2);
-    current += 2;
-    remaining -= 2;
-
-    // Add headers
-    for (size_t i = 0; i < ctx->response->header_count; i++) {
-        // Copy header name
-        size_t name_len = strlen(ctx->response->headers[i].name);
-        memcpy(current, ctx->response->headers[i].name, name_len);
-        current += name_len;
-        remaining -= name_len;
-
-        // Add ": "
-        memcpy(current, ": ", 2);
-        current += 2;
-        remaining -= 2;
-
-        // Copy header value
-        size_t value_len = strlen(ctx->response->headers[i].value);
-        memcpy(current, ctx->response->headers[i].value, value_len);
-        current += value_len;
-        remaining -= value_len;
-
-        // Add CRLF
-        memcpy(current, "\r\n", 2);
-        current += 2;
-        remaining -= 2;
-    }
-
-    // Append the end of the headers
-    if (remaining < 3) {
-        LOG_ERROR("No space for final CRLF");
+    // Calculate status line space requirements
+    const size_t status_line_len = 9 + 3 + 1 + status_text_len + 2;  // "HTTP/1.1 200 OK\r\n"
+    if (remaining < status_line_len) {
+        LOG_ERROR("Status line too long for buffer");
         return;
     }
 
+    // Build status line
+    memcpy(current, "HTTP/1.1 ", 9);
+    current += 9;
+    memcpy(current, status_code, 3);
+    current += 3;
+    *current++ = ' ';
+    memcpy(current, status_text, status_text_len);
+    current += status_text_len;
     memcpy(current, "\r\n", 2);
     current += 2;
-    *current = '\0';
+    remaining = sizeof(header_res) - (current - header_res);
 
-    // Send the response headers
-    int nbytes_sent = sendall(ctx->response->client_fd, header_res, strlen(header_res));
-    if (nbytes_sent == -1) {
-        if (errno == EBADF) {
-            // Can happen if the client closes the connection before the response is sent.
-            // We can safely ignore this error.
-        } else {
-            LOG_ERROR("%s, fd: %d", strerror(errno), ctx->response->client_fd);
+    // Process headers
+    for (size_t i = 0; i < ctx->response->header_count; i++) {
+        const char* name = ctx->response->headers[i].name;
+        const char* value = ctx->response->headers[i].value;
+        const size_t name_len = strlen(name);
+        const size_t value_len = strlen(value);
+        const size_t header_space = name_len + 2 + value_len + 2;  // "Name: Value\r\n"
+
+        if (remaining < header_space) {
+            LOG_ERROR("Out of buffer space for headers");
+            break;
         }
+
+        memcpy(current, name, name_len);
+        current += name_len;
+        memcpy(current, ": ", 2);
+        current += 2;
+        memcpy(current, value, value_len);
+        current += value_len;
+        memcpy(current, "\r\n", 2);
+        current += 2;
+        remaining -= header_space;
     }
+
+    // Add final CRLF
+    if (remaining >= 2) {
+        memcpy(current, "\r\n", 2);
+        current += 2;
+    } else {
+        LOG_ERROR("Insufficient space for final CRLF");
+        return;
+    }
+
+    // Calculate total length and send
+    const size_t total_len = current - header_res;
+    const int nbytes_sent = sendall(ctx->response->client_fd, header_res, total_len);
+
+    if (nbytes_sent == -1 && errno != EBADF) {
+        LOG_ERROR("Send error: %s, fd: %d", strerror(errno), ctx->response->client_fd);
+    }
+
     ctx->response->headers_sent = nbytes_sent != -1;
 }
 
@@ -229,7 +207,7 @@ int send_string(context_t* ctx, const char* data) {
 __attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    char* buffer = NULL;
+    char* buffer = nullptr;
 
     // Determine the required buffer size
     // See man vsnprintf for more information
@@ -354,10 +332,10 @@ static void send_range_headers(context_t* ctx, ssize_t start, ssize_t end, off64
 
 // ==================== sendfile =============================
 // Helper function prototypes
-bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range);
-bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t file_size);
-ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request);
-void set_content_disposition(context_t* ctx, const char* filename);
+static inline bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range);
+static inline bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t file_size);
+static inline ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request);
+static inline void set_content_disposition(context_t* ctx, const char* filename);
 
 // Main function to serve a file
 int servefile(context_t* ctx, const char* filename) {
@@ -459,7 +437,7 @@ int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* fi
 
 // Parses the Range header and extracts start and end values
 bool parse_range(const char* range_header, ssize_t* start, ssize_t* end, bool* has_end_range) {
-    if (strstr(range_header, "bytes=") != NULL) {
+    if (strstr(range_header, "bytes=") != nullptr) {
         if (sscanf(range_header, "bytes=%ld-%ld", start, end) == 2) {
             *has_end_range = true;
             return true;

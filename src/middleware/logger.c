@@ -22,7 +22,7 @@
 #define COLOR_WHITE "\x1b[37m]"
 
 // File where the logs will be written
-FILE* log_file = NULL;
+FILE* log_file = nullptr;
 
 // Default global log flags
 LogFlag log_flags = LOG_DEFAULT;
@@ -45,7 +45,7 @@ void epollix_logger(context_t* ctx, Handler next) {
         return;
     }
 
-    if (log_file == NULL) {
+    if (log_file == nullptr) {
         log_file = stdout;
     }
 
@@ -61,7 +61,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Date and time
     if (log_flags & (LOG_DATE | LOG_TIME)) {
-        time_t raw_time = time(NULL);
+        time_t raw_time = time(nullptr);
         struct tm* tm_info = localtime(&raw_time);
         if (log_flags & LOG_DATE) {
             buffer_offset +=

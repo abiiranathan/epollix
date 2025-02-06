@@ -49,14 +49,14 @@ void free_locals(context_t* ctx) {
     }
 }
 
-// Get a value from the context. Returns NULL if the key does not exist.
+// Get a value from the context. Returns nullptr if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key) {
     for (size_t i = 0; i < ctx->locals_count; ++i) {
         if (strcmp(ctx->locals[i].key, key) == 0) {
             return ctx->locals[i].value;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 void enable_keepalive(int sockfd) {

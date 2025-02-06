@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "../include/request.h"
 #include "../include/middleware.h"
 #include "../include/route.h"
@@ -5,14 +7,12 @@
 #include <cpuid.h>
 #include <ctype.h>
 #include <errno.h>
-#include <immintrin.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <xmmintrin.h>
 
 // Not found route.
-Route* notFoundRoute = NULL;
+Route* notFoundRoute = nullptr;
 
 typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderState;
 
@@ -22,13 +22,13 @@ extern void http_error(int client_fd, http_status status, const char* message);
 void request_init(Request* req, int client_fd, int epoll_fd) {
     req->client_fd = client_fd;
     req->epoll_fd = epoll_fd;
-    req->path = NULL;
+    req->path = nullptr;
     req->method = M_INVALID;
-    req->route = NULL;
+    req->route = nullptr;
     req->content_length = 0;
-    req->body = NULL;
+    req->body = nullptr;
     req->header_count = 0;
-    req->query_params = NULL;
+    req->query_params = nullptr;
     memset(req->headers, 0, sizeof req->headers);
 }
 
@@ -62,7 +62,7 @@ const char* get_content_type(Request* req) {
 
 const char* get_param(Request* req, const char* name) {
     if (!req->route->params) {
-        return NULL;
+        return nullptr;
     }
     return get_path_param(req->route->params, name);
 }
@@ -70,7 +70,7 @@ const char* get_param(Request* req, const char* name) {
 // Get the value of a query parameter by name.
 const char* get_query_param(Request* req, const char* name) {
     if (!req->query_params) {
-        return NULL;
+        return nullptr;
     }
 
     return map_get(req->query_params, (void*)name);
@@ -180,9 +180,9 @@ char* encode_uri(const char* str) {
     size_t src_len = strlen(str);
     size_t capacity = src_len * 3 + 1;
     char* encoded_str = (char*)malloc(capacity);
-    if (encoded_str == NULL) {
+    if (encoded_str == nullptr) {
         perror("memory allocation failed");
-        return NULL;
+        return nullptr;
     }
 
     const char* hex = "0123456789ABCDEF";  // hexadecimal digits for percent-encoding
@@ -240,7 +240,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     if (!content_length_header || content_length_header >= end_of_headers) {
         return 0;
     }
-    return strtoul(content_length_header + 15, NULL, 10);
+    return strtoul(content_length_header + 15, nullptr, 10);
 }
 
 bool parse_url_query_params(char* query, map* query_params) {
@@ -250,26 +250,26 @@ bool parse_url_query_params(char* query, map* query_params) {
         return false;
     }
 
-    char* key = NULL;
-    char* value = NULL;
+    char* key = nullptr;
+    char* value = nullptr;
     char *save_ptr, *save_ptr2;
     bool success = true;
 
     char* token = strtok_r(query, "&", &save_ptr);
-    while (token != NULL) {
+    while (token != nullptr) {
         key = strtok_r(token, "=", &save_ptr2);
-        value = strtok_r(NULL, "=", &save_ptr2);
+        value = strtok_r(nullptr, "=", &save_ptr2);
 
-        if (key != NULL && value != NULL) {
+        if (key != nullptr && value != nullptr) {
             char* queryName = strdup(key);
-            if (queryName == NULL) {
+            if (queryName == nullptr) {
                 perror("strdup");
                 success = false;
                 break;
             }
 
             char* queryValue = strdup(value);
-            if (queryValue == NULL) {
+            if (queryValue == nullptr) {
                 free(queryName);
                 perror("strdup");
                 success = false;
@@ -278,7 +278,7 @@ bool parse_url_query_params(char* query, map* query_params) {
 
             map_set(query_params, queryName, queryValue);
         }
-        token = strtok_r(NULL, "&", &save_ptr);
+        token = strtok_r(nullptr, "&", &save_ptr);
     }
     return success;
 }
@@ -308,7 +308,7 @@ static bool parse_uri(const char* decoded_uri, char** path, char** query, map** 
             return false;
         }
     } else {
-        *query_params = NULL;
+        *query_params = nullptr;
     }
 
     return true;
@@ -337,7 +337,7 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
             } else {
                 perror("recv");
                 free(*body);
-                *body = NULL;
+                *body = nullptr;
                 return false;
             }
         } else if (count == 0) {
@@ -365,7 +365,7 @@ void initialize_request(Request* req, uint8_t* body, size_t content_length, map*
     req->http_version[sizeof(req->http_version) - 1] = '\0';
 
     req->path = strdup(path);
-    LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
+    LOG_ASSERT(req->path != nullptr, "malloc failed to allocate request path");
 }
 
 // Handle the case when a route is not found
@@ -398,43 +398,20 @@ int check_avx() {
     return ecx & bit_AVX;
 }
 
-__attribute__((target("avx2"))) inline void fast_bzero(void* ptr, size_t size) {
-    // Use standard implementation if vector size is too small
-    if (size < 32) {
-        memset(ptr, 0, size);
-        return;
-    }
-
-    char* p = (char*)ptr;
-    size_t vec_size = size & ~31ULL;
-    size_t rem_size = size & 31ULL;
-
-    __m256i zero = _mm256_setzero_si256();
-
-    for (size_t i = 0; i < vec_size; i += 32) {
-        _mm256_storeu_si256((__m256i*)(p + i), zero);
-    }
-
-    // Handle remaining bytes
-    for (size_t i = 0; i < rem_size; ++i) {
-        p[vec_size + i] = 0;
-    }
-}
-
 // handle the request and send response.
 void process_request(Request* req) {
     int client_fd = req->client_fd;
 
-    char headers[4096] = {};
+    char headers[4096];
 
-    char* path = NULL;                  // Request path
-    char* query = NULL;                 // Query string
-    map* query_params = NULL;           // Query parameters
-    uint8_t* body = NULL;               // Request body (dynamically allocated)
+    char* path = nullptr;               // Request path
+    char* query = nullptr;              // Query string
+    map* query_params = nullptr;        // Query parameters
+    uint8_t* body = nullptr;            // Request body (dynamically allocated)
     size_t total_read = 0;              // Total bytes read
     HttpMethod httpMethod = M_INVALID;  // Http method
     http_error_t code = http_ok;        // Error code
-    char decoded_uri[1024] = {};        // Decoded URI (e.g., "/path/to/resource?query=string")
+    char decoded_uri[1024];             // Decoded URI (e.g., "/path/to/resource?query=string")
     size_t header_capacity = 0;         // Size of the headers in the buffer (including the initial read)
     size_t body_size = 0;               // Size of the request body (from the Content-Length header)
 
@@ -474,7 +451,7 @@ void process_request(Request* req) {
     }
 
     req->route = default_route_matcher(httpMethod, path);
-    if (req->route == NULL && !handle_not_found(req, method, http_version, path)) {
+    if (req->route == nullptr && !handle_not_found(req, method, http_version, path)) {
         goto error;
     }
 

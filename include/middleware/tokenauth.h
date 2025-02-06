@@ -21,7 +21,7 @@ extern "C" {
 // secret key to sign the token.
 void BearerAuthMiddleware(context_t* ctx, Handler next);
 
-// Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.
+// Returns a pointer to the JWT payload stored in the context_t object or nullptr if the payload is not found.
 const JWTPayload* get_jwt_payload(context_t* ctx);
 
 #ifdef __cplusplus

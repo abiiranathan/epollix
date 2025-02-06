@@ -22,6 +22,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(GNUInstallDirs)
 include(CTest)
 include(FetchContent)
+include(ExternalProject)
+
 enable_testing()
 
 # Option to build tests (default ON)
@@ -39,20 +41,22 @@ if(NOT solidc_FOUND)
   FetchContent_Declare(
     solidc
     GIT_REPOSITORY https://github.com/abiiranathan/solidc.git
-    GIT_TAG main  # You can change this to a specific commit, tag, or branch
+    GIT_TAG main
   )
   FetchContent_MakeAvailable(solidc)
 endif()
 
 
+# -----------------------------------------------------------------------------
 # Find Cipherkit using pkg-config
+# -----------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CIPHERKIT cipherkit)
 
 if(CIPHERKIT_FOUND)
   message(STATUS "Cipherkit found, middleware and example will be built")
 else()
-  message(STATUS "Cipherkit not found, middleware and example will not be built")
+  message(STATUS "Cipherkit not found; it will be downloaded and built via ExternalProject")
 endif()
 
 # -----------------------------------------------------------------------------
@@ -151,7 +155,7 @@ target_compile_options(epollix PUBLIC -Wall -Wextra -Werror)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
   message(STATUS "Using Clang, adding -fblocks support")
-  target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks -mavx2 -msse4.1)
+  target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)
   target_link_libraries(epollix PUBLIC BlocksRuntime)
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_BUILD_TYPE STREQUAL "Release")

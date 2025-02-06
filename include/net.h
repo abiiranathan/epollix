@@ -44,7 +44,7 @@ char* get_ip_address(context_t* ctx);
 void set_context_value(context_t* ctx, const char* key, void* value);
 
 // Get a value stored by  a call to `set_context_value` from the context.
-// Returns NULL if the key does not exist.
+// Returns nullptr if the key does not exist.
 void* get_context_value(context_t* ctx, const char* key);
 
 void free_locals(context_t* ctx);

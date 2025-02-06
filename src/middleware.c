@@ -6,7 +6,7 @@
 
 Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE] = {};  // Global middleware
 size_t global_middleware_count = 0;                        // Number of global middleware
-static map* global_middleware_context = NULL;              // Global middleware context
+static map* global_middleware_context = nullptr;           // Global middleware context
 
 void middleware_init(void) {
     global_middleware_context = map_create(10, key_compare_char_ptr);
@@ -28,9 +28,9 @@ void set_middleware_context(Route* route, void* userdata) {
 
 // Set route middleware context or userdata.
 void set_global_mw_context(const char* key, void* userdata) {
-    if (global_middleware_context == NULL) {
+    if (global_middleware_context == nullptr) {
         global_middleware_context = map_create(8, key_compare_char_ptr);
-        if (global_middleware_context == NULL) {
+        if (global_middleware_context == nullptr) {
             LOG_ERROR("unable to create map for global middleware context");
             return;
         }
@@ -45,8 +45,8 @@ void set_global_mw_context(const char* key, void* userdata) {
 }
 
 void* get_global_middleware_context(const char* key) {
-    if (global_middleware_context == NULL) {
-        return NULL;
+    if (global_middleware_context == nullptr) {
+        return nullptr;
     }
     return map_get(global_middleware_context, (char*)key);
 }

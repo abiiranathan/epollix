@@ -102,7 +102,7 @@ be reset to zero;
 require that either the entire data area is zeroed or, in the case of
 .BR crypt_ra ,
 .I *data
-is NULL.  When called with a NULL
+is nullptr.  When called with a nullptr
 .I *data
 or insufficient
 .I *size
@@ -114,7 +114,7 @@ to allocate the required amount of memory dynamically.  Thus,
 .B crypt_ra
 has the additional requirement that
 .IR *data ,
-when non-NULL, must point to an area allocated either with a previous
+when non-nullptr, must point to an area allocated either with a previous
 call to
 .B crypt_ra
 or with a
@@ -176,15 +176,15 @@ The behavior of
 .B crypt
 on errors isn't well standardized.  Some implementations simply can't fail
 (unless the process dies, in which case they obviously can't return),
-others return NULL or a fixed string.  Most implementations don't set
+others return nullptr or a fixed string.  Most implementations don't set
 .IR errno ,
-but some do.  SUSv2 specifies only returning NULL and setting
+but some do.  SUSv2 specifies only returning nullptr and setting
 .I errno
 as a valid behavior, and defines only one possible error
 .RB "(" ENOSYS ,
 "The functionality is not supported on this implementation.")
 Unfortunately, most existing applications aren't prepared to handle
-NULL returns from
+nullptr returns from
 .BR crypt .
 The description below corresponds to this implementation of
 .BR crypt " and " crypt_r
@@ -204,7 +204,7 @@ This behavior is safe for older applications which assume that
 can't fail, when both setting new passwords and authenticating against
 existing password hashes.
 .BR crypt_rn " and " crypt_ra
-return NULL to indicate failure.  All four functions set
+return nullptr to indicate failure.  All four functions set
 .I errno
 when they fail.
 .PP
@@ -212,7 +212,7 @@ The functions
 .crypt_gensalt and
 return a pointer to the compiled string for
 .IR setting ,
-or NULL on error in which case
+or nullptr on error in which case
 .I errno
 is set.
 .SH ERRORS
@@ -233,7 +233,7 @@ the input
 is insufficient for the smallest valid salt with the requested
 .IR prefix ;
 .I input
-is NULL.
+is nullptr.
 .TP
 .B ERANGE
 .BR crypt_rn :
@@ -255,7 +255,7 @@ would re-use);
 .sp
 .BR crypt_ra :
 .I *data
-is NULL or
+is nullptr or
 .I *size
 is insufficient for the requested hashing algorithm and
 .BR realloc (3)

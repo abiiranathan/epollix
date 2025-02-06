@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
+// #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
 #include <solidc/cstr.h>
 #include <solidc/filepath.h>
 #include <solidc/thread.h>
@@ -17,35 +17,49 @@
 #include <sys/sendfile.h>
 #include <unistd.h>
 
-static void close_connection(int client_fd, int epoll_fd) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-    close(client_fd);
+cleanup_func user_cleanup_func = nullptr;  // User-defined cleanup function
+EpollServer* srv = nullptr;
+
+#define TASK_CAPACITY (MAXEVENTS / 2)  // global server object
+Task taskPool[TASK_CAPACITY];
+
+static void initTasks(void) {
+    for (int i = 0; i < TASK_CAPACITY; i++) {
+        taskPool[i].client_fd = -1;
+        taskPool[i].epoll_fd = -1;
+    }
 }
 
-cleanup_func user_cleanup_func = NULL;  // User-defined cleanup function
-EpollServer* srv = NULL;                // global server object
-
-// Allocate memory for new task.
-Task* newTask(int client_fd, int epoll_fd) {
-    Task* task = (Task*)malloc(sizeof(Task));
-    if (task == NULL) {
-        return NULL;
+static Task* getFreeTask(void) {
+    for (int i = 0; i < TASK_CAPACITY; i++) {
+        if (taskPool[i].client_fd == -1) {
+            return &taskPool[i];
+        }
     }
+    return NULL;
+}
 
-    task->client_fd = client_fd;
-    task->epoll_fd = epoll_fd;
-    return task;
+static void PutTask(Task* task) {
+    task->client_fd = -1;
+    task->epoll_fd = -1;
+}
+
+static inline void close_connection(int client_fd, int epoll_fd) {
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
+    close(client_fd);
 }
 
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
-    Request req = {0};
-    Response res = {0};
+
+    Request req;
+    Response res;
+
     request_init(&req, task->client_fd, task->epoll_fd);
     response_init(&res, task->client_fd);
     process_request(&req);
 
-    if (req.route != NULL) {
+    if (req.route != nullptr) {
         // shutdown read end of the socket
         shutdown(task->client_fd, SHUT_RD);
         context_t ctx = {.request = &req, .response = &res};
@@ -59,7 +73,8 @@ static void handleConnection(void* arg) {
     close_connection(task->client_fd, task->epoll_fd);
     request_destroy(&req);
     response_destroy(&res);
-    free(task);
+
+    PutTask(task);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -99,7 +114,7 @@ void http_error(int client_fd, http_status status, const char* message) {
 
     if (message_length >= max_message_length) {
         // use asprintf to allocate memory for the message if it's too long
-        char* msg = NULL;
+        char* msg = nullptr;
         int ret = asprintf(&msg, fmt, status, status_str, message_length, message);
         if (ret < 0) {
             LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
@@ -129,13 +144,13 @@ static int setup_server_socket(const char* port) {
     hints.ai_socktype = SOCK_STREAM; /* We want a TCP socket */
     hints.ai_flags = AI_PASSIVE;     /* All interfaces */
 
-    s = getaddrinfo(NULL, port, &hints, &result);
+    s = getaddrinfo(nullptr, port, &hints, &result);
     if (s != 0) {
         LOG_ERROR("getaddrinfo: %s", gai_strerror(s));
         return -1;
     }
 
-    for (rp = result; rp != NULL; rp = rp->ai_next) {
+    for (rp = result; rp != nullptr; rp = rp->ai_next) {
         sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sfd == -1)
             continue;
@@ -156,7 +171,7 @@ static int setup_server_socket(const char* port) {
         close(sfd);
     }
 
-    if (rp == NULL) {
+    if (rp == nullptr) {
         LOG_ERROR("Could not bind");
         return -1;
     }
@@ -168,8 +183,8 @@ static int setup_server_socket(const char* port) {
 // Create a new EpollServer.
 EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_func cf) {
     EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
-    if (server == NULL) {
-        return NULL;
+    if (server == nullptr) {
+        return nullptr;
     }
 
     int port_int = atoi(port);
@@ -187,9 +202,9 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_f
     server->cleanup = cf;
     server->port = port_int;
     server->pool = threadpool_create(num_workers);
-    if (server->pool == NULL) {
+    if (server->pool == nullptr) {
         free(server);
-        return NULL;
+        return nullptr;
     }
 
     middleware_init();
@@ -235,7 +250,7 @@ static void install_signal_handler(void) {
     sa.sa_flags = 0;
 
     // See man 2 sigaction for more information.
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    if (sigaction(SIGINT, &sa, nullptr) == -1) {
         LOG_FATAL("unable to call sigaction\n");
     };
 
@@ -275,6 +290,7 @@ int epoll_server_listen(EpollServer* server) {
 
     // Install signal handler for SIGINT and SIGTERM
     install_signal_handler();
+    initTasks();
 
     /* The event loop */
     while (true) {
@@ -316,30 +332,46 @@ int epoll_server_listen(EpollServer* server) {
                         continue;
                     }
 
-                    // Disable Nagle's algorithm for the client socket
-                    int flag = 1;
-                    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+                    // Only disable based on configuation
+                    // // Disable Nagle's algorithm for the client socket
+                    // int flag = 1;
+                    // setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 
                     // Enable keepalive for the client socket
-                    enable_keepalive(client_fd);
+                    // enable_keepalive(client_fd);
 
+                    // TODO: Pass timeout as a configuration
                     struct timeval timeout;
                     timeout.tv_sec = 5;  // 5 seconds timeout
                     timeout.tv_usec = 0;
                     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
                 }
             } else {
+                int taskRetries = 10;
+
                 // client socket is ready for reading
                 if (events[i].events & EPOLLIN) {
-                    Task* task = newTask(events[i].data.fd, server->epoll_fd);
+                    Task* task = NULL;
+                    while ((task = getFreeTask()) == NULL) {
+                        taskRetries--;
+                        usleep(1000);
+
+                        if (taskRetries == 0) {
+                            LOG_ERROR("Failed to get a free task from the pool");
+                            http_error(events[i].data.fd, StatusInternalServerError, "Internal server error");
+                            close_connection(events[i].data.fd, server->epoll_fd);
+                            break;
+                        }
+                    }
+
+                    // we failed to get a free task even after waiting
                     if (!task) {
-                        LOG_ERROR("Failed to get a free task from the pool");
-                        http_error(events[i].data.fd, StatusInternalServerError, "Internal server error");
-                        close_connection(events[i].data.fd, server->epoll_fd);
                         continue;
                     }
 
-                    threadpool_add_task(server->pool, handleConnection, task);
+                    task->client_fd = events[i].data.fd;
+                    task->epoll_fd = server->epoll_fd;
+                    threadpool_submit(server->pool, handleConnection, task);
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
                     close_connection(events[i].data.fd, server->epoll_fd);
                 }
@@ -373,7 +405,7 @@ static void epoll_server_shutdown(EpollServer* server) {
     }
 
     free(server);
-    server = NULL;
+    server = nullptr;
 }
 
 // Destructor extension for gcc and clang.

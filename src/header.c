@@ -8,18 +8,18 @@
 header_t* header_fromstring(const char* str) {
     const char* colon = strchr(str, ':');
     if (!colon || colon == str) {
-        return NULL;
+        return nullptr;
     }
 
     size_t name_length = colon - str;
     header_t* header = malloc(sizeof(header_t));
     if (!header) {
-        return NULL;
+        return nullptr;
     }
 
     char* name = malloc(name_length + 1);
     if (!name) {
-        return NULL;
+        return nullptr;
     }
     memcpy(name, str, name_length);
     name[name_length] = '\0';
@@ -33,7 +33,7 @@ header_t* header_fromstring(const char* str) {
     size_t value_length = strlen(value_start);
     char* value = malloc(value_length + 1);
     if (!value) {
-        return NULL;
+        return nullptr;
     }
 
     memcpy(value, value_start, value_length);
@@ -48,7 +48,7 @@ char* find_header(header_t* headers, size_t count, const char* name) {
             return headers[i].value;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 int find_header_index(header_t** headers, size_t count, const char* name) {

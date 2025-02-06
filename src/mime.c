@@ -265,14 +265,14 @@ const char* get_mimetype(char* filename) {
     }
 
     // Get the file extension.
-    char *ptr, *start = filename, *last = NULL;
+    char *ptr, *start = filename, *last = nullptr;
     while ((ptr = strstr(start, "."))) {
         last = ptr;
         start++;
     }
 
     // No extension.
-    if (last == NULL) {
+    if (last == nullptr) {
         return DEFAULT_CONTENT_TYPE;
     }
 

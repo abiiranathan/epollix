@@ -22,21 +22,24 @@ extern "C" {
 #define MAX_FILE_SIZE (10 * 1024 * 1024)
 #endif
 
-// Define maximum values for field_name, filename and mimetype and value.
+// maximum form field name size
 #ifndef MAX_FIELD_NAME_SIZE
 #define MAX_FIELD_NAME_SIZE 64
 #endif
 
+// maximum form value size
+#ifndef MAX_VALUE_SIZE
+#define MAX_VALUE_SIZE 2048
+#endif
+
+// Maximum filename size.
 #ifndef MAX_FILENAME_SIZE
 #define MAX_FILENAME_SIZE 128
 #endif
 
+// Mime-type maxsize
 #ifndef MAX_MIMETYPE_SIZE
 #define MAX_MIMETYPE_SIZE 128
-#endif
-
-#ifndef MAX_VALUE_SIZE
-#define MAX_VALUE_SIZE 2048
 #endif
 
 typedef enum {
@@ -94,7 +97,7 @@ typedef enum {
  * @param size: Content-Length(size of data in bytes)
  * @param boundary: Null-terminated string for the form boundary.
  * @param form: Pointer to MultipartForm struct to store the parsed form data. It is assumed
- * to be initialized well and not NULL.
+ * to be initialized well and not nullptr.
  * You can use the function multipart_parse_boundary or multipart_parse_boundary_from_header helpers
  * to get the boundary.
  * 
@@ -122,7 +125,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
 
 // =============== Fields API ========================
 // Get the value of a field by name.
-// Returns NULL if the field is not found.
+// Returns nullptr if the field is not found.
 const char* multipart_get_field_value(const MultipartForm* form, const char* name);
 
 // =============== File API ==========================

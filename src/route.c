@@ -30,7 +30,7 @@ Route* default_route_matcher(HttpMethod method, const char* path) {
             }
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 // Helper function to register a new route
@@ -43,9 +43,9 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->method = method;
     route->handler = handler;
     route->type = type;
-    route->mw_data = NULL;
+    route->mw_data = nullptr;
     route->middleware_count = 0;
-    route->middleware = NULL;
+    route->middleware = nullptr;
 
     route->pattern = strdup(pattern);
     route->params = (PathParams*)malloc(sizeof(PathParams));
@@ -207,12 +207,12 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     LOG_ASSERT(MAX_DIRNAME > strlen(dirname) + 1, "dirname is too long");
 
     char* fullpath = strdup(dirname);
-    LOG_ASSERT(fullpath != NULL, "strdup failed");
+    LOG_ASSERT(fullpath != nullptr, "strdup failed");
 
     if (strstr(fullpath, "~")) {
         free(fullpath);
         fullpath = filepath_expanduser(dirname);
-        LOG_ASSERT(fullpath != NULL, "filepath_expanduser failed");
+        LOG_ASSERT(fullpath != nullptr, "filepath_expanduser failed");
     }
 
     // Check that dirname exists
@@ -230,7 +230,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     }
 
     Route* route = registerGroupRoute(group, M_GET, pattern, (Handler)staticFileHandler, StaticRoute);
-    LOG_ASSERT(route != NULL, "registerGroupRoute failed");
+    LOG_ASSERT(route != nullptr, "registerGroupRoute failed");
 
     route->type = StaticRoute;
     route->dirname = fullpath;
@@ -251,9 +251,9 @@ RouteGroup* route_group(const char* pattern) {
 
     group->middleware_count = 0;
     group->count = 0;
-    group->middleware = NULL;
+    group->middleware = nullptr;
     group->middleware_count = 0;
-    group->routes = NULL;
+    group->routes = nullptr;
     return group;
 }
 
@@ -267,7 +267,7 @@ void route_group_free(RouteGroup* group) {
     if (group->routes) {
         // The individual routes are freed in free_static_routes
         free(group->routes);
-        group->routes = NULL;
+        group->routes = nullptr;
     }
     free(group);
 }

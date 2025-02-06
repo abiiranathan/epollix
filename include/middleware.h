@@ -49,7 +49,7 @@ void set_middleware_context(Route* route, void* userdata);
 // Set global middleware context or userdata.
 void set_global_mw_context(const char* key, void* userdata);
 
-// Returns the global middleware context or userdata or NULL if not set.
+// Returns the global middleware context or userdata or nullptr if not set.
 void* get_global_middleware_context(const char* key);
 
 #ifdef __cplusplus

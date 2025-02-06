@@ -17,21 +17,21 @@ void handleUnauthorized(context_t* ctx) {
 
 void BearerAuthMiddleware(context_t* ctx, Handler next) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
-    if (auth_header == NULL) {
+    if (auth_header == nullptr) {
         LOG_ERROR("Authorization header is missing");
         handleUnauthorized(ctx);
         return;
     }
 
     const char* secret = secure_getenv(JWT_TOKEN_SECRET);
-    if (secret == NULL) {
+    if (secret == nullptr) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
         handleUnauthorized(ctx);
         return;
     }
 
     const char* token = strstr(auth_header, BEARER);
-    if (token == NULL) {
+    if (token == nullptr) {
         handleUnauthorized(ctx);
         return;
     }
@@ -50,7 +50,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     jwt_error_t code = jwt_token_verify(token, secret, payload);
     if (code != JWT_SUCCESS) {
         free(payload);
-        payload = NULL;
+        payload = nullptr;
         LOG_ERROR("Invalid JWT token: %s", token);
         handleUnauthorized(ctx);
         return;
@@ -63,7 +63,7 @@ void BearerAuthMiddleware(context_t* ctx, Handler next) {
     next(ctx);
 }
 
-// Returns a pointer to the JWT payload stored in the context_t object or NULL if the payload is not found.
+// Returns a pointer to the JWT payload stored in the context_t object or nullptr if the payload is not found.
 const JWTPayload* get_jwt_payload(context_t* ctx) {
     return (JWTPayload*)get_context_value(ctx, JWT_PAYLOAD_CONTEXT_NAME);
 }

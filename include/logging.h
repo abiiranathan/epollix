@@ -8,8 +8,6 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 
-// If clang is used, use the below pragma to disable the warning about zero variadic arguments.
-// This is supported in gcc and clang but in clang we have to disable the warning.
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"

@@ -65,7 +65,7 @@ void decode_uri(const char* src, char* dst, size_t dst_size);
 void process_request(Request* req);
 
 // Set a NotFoundHandler. This is handy for SPAs.
-// It will be called if the RouteMatcher returns NULL.
+// It will be called if the RouteMatcher returns nullptr.
 Route* route_notfound(Handler h);
 
 #ifdef __cplusplus
