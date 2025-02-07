@@ -1,11 +1,11 @@
 #ifndef _DEFER_H
 #define _DEFER_H
 
-#define DEFER_VERSION 1
+#define DEFER_VERSION            1
 #define _DEFER_CONCAT_IMPL(a, b) a##b
-#define _DEFER_CONCAT(a, b) _DEFER_CONCAT_IMPL(a, b)
+#define _DEFER_CONCAT(a, b)      _DEFER_CONCAT_IMPL(a, b)
 
-#define autofree __attribute__((cleanup(autofree_var)))
+#define autofree  __attribute__((cleanup(autofree_var)))
 #define autoclose __attribute__((cleanup(autoclose_var)))
 
 #ifdef __cplusplus

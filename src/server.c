@@ -17,8 +17,7 @@
 #include <sys/sendfile.h>
 #include <unistd.h>
 
-cleanup_func user_cleanup_func = nullptr;  // User-defined cleanup function
-EpollServer* srv = nullptr;                // global server object
+EpollServer* srv = nullptr;  // global server object
 
 #define TASK_CAPACITY (MAXEVENTS / 2)
 Task taskPool[TASK_CAPACITY];
@@ -26,7 +25,7 @@ Task taskPool[TASK_CAPACITY];
 static void initTasks(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         taskPool[i].client_fd = -1;
-        taskPool[i].epoll_fd = -1;
+        taskPool[i].epoll_fd  = -1;
     }
 }
 
@@ -41,7 +40,7 @@ static Task* getFreeTask(void) {
 
 static void PutTask(Task* task) {
     task->client_fd = -1;
-    task->epoll_fd = -1;
+    task->epoll_fd  = -1;
 }
 
 static inline void close_connection(int client_fd, int epoll_fd) {
@@ -98,7 +97,7 @@ static void handleConnection(void* arg) {
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
-    size_t sent = 0;
+    size_t sent      = 0;
     size_t remaining = n;
     const char* data = (const char*)buf;
 
@@ -126,16 +125,16 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
 void http_error(int client_fd, http_status status, const char* message) {
     char reply[1024];
     const char* status_str = http_status_text(status);
-    const char* fmt = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
+    const char* fmt        = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
 
     // 20 is a safe margin for status and other formatting
     size_t max_message_length = sizeof(reply) - strlen(fmt) - 20;
-    size_t message_length = strlen(message);
+    size_t message_length     = strlen(message);
 
     if (message_length >= max_message_length) {
         // use asprintf to allocate memory for the message if it's too long
         char* msg = nullptr;
-        int ret = asprintf(&msg, fmt, status, status_str, message_length, message);
+        int ret   = asprintf(&msg, fmt, status, status_str, message_length, message);
         if (ret < 0) {
             LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
             return;
@@ -160,9 +159,9 @@ static int setup_server_socket(const char* port) {
     int s, sfd;
 
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family = AF_UNSPEC;     /* Return IPv4 and IPv6 choices */
+    hints.ai_family   = AF_UNSPEC;   /* Return IPv4 and IPv6 choices */
     hints.ai_socktype = SOCK_STREAM; /* We want a TCP socket */
-    hints.ai_flags = AI_PASSIVE;     /* All interfaces */
+    hints.ai_flags    = AI_PASSIVE;  /* All interfaces */
 
     s = getaddrinfo(nullptr, port, &hints, &result);
     if (s != 0) {
@@ -172,8 +171,7 @@ static int setup_server_socket(const char* port) {
 
     for (rp = result; rp != nullptr; rp = rp->ai_next) {
         sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sfd == -1)
-            continue;
+        if (sfd == -1) continue;
 
         // Allow reuse of the port.
         int enable = 1;
@@ -201,7 +199,7 @@ static int setup_server_socket(const char* port) {
 }
 
 // Create a new EpollServer.
-EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_func cf) {
+EpollServer* epoll_server_create(size_t num_workers, const char* port) {
     EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
     if (server == nullptr) {
         return nullptr;
@@ -219,15 +217,12 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port, cleanup_f
     }
 
     server->num_workers = num_workers;
-    server->cleanup = cf;
-    server->port = port_int;
-    server->pool = threadpool_create(num_workers);
+    server->port        = port_int;
+    server->pool        = threadpool_create(num_workers);
     if (server->pool == nullptr) {
         free(server);
         return nullptr;
     }
-
-    middleware_init();
 
     // Create an epoll instance
     server->server_fd = setup_server_socket(port);
@@ -282,16 +277,13 @@ static void install_signal_handler(void) {
 
 // Listen and serve on the given port.
 int epoll_server_listen(EpollServer* server) {
-    // set the global server object
-    // Allows for easy cleanup at exit.
     srv = server;
-    user_cleanup_func = server->cleanup;
 
     // Add the server socket to the epoll instance
     struct epoll_event event = {0}, events[MAXEVENTS] = {0};
     event.data.fd = server->server_fd;
-    event.events = EPOLLIN | EPOLLET;
-    int ret = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->server_fd, &event);
+    event.events  = EPOLLIN | EPOLLET;
+    int ret       = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->server_fd, &event);
     if (ret == -1) {
         perror("epoll_ctl");
         LOG_FATAL("Failed to add server socket to epoll\n");
@@ -322,7 +314,7 @@ int epoll_server_listen(EpollServer* server) {
                     socklen_t client_len;
                     int client_fd;
                     client_len = sizeof internetAddress;
-                    client_fd = accept(server->server_fd, &internetAddress, &client_len);
+                    client_fd  = accept(server->server_fd, &internetAddress, &client_len);
                     if (client_fd == -1) {
                         if (errno == EINTR) {
                             return -1;  // Interrupted by signal
@@ -344,8 +336,8 @@ int epoll_server_listen(EpollServer* server) {
 
                     // Add client socket to epoll
                     event.data.fd = client_fd;
-                    event.events = EPOLLIN | EPOLLET | EPOLLHUP | EPOLLERR | EPOLLONESHOT;
-                    ret = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
+                    event.events  = EPOLLIN | EPOLLET | EPOLLHUP | EPOLLERR | EPOLLONESHOT;
+                    ret           = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
                     if (ret == -1) {
                         perror("epoll_ctl");
                         LOG_ERROR("epoll_ctl failed");
@@ -362,7 +354,7 @@ int epoll_server_listen(EpollServer* server) {
 
                     // TODO: Pass timeout as a configuration
                     struct timeval timeout;
-                    timeout.tv_sec = 5;  // 5 seconds timeout
+                    timeout.tv_sec  = 5;  // 5 seconds timeout
                     timeout.tv_usec = 0;
                     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
                 }
@@ -390,7 +382,7 @@ int epoll_server_listen(EpollServer* server) {
                     }
 
                     task->client_fd = events[i].data.fd;
-                    task->epoll_fd = server->epoll_fd;
+                    task->epoll_fd  = server->epoll_fd;
                     threadpool_submit(server->pool, handleConnection, task);
                 } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
                     close_connection(events[i].data.fd, server->epoll_fd);
@@ -420,10 +412,6 @@ static void epoll_server_shutdown(EpollServer* server) {
         close(server->server_fd);
     }
 
-    if (server->cleanup) {
-        server->cleanup();
-    }
-
     free(server);
     server = nullptr;
 }
@@ -431,11 +419,5 @@ static void epoll_server_shutdown(EpollServer* server) {
 // Destructor extension for gcc and clang.
 // This is automatically called atexit.
 __attribute__((destructor)) void server_destructor(void) {
-    routes_cleanup();
-    middleware_cleanup();
     epoll_server_shutdown(srv);
-
-    if (user_cleanup_func) {
-        user_cleanup_func();
-    }
 }

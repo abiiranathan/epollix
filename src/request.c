@@ -21,17 +21,17 @@ extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
 bool request_init(MemoryPool* pool, Request* req, int client_fd, int epoll_fd) {
-    req->client_fd = client_fd;
-    req->epoll_fd = epoll_fd;
-    req->path = nullptr;
-    req->method = M_INVALID;
-    req->route = nullptr;
-    req->content_length = 0;
-    req->body = nullptr;
-    req->header_count = 0;
-    req->query_params = nullptr;
+    req->client_fd       = client_fd;
+    req->epoll_fd        = epoll_fd;
+    req->path            = nullptr;
+    req->method          = M_INVALID;
+    req->route           = nullptr;
+    req->content_length  = 0;
+    req->body            = nullptr;
+    req->header_count    = 0;
+    req->query_params    = nullptr;
     req->header_capacity = 36;
-    req->headers = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
+    req->headers         = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
     return req->headers != NULL;
 }
 
@@ -81,7 +81,7 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
     while (ptr < end) {
         // Reallocate the headers
         if (req->header_count == req->header_capacity) {
-            size_t capacity = req->header_capacity * 2;
+            size_t capacity    = req->header_capacity * 2;
             header_t** headers = mpool_alloc(pool, sizeof(header_t*) * capacity);
             if (!headers) {
                 return false;
@@ -93,11 +93,10 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
 
         // Parse header name
         const char* colon = (const char*)memchr(ptr, ':', end - ptr);
-        if (!colon)
-            break;
+        if (!colon) break;
 
         size_t name_len = colon - ptr;
-        char* name = mpool_alloc(pool, name_len + 1);
+        char* name      = mpool_alloc(pool, name_len + 1);
         if (!name) {
             return http_memory_alloc_failed;
         }
@@ -112,11 +111,10 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
 
         // Parse header value
         const char* eol = (const char*)memchr(ptr, '\r', end - ptr);
-        if (!eol || eol + 1 >= end || eol[1] != '\n')
-            break;
+        if (!eol || eol + 1 >= end || eol[1] != '\n') break;
 
         size_t value_len = eol - ptr;
-        char* value = mpool_alloc(pool, value_len + 1);
+        char* value      = mpool_alloc(pool, value_len + 1);
         if (!value) {
             return http_memory_alloc_failed;
         }
@@ -128,7 +126,7 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
         if (!header) {
             return http_memory_alloc_failed;
         }
-        header->name = name;
+        header->name  = name;
         header->value = value;
 
         req->headers[req->header_count++] = header;
@@ -146,18 +144,12 @@ void decode_uri(const char* src, char* dst, size_t dst_size) {
 
     while (*src && written + 1 < dst_size) {
         if ((*src == '%') && ((a = src[1]) && (b = src[2])) && (isxdigit(a) && isxdigit(b))) {
-            if (a >= 'a')
-                a -= 'a' - 'A';
-            if (a >= 'A')
-                a -= 'A' - 10;
-            else
-                a -= '0';
-            if (b >= 'a')
-                b -= 'a' - 'A';
-            if (b >= 'A')
-                b -= 'A' - 10;
-            else
-                b -= '0';
+            if (a >= 'a') a -= 'a' - 'A';
+            if (a >= 'A') a -= 'A' - 10;
+            else a -= '0';
+            if (b >= 'a') b -= 'a' - 'A';
+            if (b >= 'A') b -= 'A' - 10;
+            else b -= '0';
             *dst++ = 16 * a + b;
             src += 3;
             written++;
@@ -177,8 +169,8 @@ char* encode_uri(const char* str) {
     // Since each character can be encoded as "%XX" (3 characters),
     // we multiply the length of the input string by 3 and add 1 for the null
     // terminator.
-    size_t src_len = strlen(str);
-    size_t capacity = src_len * 3 + 1;
+    size_t src_len    = strlen(str);
+    size_t capacity   = src_len * 3 + 1;
     char* encoded_str = (char*)malloc(capacity);
     if (encoded_str == nullptr) {
         perror("memory allocation failed");
@@ -186,7 +178,7 @@ char* encode_uri(const char* str) {
     }
 
     const char* hex = "0123456789ABCDEF";  // hexadecimal digits for percent-encoding
-    size_t index = 0;                      // position in the encoded string
+    size_t index    = 0;                   // position in the encoded string
 
     // Iterate through each character in the input string
     for (size_t i = 0; i < src_len; i++) {
@@ -213,21 +205,18 @@ char* encode_uri(const char* str) {
 // Parse the request line (first line of the HTTP request)
 static bool parse_request_line(char* headers, char** method, char** uri, char** http_version, char** header_start) {
     *method = headers;
-    *uri = strchr(headers, ' ');
-    if (!*uri)
-        return false;
+    *uri    = strchr(headers, ' ');
+    if (!*uri) return false;
     **uri = '\0';
     (*uri)++;
 
     *http_version = strchr(*uri, ' ');
-    if (!*http_version)
-        return false;
+    if (!*http_version) return false;
     **http_version = '\0';
     (*http_version)++;
 
     *header_start = strstr(*http_version, "\r\n");
-    if (!*header_start)
-        return false;
+    if (!*header_start) return false;
     **header_start = '\0';
     *header_start += 2;
 
@@ -244,14 +233,14 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
 }
 
 bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params) {
-    char* key = nullptr;
+    char* key   = nullptr;
     char* value = nullptr;
     char *save_ptr, *save_ptr2;
     bool success = true;
 
     char* token = strtok_r(query, "&", &save_ptr);
     while (token != nullptr) {
-        key = strtok_r(token, "=", &save_ptr2);
+        key   = strtok_r(token, "=", &save_ptr2);
         value = strtok_r(nullptr, "=", &save_ptr2);
 
         if (key != nullptr && value != nullptr) {
@@ -289,7 +278,7 @@ static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, ch
 
         // key and value are allocated in pool and thus should not be freed.
         bool free_entries = false;
-        *query_params = map_create(4, key_compare_char_ptr, free_entries);
+        *query_params     = map_create(4, key_compare_char_ptr, free_entries);
         if (!*query_params) {
             return false;
         }
@@ -309,8 +298,7 @@ static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, ch
 bool allocate_and_read_body(MemoryPool* pool, int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
                             const char* initial_body) {
     *body = (uint8_t*)mpool_alloc(pool, body_size + 1);
-    if (!*body)
-        return false;
+    if (!*body) return false;
 
     // copy the initial body read if any
     if (initial_read > 0) {
@@ -345,11 +333,11 @@ bool allocate_and_read_body(MemoryPool* pool, int client_fd, uint8_t** body, siz
 void initialize_request(MemoryPool* pool, Request* req, uint8_t* body, size_t content_length, map* query_params,
                         HttpMethod httpMethod, const char* http_version, const char* path) {
 
-    req->body = body;
+    req->body           = body;
     req->content_length = content_length;
-    req->query_params = query_params;
-    req->header_count = 0;
-    req->method = httpMethod;
+    req->query_params   = query_params;
+    req->header_count   = 0;
+    req->method         = httpMethod;
 
     strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
     req->http_version[sizeof(req->http_version) - 1] = '\0';
@@ -377,7 +365,7 @@ Route* route_notfound(Handler h) {
     }
 
     notFoundRoute = route_get("__notfound__", h);
-    registered = true;
+    registered    = true;
     return notFoundRoute;
 }
 
@@ -394,16 +382,16 @@ void process_request(Request* req, MemoryPool* pool) {
 
     char headers[4096];
 
-    char* path = nullptr;               // Request path
-    char* query = nullptr;              // Query string
-    map* query_params = nullptr;        // Query parameters
-    uint8_t* body = nullptr;            // Request body (dynamically allocated)
-    size_t total_read = 0;              // Total bytes read
+    char* path            = nullptr;    // Request path
+    char* query           = nullptr;    // Query string
+    map* query_params     = nullptr;    // Query parameters
+    uint8_t* body         = nullptr;    // Request body (dynamically allocated)
+    size_t total_read     = 0;          // Total bytes read
     HttpMethod httpMethod = M_INVALID;  // Http method
-    http_error_t code = http_ok;        // Error code
+    http_error_t code     = http_ok;    // Error code
     char decoded_uri[1024];             // Decoded URI (e.g., "/path/to/resource?query=string")
     size_t header_capacity = 0;         // Size of the headers in the buffer (including the initial read)
-    size_t body_size = 0;               // Size of the request body (from the Content-Length header)
+    size_t body_size       = 0;         // Size of the request body (from the Content-Length header)
 
     ssize_t inital_size = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (inital_size <= 0) {
@@ -433,7 +421,7 @@ void process_request(Request* req, MemoryPool* pool) {
     }
 
     header_capacity = end_of_headers - headers + 4;
-    body_size = parse_content_length(header_start, end_of_headers);
+    body_size       = parse_content_length(header_start, end_of_headers);
 
     decode_uri(uri, decoded_uri, sizeof(decoded_uri));
 

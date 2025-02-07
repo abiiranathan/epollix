@@ -2,7 +2,7 @@
 #define C4C2FBAD_C23C_4F88_95D5_67AAD2406076
 
 #include <stddef.h>
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE     1
 #define _POSIX_C_SOURCE 200809L
 
 #ifdef __cplusplus

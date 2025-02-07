@@ -29,14 +29,14 @@
 */
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams) {
     const char* pattern_ptr = pattern;
-    const char* url_ptr = url_path;
+    const char* url_ptr     = url_path;
     pathParams->match_count = 0;
 
     // Early return if there are no parameters in the pattern
     if (!strchr(pattern, '{')) {
         // Compare ignoring trailing slashes
         size_t lpattern = strlen(pattern_ptr);
-        size_t lurl = strlen(url_ptr);
+        size_t lurl     = strlen(url_ptr);
 
         // Skip trailing slash for the pattern
         if (lpattern > 1 && pattern_ptr[lpattern - 1] == '/') {
@@ -62,12 +62,10 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
             // Extract parameter name
             pattern_ptr++;
             const char* brace_end = strchr(pattern_ptr, '}');
-            if (!brace_end)
-                return false;
+            if (!brace_end) return false;
 
             size_t param_name_len = brace_end - pattern_ptr;
-            if (param_name_len >= MAX_PARAM_NAME)
-                return false;
+            if (param_name_len >= MAX_PARAM_NAME) return false;
 
             // Prepare parameter
             PathParam* param = &pathParams->params[pathParams->match_count];
@@ -82,8 +80,7 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
                 url_ptr++;
 
             size_t value_len = url_ptr - value_start;
-            if (value_len >= MAX_PARAM_VALUE)
-                return false;
+            if (value_len >= MAX_PARAM_VALUE) return false;
 
             memcpy(param->value, value_start, value_len);
             param->value[value_len] = '\0';
@@ -91,8 +88,7 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
             pathParams->match_count++;
         } else {
             // Static comparison
-            if (*pattern_ptr != *url_ptr)
-                return false;
+            if (*pattern_ptr != *url_ptr) return false;
             pattern_ptr++;
             url_ptr++;
         }

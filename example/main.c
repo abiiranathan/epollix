@@ -1,5 +1,7 @@
 #define _GNU_SOURCE 1
+#define USE_LOGGER  0
 
+#include <sys/cdefs.h>
 #include <stdio.h>
 #include "../include/epollix.h"
 
@@ -9,8 +11,8 @@ static void index_page(context_t* ctx) {
 }
 
 const char* filename = "/home/nabiizy/Videos/Movies/ANGRYBIRDS-2.mp4";
-FILE* file = nullptr;
-off64_t size = 0;
+FILE* file           = nullptr;
+off64_t size         = 0;
 
 static void open_movie(void) {
     file = fopen(filename, "rb");
@@ -50,23 +52,23 @@ static void handle_create_user(context_t* ctx) {
     char boundary[128] = {0};
     if (!multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary))) {
         ctx->response->status = StatusBadRequest;
-        const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
+        const char* error     = multipart_error_message(INVALID_FORM_BOUNDARY);
         send_string(ctx, error);
         return;
     }
 
     char* body = (char*)ctx->request->body;
-    code = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
+    code       = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
     if (code != MULTIPART_OK) {
         ctx->response->status = StatusBadRequest;
-        const char* error = multipart_error_message(code);
+        const char* error     = multipart_error_message(code);
         send_response(ctx, error, strlen(error));
         return;
     }
 
     const char* username = multipart_get_field_value(&form, "username");
     const char* password = multipart_get_field_value(&form, "password");
-    const char* email = multipart_get_field_value(&form, "email");
+    const char* email    = multipart_get_field_value(&form, "email");
 
     printf("[Username]: %s, Password: %s, Email: %s\n", username, password, email);
     printf("\n******************Got %ld files *********************************\n", form.num_files);
@@ -83,8 +85,8 @@ static void handle_create_user(context_t* ctx) {
 
     // Generate a JWT token
     unsigned long expiry_hours_in_ms = 3600;  // 1 hour
-    unsigned long expiry = (unsigned long)(time(nullptr) + expiry_hours_in_ms);
-    const char* sub = username;
+    unsigned long expiry             = (unsigned long)(time(nullptr) + expiry_hours_in_ms);
+    const char* sub                  = username;
 
     JWTPayload payload = {0};
 
@@ -104,7 +106,7 @@ static void handle_create_user(context_t* ctx) {
         return;
     }
 
-    char* jwtToken = nullptr;
+    char* jwtToken      = nullptr;
     jwt_error_t jwt_err = jwt_token_create(&payload, secret, &jwtToken);
     if (jwt_err != JWT_SUCCESS) {
         LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
@@ -140,14 +142,14 @@ static void render_register_form(context_t* ctx) {
 }
 
 // Beared Authenticated route
-static void protected_route(context_t* ctx) {
+__attribute_used__ static void protected_route(context_t* ctx) {
     const JWTPayload* payload = get_jwt_payload(ctx);
     send_string_f(ctx, "Protected route:\nYour username is: %s\n", payload->sub);
 }
 
 static void* send_time(void* arg) {
     context_t* ctx = (context_t*)arg;
-    int count = 1000;
+    int count      = 1000;
     while (1) {
         time_t rawtime;
         struct tm* timeinfo;
@@ -155,7 +157,7 @@ static void* send_time(void* arg) {
 
         time(&rawtime);
         timeinfo = localtime(&rawtime);
-        strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
+        strftime(buffer, 80, "%Y-%m-%d %H:%M:%S\n", timeinfo);
 
         int ret = response_send_chunk(ctx, buffer, strlen(buffer));
         if (ret < 0) {
@@ -195,16 +197,14 @@ static void user_route_mw(context_t* ctx, Handler next) {
 }
 
 static void api_users(context_t* ctx) {
-    sleep(1);
-
     User users[10] = {0};
     for (int i = 0; i < 10; i++) {
         users[i].username = "user";
-        users[i].email = "randomemail@gmail.com";
+        users[i].email    = "randomemail@gmail.com";
         users[i].password = "password";
     }
 
-    cJSON* root = cJSON_CreateObject();
+    cJSON* root        = cJSON_CreateObject();
     cJSON* users_array = cJSON_CreateArray();
 
     for (int i = 0; i < 10; i++) {
@@ -234,19 +234,15 @@ static void api_user_by_id(context_t* ctx) {
 }
 
 static void gzip_route(context_t* ctx) {
-    char* data = "<h1>Hello there. This is GZIP compressed data</h1>";
+    char* data                     = "<h1>Hello there. This is GZIP compressed data</h1>";
     unsigned char* compressed_data = nullptr;
-    size_t compressed_data_len = 0;
+    size_t compressed_data_len     = 0;
     gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
 
     set_response_header(ctx, "Content-Encoding", "gzip");
     send_response(ctx, (void*)compressed_data, compressed_data_len);
 
     free(compressed_data);
-}
-
-static void cleanup(void) {
-    crypto_cleanup();
 }
 
 int main(int argc, char** argv) {
@@ -256,42 +252,38 @@ int main(int argc, char** argv) {
     }
 
     open_movie();
-
-    crypto_init();
-
-    BasicAuthData *guest = nullptr, *admin = nullptr;
+    BasicAuthUser *guest = nullptr, *admin = nullptr;
 
     // Set the JWT token secret used to sign the token for Bearer authentication
     setenv(JWT_TOKEN_SECRET, "super_jwt_token_secret", 1);
 
-    // // Logging middleware
-    // set_log_file(stdout);
-    // use_global_middleware(1, epollix_logger);
+#if USE_LOGGER > 0
+    // Logging middleware
+    FILE* logfile = fopen("server.log", "a+");
+    LOG_ASSERT(logfile, "Failed to open logfile");
 
-    // We need a way to associate the BasicAuthData to a route since C has no support for closures.
-    // we can use the set_mw_context function to set the BasicAuthData to a specific route.
-    // Or we can use the set_global_mw_context function to set the BasicAuthData to all routes.
-    guest = create_basic_auth_data("guest", "guest", "Protected");
-    admin = create_basic_auth_data("admin", "admin", "ProtectedAdmin");
+    set_log_file(logfile);
+    use_global_middleware(1, epollix_logger);
+#endif
+
+    guest = new_basic_auth_user("guest", "guest", "Protected");
+    admin = new_basic_auth_user("admin", "admin", "ProtectedAdmin");
 
     LOG_ASSERT(guest != nullptr, "Failed to allocate memory for BasicAuthData");
     LOG_ASSERT(admin != nullptr, "Failed to allocate memory for BasicAuthData");
 
-    // set_global_mw_context(BASIC_AUTH_KEY, guest);
+    set_global_mw_context(BASIC_AUTH_KEY, guest);
     // use_global_middleware(1, global_basic_auth);
-    // Since guest is not used: lets free it manually
-    // If passed to middleware context, its freed automatically
-    free(guest);
 
     route_get("/", index_page);
     route_get("/movie", serve_movie);
     route_get("/greet/{name}", handle_greet);
     route_get("/gzip", gzip_route);
 
-    Route* pr = route_get("/protected", protected_route);
+    // Route* pr = route_get("/protected", protected_route);
 
     // Expects a valid secret to be set in the JWT_TOKEN_SECRET environment variable
-    use_route_middleware(pr, 1, BearerAuthMiddleware);
+    // use_route_middleware(pr, 1, BearerAuthMiddleware);
 
     Route* reg = route_get("/users/register", render_register_form);
     set_middleware_context(reg, admin);
@@ -312,9 +304,10 @@ int main(int argc, char** argv) {
     Route* ur = route_group_get(group, "/users", api_users);
     use_route_middleware(ur, 1, user_route_mw);
     route_group_get(group, "/users/{id}", api_user_by_id);
-    route_group_free(group);
 
-    EpollServer* server = epoll_server_create(4, port, cleanup);
+    use_group_middleware(group, 1, global_basic_auth);
+
+    EpollServer* server = epoll_server_create(4, port);
     if (server == nullptr) {
         LOG_FATAL("Failed to create server\n");
     }

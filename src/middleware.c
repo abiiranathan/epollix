@@ -1,53 +1,56 @@
 #include "../include/middleware.h"
 #include "../include/net.h"
 #include "../include/request.h"
+#include "constants.h"
+#include "logging.h"
 
 #include <stdarg.h>
+#include <stddef.h>
+#include <stdio.h>
 
-Middleware global_middleware[MAX_GLOBAL_MIDDLEWARE] = {};  // Global middleware
-size_t global_middleware_count = 0;                        // Number of global middleware
-static map* global_middleware_context = nullptr;           // Global middleware context
+static Middleware GLOBAL_MIDDLEWARE[MAX_GLOBAL_MIDDLEWARE] = {};       // Global middleware
+static size_t global_middleware_count                      = 0;        // Number of global middleware
+static map* global_middleware_context                      = nullptr;  // Global middleware context
+static MemoryPool* pool                                    = NULL;
 
-void middleware_init(void) {
-    global_middleware_context = map_create(10, key_compare_char_ptr, true);
-    if (!global_middleware_context) {
-        LOG_FATAL("Failed to create global_middleware_context\n");
-    }
+__attribute__((constructor())) void middleware_init(void) {
+    // Initialize global middleware context
+    global_middleware_context = map_create(4, key_compare_char_ptr, true);
+    LOG_ASSERT(global_middleware_context, "Failed to create global_middleware_context\n");
+
+    // Initialize middleware memory pool
+    pool = mpool_create(4096);
+    LOG_ASSERT(pool, "pool is NULL");
 }
 
-void middleware_cleanup(void) {
+__attribute__((destructor())) void middleware_cleanup(void) {
     if (global_middleware_context) {
         map_destroy(global_middleware_context);
+    }
+
+    if (pool) {
+        mpool_destroy(pool);
     }
 }
 
 // Set route middleware context or userdata.
+// This user data is free automatically for you at exit.
 void set_middleware_context(Route* route, void* userdata) {
     route->mw_data = userdata;
 }
 
 // Set route middleware context or userdata.
 void set_global_mw_context(const char* key, void* userdata) {
-    if (global_middleware_context == nullptr) {
-        global_middleware_context = map_create(8, key_compare_char_ptr, true);
-        if (global_middleware_context == nullptr) {
-            LOG_ERROR("unable to create map for global middleware context");
-            return;
-        }
-    }
-
-    char* k = strdup(key);
-    if (!k) {
+    // The key has the same life time as the map.
+    char* ctx_key = strdup(key);
+    if (!ctx_key) {
         LOG_ERROR("unable to allocate memory for key: %s", key);
         return;
     }
-    map_set(global_middleware_context, k, userdata);
+    map_set(global_middleware_context, ctx_key, userdata);
 }
 
 void* get_global_middleware_context(const char* key) {
-    if (global_middleware_context == nullptr) {
-        return nullptr;
-    }
     return map_get(global_middleware_context, (char*)key);
 }
 
@@ -58,7 +61,7 @@ inline size_t get_global_middleware_count(void) {
 
 // get_global_middleware returns the global middleware functions.
 inline Middleware* get_global_middleware(void) {
-    return global_middleware;
+    return GLOBAL_MIDDLEWARE;
 }
 
 static void middleware_next(context_t* ctx) {
@@ -82,13 +85,14 @@ void execute_middleware_chain(context_t* ctx, MiddlewareContext* mw_ctx) {
 // ================ Middleware logic ==================
 void use_global_middleware(int count, ...) {
     if (global_middleware_count + count > MAX_GLOBAL_MIDDLEWARE) {
-        LOG_FATAL("Exceeded maximum global middleware count\n");
+        LOG_FATAL("Exceeded maximum global middleware count: %d. Recompile with a bigger -DMAX_GLOBAL_MIDDLEWARE \n",
+                  MAX_GLOBAL_MIDDLEWARE);
     }
 
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count && global_middleware_count < MAX_GLOBAL_MIDDLEWARE; i++) {
-        global_middleware[global_middleware_count++] = va_arg(args, Middleware);
+        GLOBAL_MIDDLEWARE[global_middleware_count++] = va_arg(args, Middleware);
     }
 
     va_end(args);
@@ -100,24 +104,52 @@ void use_route_middleware(Route* route, int count, ...) {
         return;
     }
 
-    size_t new_count = route->middleware_count + count;
-    Middleware* new_middleware = (Middleware*)realloc(route->middleware, sizeof(Middleware) * new_count);
-    if (!new_middleware) {
-        perror("realloc");
-        LOG_FATAL("Failed to allocate memory for route middleware\n");
-    }
+    uint8_t new_count = route->middleware_count + (uint8_t)count;
+    if (new_count <= route->middleware_capacity) {
+        size_t capacity = new_count * 2;
 
-    // Update the route middleware
-    route->middleware = new_middleware;
+        Middleware* new_middleware = (Middleware*)mpool_alloc(pool, sizeof(Middleware) * capacity);
+        LOG_ASSERT(new_middleware, "Failed to allocate memory for route middleware\n");
+
+        memcpy(new_middleware, route->middleware, sizeof(Middleware) * route->middleware_count);
+        route->middleware_capacity = capacity;
+        route->middleware          = new_middleware;
+    }
 
     va_list args;
     va_start(args, count);
 
     // Append the new middleware to the route middleware
     for (size_t i = route->middleware_count; i < new_count; i++) {
-        ((Middleware*)(route->middleware))[i] = va_arg(args, Middleware);
+        route->middleware[i] = va_arg(args, Middleware);
     }
 
     route->middleware_count = new_count;
+    va_end(args);
+}
+
+// Attach route group middleware.
+void use_group_middleware(RouteGroup* group, int count, ...) {
+    if (count <= 0) {
+        return;
+    }
+
+    uint8_t new_count = group->middleware_count + (uint8_t)count;
+    if (new_count <= group->middleware_capacity) {
+        size_t capacity = new_count * 2;
+
+        Middleware* new_middleware = (Middleware*)mpool_alloc(pool, sizeof(Middleware) * capacity);
+        LOG_ASSERT(new_middleware, "Failed to allocate memory for group middleware\n");
+        memcpy(new_middleware, group->middleware, sizeof(Middleware) * group->middleware_count);
+        group->middleware_capacity = capacity;
+        group->middleware          = new_middleware;
+    }
+
+    va_list args;
+    va_start(args, count);
+    for (size_t i = group->middleware_count; i < new_count; i++) {
+        group->middleware[i] = va_arg(args, Middleware);
+    }
+    group->middleware_count = new_count;
     va_end(args);
 }

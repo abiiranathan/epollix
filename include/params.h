@@ -20,7 +20,7 @@ extern "C" {
 
 // Maximum number of parameters in a URL
 #ifndef MAX_PARAMS
-#define MAX_PARAMS 8
+#define MAX_PARAMS 4
 #endif
 
 typedef struct {

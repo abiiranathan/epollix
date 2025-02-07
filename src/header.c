@@ -12,7 +12,7 @@ header_t* header_fromstring(MemoryPool* pool, const char* str) {
     }
 
     size_t name_length = colon - str;
-    header_t* header = mpool_alloc(pool, sizeof(header_t));
+    header_t* header   = mpool_alloc(pool, sizeof(header_t));
     if (!header) {
         return nullptr;
     }
@@ -23,7 +23,7 @@ header_t* header_fromstring(MemoryPool* pool, const char* str) {
     }
     memcpy(name, str, name_length);
     name[name_length] = '\0';
-    header->name = name;
+    header->name      = name;
 
     const char* value_start = colon + 1;
     while (*value_start == ' ') {
@@ -31,14 +31,14 @@ header_t* header_fromstring(MemoryPool* pool, const char* str) {
     }
 
     size_t value_length = strlen(value_start);
-    char* value = mpool_alloc(pool, value_length + 1);
+    char* value         = mpool_alloc(pool, value_length + 1);
     if (!value) {
         return nullptr;
     }
 
     memcpy(value, value_start, value_length);
     value[value_length] = '\0';
-    header->value = value;
+    header->value       = value;
     return header;
 }
 

@@ -34,12 +34,12 @@ static void test_parse_request_headers(void) {
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
     (void)result;
 
-    LOG_ASSERT(strcmp(req->headers[0].name, "Host") == 0, "Expected Host header");
-    LOG_ASSERT(strcmp(req->headers[0].value, "localhost:8080") == 0, "Expected localhost:8080");
-    LOG_ASSERT(strcmp(req->headers[1].name, "User-Agent") == 0, "Expected User-Agent header");
-    LOG_ASSERT(strcmp(req->headers[1].value, "curl/7.68.0") == 0, "Expected curl/7.68.0");
-    LOG_ASSERT(strcmp(req->headers[2].name, "Accept") == 0, "Expected Accept header");
-    LOG_ASSERT(strcmp(req->headers[2].value, "*/*") == 0, "Expected */*");
+    LOG_ASSERT(strcmp(req->headers[0]->name, "Host") == 0, "Expected Host header");
+    LOG_ASSERT(strcmp(req->headers[0]->value, "localhost:8080") == 0, "Expected localhost:8080");
+    LOG_ASSERT(strcmp(req->headers[1]->name, "User-Agent") == 0, "Expected User-Agent header");
+    LOG_ASSERT(strcmp(req->headers[1]->value, "curl/7.68.0") == 0, "Expected curl/7.68.0");
+    LOG_ASSERT(strcmp(req->headers[2]->name, "Accept") == 0, "Expected Accept header");
+    LOG_ASSERT(strcmp(req->headers[2]->value, "*/*") == 0, "Expected */*");
 
     mpool_destroy(pool);
 

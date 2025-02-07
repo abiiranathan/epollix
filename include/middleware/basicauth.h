@@ -9,9 +9,9 @@ extern "C" {
 
 #include "../net.h"
 
-typedef struct basic_auth_data BasicAuthData;
+typedef struct basicAuthUser BasicAuthUser;
 
-BasicAuthData* create_basic_auth_data(const char* username, const char* password, const char* realm);
+BasicAuthUser* new_basic_auth_user(const char* username, const char* password, const char* realm);
 
 // Basic Auth Middleware applied to a specific route.
 // You must set the BasicAuthData before using this middleware

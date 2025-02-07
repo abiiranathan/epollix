@@ -5,7 +5,8 @@
 BasedOnStyle: Google
 AccessModifierOffset: -1
 AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: false # Align the assignment operator
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveMacros: Consecutive
 AlignEscapedNewlines: Right
 AlignOperands: Align
 AllowAllArgumentsOnNextLine: false
@@ -14,7 +15,7 @@ AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortBlocksOnASingleLine: Empty
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never # To avoid conflict, set this "Never" and each "if statement" should include brace when coding
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortLambdasOnASingleLine: Inline
 AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterReturnType: None
@@ -73,7 +74,7 @@ SpaceBeforeRangeBasedForLoopColon: true
 SpaceBeforeSquareBrackets: false
 SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 2
-SpacesInAngles: false
+SpacesInAngles: Never
 SpacesInCStyleCastParentheses: false
 SpacesInContainerLiterals: false
 SpacesInParentheses: false
@@ -81,3 +82,4 @@ SpacesInSquareBrackets: false
 Standard: c++17
 TabWidth: 4
 UseTab: Never
+SortIncludes: Never

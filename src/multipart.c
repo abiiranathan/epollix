@@ -70,10 +70,10 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     // Temporary variables to store state of the FSM.
     const char* ptr = data;
 
-    const char* key_start = nullptr;
-    const char* value_start = nullptr;
-    char key[MAX_FIELD_NAME_SIZE] = {0};
-    char value[MAX_VALUE_SIZE] = {0};
+    const char* key_start            = nullptr;
+    const char* value_start          = nullptr;
+    char key[MAX_FIELD_NAME_SIZE]    = {0};
+    char value[MAX_VALUE_SIZE]       = {0};
     char filename[MAX_FILENAME_SIZE] = {0};
     char mimetype[MAX_MIMETYPE_SIZE] = {0};
 
@@ -130,7 +130,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                     }
                     ptr += 6;  // Skip name=\"
                     key_start = ptr;
-                    state = STATE_KEY;
+                    state     = STATE_KEY;
                 } else {
                     ptr++;
                 }
@@ -156,7 +156,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                         }
                         ptr += 13;  // Skip "; filename=\""
                         key_start = ptr;
-                        state = STATE_FILENAME;
+                        state     = STATE_FILENAME;
                     } else {
                         // Move to the end of the line
                         while (*ptr != '\n')
@@ -165,11 +165,10 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                         ptr++;  // Skip the newline character
 
                         // consume the leading CRLF before value
-                        if (*ptr == '\r' && *(ptr + 1) == '\n')
-                            ptr += 2;
+                        if (*ptr == '\r' && *(ptr + 1) == '\n') ptr += 2;
 
                         value_start = ptr;
-                        state = STATE_VALUE;
+                        state       = STATE_VALUE;
                     }
                 } else {
                     ptr++;
@@ -238,8 +237,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
 
                     // consume the leading CRLF before value if available
                     bool is_look_ahead_in_bounds = (ptr + 1) < (data + size);
-                    if (is_look_ahead_in_bounds && *ptr == '\r' && *(ptr + 1) == '\n')
-                        ptr += 2;
+                    if (is_look_ahead_in_bounds && *ptr == '\r' && *(ptr + 1) == '\n') ptr += 2;
 
                     // We expect the next line to be Content-Type
                     state = STATE_FILE_MIME_HEADER;
@@ -261,8 +259,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 }
             } break;
             case STATE_MIMETYPE: {
-                size_t mimetype_len = 0;  // Length of the mimetype
-                value_start = ptr;        // store the start of the mimetype
+                size_t mimetype_len = 0;    // Length of the mimetype
+                value_start         = ptr;  // store the start of the mimetype
 
                 // Compute the length of the mimetype as we advance the pointer
                 while (*ptr != '\r' && *ptr != '\n') {
@@ -313,8 +311,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
 
             } break;
             case STATE_FILE_BODY: {
-                header.offset = ptr - data;
-                size_t endpos = 0;
+                header.offset       = ptr - data;
+                size_t endpos       = 0;
                 size_t haystack_len = size - header.offset;
 
                 // Apparently strstr can't be used with binary data!!
@@ -377,8 +375,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     }
 
 cleanup:
-    if (code != MULTIPART_OK)
-        multipart_free_form(form);
+    if (code != MULTIPART_OK) multipart_free_form(form);
     return code;
 }
 
@@ -415,7 +412,7 @@ bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
         return false;
     }
 
-    size_t length = boundary_end - body;
+    size_t length         = boundary_end - body;
     size_t total_capacity = length + 1;
     if (size <= total_capacity) {
         LOG_ERROR("boundary buffer is smaller than %ld bytes", length + 1);
@@ -436,8 +433,8 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
         return false;
     }
 
-    const char* prefix = "--";
-    size_t prefix_len = strlen(prefix);
+    const char* prefix  = "--";
+    size_t prefix_len   = strlen(prefix);
     size_t total_length = strlen(content_type);
 
     if (strncasecmp(content_type, "multipart/form-data", 19) != 0) {
@@ -445,7 +442,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
         return false;
     }
 
-    char* start = sstrstr(content_type, "boundary=", total_length);
+    char* start   = sstrstr(content_type, "boundary=", total_length);
     size_t length = total_length - ((start + 9) - content_type);
 
     // Account for prefix and null terminater
@@ -461,8 +458,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
 }
 
 void multipart_free_form(MultipartForm* form) {
-    if (!form)
-        return;
+    if (!form) return;
 
     if (form->files) {
         for (size_t i = 0; i < form->num_files; i++) {
@@ -479,9 +475,9 @@ void multipart_free_form(MultipartForm* form) {
         form->fields = nullptr;
     }
 
-    form->num_files = 0;
+    form->num_files  = 0;
     form->num_fields = 0;
-    form = nullptr;
+    form             = nullptr;
 }
 
 // =============== Fields API ========================
@@ -587,7 +583,7 @@ const char* multipart_error_message(MultipartCode error) {
 }
 
 static FileHeader** realloc_files(MultipartForm* form) {
-    size_t new_capacity = form->num_files * 2;
+    size_t new_capacity    = form->num_files * 2;
     FileHeader** new_files = (FileHeader**)realloc(form->files, new_capacity * sizeof(FileHeader*));
     if (!new_files) {
         perror("Failed to reallocate memory for files");
@@ -598,7 +594,7 @@ static FileHeader** realloc_files(MultipartForm* form) {
 }
 
 static FormField* realloc_fields(MultipartForm* form) {
-    size_t new_capacity = form->num_fields * 2;
+    size_t new_capacity   = form->num_fields * 2;
     FormField* new_fields = (FormField*)realloc(form->fields, new_capacity * sizeof(FormField));
     if (!new_fields) {
         perror("Failed to reallocate memory for fields");

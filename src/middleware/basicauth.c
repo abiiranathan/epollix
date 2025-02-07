@@ -4,21 +4,21 @@
 #include "../include/middleware/basicauth.h"
 #include "../include/response.h"
 
-struct basic_auth_data {
+struct basicAuthUser {
     const char* username;  // Username
     const char* password;  // Password
     const char* realm;     // Protected area
 };
 
-BasicAuthData* create_basic_auth_data(const char* username, const char* password, const char* realm) {
-    BasicAuthData* data = (BasicAuthData*)malloc(sizeof(BasicAuthData));
-    if (data == nullptr) {
+BasicAuthUser* new_basic_auth_user(const char* username, const char* password, const char* realm) {
+    BasicAuthUser* data = (BasicAuthUser*)malloc(sizeof(BasicAuthUser));
+    if (!data) {
         return nullptr;
     }
 
     data->username = username;
     data->password = password;
-    data->realm = realm;
+    data->realm    = realm;
     return data;
 }
 
@@ -33,7 +33,7 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
     const char* encoded_credentials = auth_header + 6;
 
     // Decode the Base64-encoded credentials
-    size_t decoded_length = 0;
+    size_t decoded_length              = 0;
     unsigned char* decoded_credentials = crypto_base64_decode(encoded_credentials, &decoded_length);
     if (decoded_credentials == nullptr) {
         return -1;
@@ -49,7 +49,7 @@ static int parse_authorization_header(const char* auth_header, char** out_userna
         return -1;
     }
 
-    *colon_pos = '\0';
+    *colon_pos    = '\0';
     *out_username = strdup((char*)decoded_credentials);
     *out_password = strdup(colon_pos + 1);
 
@@ -63,7 +63,7 @@ static void userUnathorized(context_t* ctx) {
     send_string(ctx, "Unauthorized");
 }
 
-static void handle(context_t* ctx, Handler next, BasicAuthData* auth_data) {
+static void handle(context_t* ctx, Handler next, BasicAuthUser* auth_data) {
     const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
     if (auth_header == nullptr) {
         userUnathorized(ctx);
@@ -96,7 +96,7 @@ unauthorized:
 }
 
 void route_basic_auth(context_t* ctx, Handler next) {
-    BasicAuthData* auth_data = (BasicAuthData*)route_middleware_context(ctx);
+    BasicAuthUser* auth_data = (BasicAuthUser*)route_middleware_context(ctx);
     if (auth_data == nullptr) {
         userUnathorized(ctx);
         return;
@@ -105,7 +105,7 @@ void route_basic_auth(context_t* ctx, Handler next) {
 }
 
 void global_basic_auth(context_t* ctx, Handler next) {
-    BasicAuthData* auth_data = (BasicAuthData*)get_global_middleware_context(BASIC_AUTH_KEY);
+    BasicAuthUser* auth_data = (BasicAuthUser*)get_global_middleware_context(BASIC_AUTH_KEY);
     if (auth_data == nullptr) {
         userUnathorized(ctx);
         return;

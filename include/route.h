@@ -1,6 +1,7 @@
 #ifndef BA75E25E_A90C_4152_B4D7_55525BB1A33E
 #define BA75E25E_A90C_4152_B4D7_55525BB1A33E
 
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,24 +17,27 @@ typedef void (*Handler)(struct epollix_context* ctx);
 
 // Route is a struct that contains the route pattern, handler, and middleware.
 typedef struct Route {
-    HttpMethod method;         // HTTP Method.
-    RouteType type;            // Type of Route (Normal or Static)
-    char* pattern;             // Pattern to match
-    Handler handler;           // Handler for the route
-    PathParams* params;        // Parameters extracted from the URL
-    char* dirname;             // Dirname for static route(dynamic memory)
-    Middleware* middleware;    // Array of middleware functions(allocated dynamically)
-    uint8_t middleware_count;  // Number of middleware functions
-    void* mw_data;             // Middleware data. This is set by the user.
+    HttpMethod method;            // HTTP Method.
+    RouteType type;               // Type of Route (Normal or Static)
+    char* pattern;                // Pattern to match
+    Handler handler;              // Handler for the route
+    PathParams* params;           // Parameters extracted from the URL
+    char* dirname;                // Dirname for static route(dynamic memory)
+    Middleware* middleware;       // Array of middleware functions(allocated dynamically)
+    uint8_t middleware_count;     // Number of middleware functions
+    uint8_t middleware_capacity;  // Capacity of middleware
+    void* mw_data;                // Middleware data. This is set by the user.
 } Route;
 
 // Route group is a collection of routes that share the same prefix.
 typedef struct RouteGroup {
-    char* prefix;              // Prefix for the group
-    Route** routes;            // Array of routes(dynamic memory)
-    uint8_t count;             // Number of routes in the group
-    Middleware* middleware;    // Middleware for the group
-    uint8_t middleware_count;  // Number of middleware functions
+    char* prefix;                 // Prefix for the group
+    Route** routes;               // Array of routes(dynamic memory)
+    uint8_t count;                // Number of routes in the group
+    uint8_t capacity;             // capacity of routes in the group
+    Middleware* middleware;       // Middleware for the group
+    uint8_t middleware_count;     // Number of middleware functions
+    uint8_t middleware_capacity;  // Capacity of middleware functions
 } RouteGroup;
 
 // ==================== REGISTER ROUTES ON CTX ===================================
@@ -67,14 +71,7 @@ void* route_middleware_context(struct epollix_context* ctx);
 
 // Create a new RouteGroup.
 // A RouteGroup is a collection of routes that share the same prefix.
-// The allocated group must be freed by calling ROUTE_GROUP_FREE.
 RouteGroup* route_group(const char* pattern);
-
-// Free a RouteGroup allocated by ROUTE_GROUP.
-void route_group_free(RouteGroup* group);
-
-// Cleanup all routes.
-void routes_cleanup(void);
 
 // Register an OPTIONS route.
 Route* route_group_options(RouteGroup* group, const char* pattern, Handler handler);

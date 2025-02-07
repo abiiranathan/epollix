@@ -7,16 +7,16 @@ extern "C" {
 #include "../net.h"
 
 typedef enum {
-    LOG_NONE = 0,
-    LOG_DATE = 1 << 0,
-    LOG_TIME = 1 << 1,
-    LOG_METHOD = 1 << 2,
-    LOG_PATH = 1 << 3,
-    LOG_STATUS = 1 << 4,
-    LOG_LATENCY = 1 << 5,
+    LOG_NONE       = 0,
+    LOG_DATE       = 1 << 0,
+    LOG_TIME       = 1 << 1,
+    LOG_METHOD     = 1 << 2,
+    LOG_PATH       = 1 << 3,
+    LOG_STATUS     = 1 << 4,
+    LOG_LATENCY    = 1 << 5,
     LOG_USER_AGENT = 1 << 6,
-    LOG_IP = 1 << 7,
-    LOG_DEFAULT = LOG_DATE | LOG_TIME | LOG_METHOD | LOG_PATH | LOG_STATUS | LOG_LATENCY
+    LOG_IP         = 1 << 7,
+    LOG_DEFAULT    = LOG_DATE | LOG_TIME | LOG_METHOD | LOG_PATH | LOG_STATUS | LOG_LATENCY
 } LogFlag;
 
 extern LogFlag log_flags;
@@ -33,13 +33,16 @@ void remove_log_flags(LogFlag flags);
 // Append the log flags
 void append_log_flags(LogFlag flags);
 
-// Set the file where the logs will be written
-// Default is stdout
+// Set the file where the logs will be written.
+// Default is stdout.
+// If the FILE object is not a standard stream, it will be closed at exit for you.
 void set_log_file(FILE* file);
 
 // Logger middleware.
 // You can customize the logger by setting the log flags using set_log_flags or append_log_flags.
 // The default is LOG_DEFAULT.
+// The default FILE is stdout (which is significantly slow). Consider using a file if this is slowing down
+// your program.
 void epollix_logger(context_t* ctx, Handler next);
 
 #ifdef __cplusplus

@@ -1,4 +1,4 @@
-#define _GNU_SOURCE 1
+#define _GNU_SOURCE     1
 #define _POSIX_C_SOURCE 200809L
 
 #include "../include/response.h"
@@ -18,33 +18,31 @@
 
 // Create a new response object.
 bool response_init(MemoryPool* pool, Response* res, int client_fd) {
-    res->client_fd = client_fd;
-    res->status = StatusOK;
-    res->data = nullptr;
-    res->headers_sent = false;
-    res->chunked = false;
+    res->client_fd        = client_fd;
+    res->status           = StatusOK;
+    res->data             = nullptr;
+    res->headers_sent     = false;
+    res->chunked          = false;
     res->content_type_set = false;
-    res->header_count = 0;
-    res->header_capacity = 16;
-    res->headers = mpool_alloc(pool, sizeof(header_t*) * res->header_capacity);
+    res->header_count     = 0;
+    res->header_capacity  = 16;
+    res->headers          = mpool_alloc(pool, sizeof(header_t*) * res->header_capacity);
     return res->headers != NULL;
 }
 
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
     header_t* header = mpool_alloc(ctx->pool, sizeof(header_t));
-    if (!header)
-        return false;
+    if (!header) return false;
 
-    header->name = mpool_copy_str(ctx->pool, name);
+    header->name  = mpool_copy_str(ctx->pool, name);
     header->value = mpool_copy_str(ctx->pool, value);
 
-    if (!header->name || !header->value)
-        return false;
+    if (!header->name || !header->value) return false;
 
     // Reallocate the headers
     if (ctx->response->header_count == ctx->response->header_capacity) {
-        size_t capacity = ctx->response->header_capacity * 2;
+        size_t capacity    = ctx->response->header_capacity * 2;
         header_t** headers = mpool_alloc(ctx->pool, sizeof(header_t*) * capacity);
         if (!headers) {
             return false;
@@ -64,7 +62,7 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
 
 void process_response(context_t* ctx) {
     size_t globalCount = get_global_middleware_count();
-    Route* route = ctx->request->route;
+    Route* route       = ctx->request->route;
 
     // Directly execute the handler if no middleware
     if (route->middleware_count == 0 && globalCount == 0) {
@@ -75,8 +73,8 @@ void process_response(context_t* ctx) {
     // Define middleware context
     MiddlewareContext mw_ctx = {
         .handler = route->handler,
-        .index = 0,
-        .count = globalCount + route->middleware_count,
+        .index   = 0,
+        .count   = globalCount + route->middleware_count,
     };
 
     // Combine global and route middleware
@@ -100,8 +98,7 @@ void process_response(context_t* ctx) {
 }
 
 static void write_headers(context_t* ctx) {
-    if (ctx->response->headers_sent)
-        return;
+    if (ctx->response->headers_sent) return;
 
     // Set default status code if not set
     if (ctx->response->status == 0) {
@@ -109,7 +106,7 @@ static void write_headers(context_t* ctx) {
     }
 
     char header_res[2048];
-    char* current = header_res;
+    char* current    = header_res;
     size_t remaining = sizeof(header_res);
 
     // Precompute status code digits (3 characters)
@@ -118,7 +115,7 @@ static void write_headers(context_t* ctx) {
 
     // Get status text and length
     const char* status_text = http_status_text(status);
-    size_t status_text_len = strlen(status_text);
+    size_t status_text_len  = strlen(status_text);
 
     // Calculate status line space requirements
     const size_t status_line_len = 9 + 3 + 1 + status_text_len + 2;  // "HTTP/1.1 200 OK\r\n"
@@ -141,10 +138,10 @@ static void write_headers(context_t* ctx) {
 
     // Process headers
     for (size_t i = 0; i < ctx->response->header_count; i++) {
-        const char* name = ctx->response->headers[i]->name;
-        const char* value = ctx->response->headers[i]->value;
-        const size_t name_len = strlen(name);
-        const size_t value_len = strlen(value);
+        const char* name          = ctx->response->headers[i]->name;
+        const char* value         = ctx->response->headers[i]->value;
+        const size_t name_len     = strlen(name);
+        const size_t value_len    = strlen(value);
         const size_t header_space = name_len + 2 + value_len + 2;  // "Name: Value\r\n"
 
         if (remaining < header_space) {
@@ -174,7 +171,7 @@ static void write_headers(context_t* ctx) {
 
     // Calculate total length and send
     const size_t total_len = current - header_res;
-    const int nbytes_sent = sendall(ctx->response->client_fd, header_res, total_len);
+    const int nbytes_sent  = sendall(ctx->response->client_fd, header_res, total_len);
 
     if (nbytes_sent == -1 && errno != EBADF) {
         LOG_ERROR("Send error: %s, fd: %d", strerror(errno), ctx->response->client_fd);
@@ -260,7 +257,7 @@ int response_send_chunk(context_t* ctx, const char* data, size_t len) {
 
     // Send the chunked header
     char chunked_header[32] = {0};
-    int ret = snprintf(chunked_header, sizeof(chunked_header), "%zx\r\n", len);
+    int ret                 = snprintf(chunked_header, sizeof(chunked_header), "%zx\r\n", len);
     if (ret >= (int)sizeof(chunked_header)) {
         LOG_ERROR("chunked header truncated");
         // end the chunked response
@@ -469,8 +466,8 @@ bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t fi
         // Http range requests can be negative :) Wieird but true
         // I had to read the RFC to understand this, who would have thought?
         // https://datatracker.ietf.org/doc/html/rfc7233
-        startByte = file_size + startByte;    // subtract from the file size
-        endByte = startByte + byteRangeSize;  // send the next 4MB if not more than the file size
+        startByte = file_size + startByte;      // subtract from the file size
+        endByte   = startByte + byteRangeSize;  // send the next 4MB if not more than the file size
     } else if (endByte < 0) {
         // Even the end range can be negative. Deal with it!
         endByte = file_size + endByte;
@@ -487,7 +484,7 @@ bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t fi
     }
 
     *start = startByte;
-    *end = endByte;
+    *end   = endByte;
 
     return true;
 }
@@ -495,10 +492,10 @@ bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t fi
 // Sends the file content, handling both full and partial responses
 ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request) {
     ssize_t total_bytes_sent = 0;
-    ssize_t buffer_size = 4 << 20;  // 2MB buffer
-    int file_fd = fileno(file);
-    off_t offset = start;
-    ssize_t max_range = end - start + 1;
+    ssize_t buffer_size      = 4 << 20;  // 2MB buffer
+    int file_fd              = fileno(file);
+    off_t offset             = start;
+    ssize_t max_range        = end - start + 1;
 
     if (is_range_request) {
         buffer_size = max_range < buffer_size ? max_range : buffer_size;
@@ -514,8 +511,7 @@ ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end,
         ssize_t sent_bytes = sendfile(client_fd, file_fd, &offset, buffer_size);
         if (sent_bytes > 0) {
             total_bytes_sent += sent_bytes;
-            if (is_range_request && total_bytes_sent >= max_range)
-                break;
+            if (is_range_request && total_bytes_sent >= max_range) break;
             buffer_size = (max_range - total_bytes_sent) < buffer_size ? (max_range - total_bytes_sent) : buffer_size;
         } else if (sent_bytes == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {

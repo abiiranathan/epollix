@@ -6,8 +6,8 @@
 #include <string.h>
 #include "../include/response.h"
 
-#define BEARER "Bearer "
-#define BEARER_LEN 7
+#define BEARER                   "Bearer "
+#define BEARER_LEN               7
 #define JWT_PAYLOAD_CONTEXT_NAME "JWT_PAYLOAD_CONTEXT_NAME"
 
 void handleUnauthorized(context_t* ctx) {

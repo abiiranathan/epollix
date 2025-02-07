@@ -37,7 +37,7 @@ void set_context_value(context_t* ctx, const char* key, void* value) {
         return;
     }
 
-    ctx->locals[ctx->locals_count].key = strdup(key);
+    ctx->locals[ctx->locals_count].key   = strdup(key);
     ctx->locals[ctx->locals_count].value = value;
     ctx->locals_count++;
 }
@@ -60,10 +60,10 @@ void* get_context_value(context_t* ctx, const char* key) {
 }
 
 void enable_keepalive(int sockfd) {
-    int keepalive = 1;  // Enable keepalive
-    int keepidle = 60;  // 60 seconds before sending keepalive probes
-    int keepintvl = 5;  // 5 seconds interval between keepalive probes
-    int keepcnt = 3;    // 3 keepalive probes before closing the connection
+    int keepalive = 1;   // Enable keepalive
+    int keepidle  = 60;  // 60 seconds before sending keepalive probes
+    int keepintvl = 5;   // 5 seconds interval between keepalive probes
+    int keepcnt   = 3;   // 3 keepalive probes before closing the connection
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int)) < 0) {
         LOG_FATAL("setsockopt(): new_tcpserver failed\n");

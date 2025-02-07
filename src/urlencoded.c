@@ -9,8 +9,7 @@ map* parse_urlencoded_form(const char* url) {
     }
 
     char* q = strstr(url, "?");
-    if (!q)
-        return nullptr;
+    if (!q) return nullptr;
     q++;
 
     char* query = strdup(q);
@@ -19,14 +18,14 @@ map* parse_urlencoded_form(const char* url) {
         return nullptr;
     }
 
-    char* key = nullptr;
+    char* key   = nullptr;
     char* value = nullptr;
     char *save_ptr, *save_ptr2;
     bool success = true;
 
     char* token = strtok_r(query, "&", &save_ptr);
     while (token != nullptr) {
-        key = strtok_r(token, "=", &save_ptr2);
+        key   = strtok_r(token, "=", &save_ptr2);
         value = strtok_r(nullptr, "=", &save_ptr2);
 
         if (key != nullptr && value != nullptr) {

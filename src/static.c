@@ -21,7 +21,7 @@ void enable_directory_browsing(bool enable) {
 
 static void send_error_page(context_t* ctx, http_status status) {
     const char* status_str = http_status_text(status);
-    char* error_page = nullptr;
+    char* error_page       = nullptr;
     int ret = asprintf(&error_page, "<html><head><title>%d %s</title></head><body><h1>%d %s</h1></body></html>", status,
                        status_str, status, status_str);
     if (ret == -1) {
@@ -47,7 +47,7 @@ static inline void append_or_error(context_t* ctx, Arena* arena, cstr* response,
 static void format_file_size(off_t size, char* buf, size_t buffer_size) {
     char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
 
-    int i = 0;
+    int i    = 0;
     double s = size;
 
     while (s >= 1024 && i < 8) {
@@ -113,7 +113,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         return;
     }
 
-    char* token = strtok(path, "/");
+    char* token                        = strtok(path, "/");
     char breadcrumb_path[MAX_PATH_LEN] = {0};
 
     while (token) {
