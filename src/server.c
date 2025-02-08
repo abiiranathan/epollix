@@ -1,35 +1,48 @@
 #define _GNU_SOURCE 1
 
+#include <errno.h>
+#include <netdb.h>
+#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
+#include <solidc/thread.h>
+#include <solidc/threadpool.h>
+#include <sys/epoll.h>
+
 #include "../include/server.h"
 #include "../include/response.h"
 
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
-#include <solidc/cstr.h>
-#include <solidc/filepath.h>
-#include <solidc/thread.h>
-#include <solidc/threadpool.h>
-#include <stdio.h>
-#include <sys/epoll.h>
-#include <sys/sendfile.h>
-#include <unistd.h>
+typedef struct read_task {
+    int epoll_fd;   // Epoll file descriptor
+    int client_fd;  // Client file descriptor
+} Task;
 
-EpollServer* srv = nullptr;  // global server object
+// An epoll(2) powered TCP server.
+typedef struct EpollServer {
+    size_t num_workers;       // Number of worker threads
+    int port;                 // Port the server is listening on
+    int server_fd;            // Server file descriptor
+    int epoll_fd;             // Epoll file descriptor
+    int timeout_sec;          // client timeout in seconds
+    bool enable_keepalive;    // Enable client keepalive
+    bool enable_tcp_nodelay;  // Turn off Nagle's algorithm
+    ThreadPool* pool;         // Threadpool
+} EpollServer;
+
+// global server object
+EpollServer* epollServer = nullptr;
 
 #define TASK_CAPACITY (MAXEVENTS / 2)
-Task taskPool[TASK_CAPACITY];
+static Task taskPool[TASK_CAPACITY];
 
-static void initTasks(void) {
+static inline void initTasks(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         taskPool[i].client_fd = -1;
         taskPool[i].epoll_fd  = -1;
     }
 }
 
-static Task* getFreeTask(void) {
+// Get a free task from the pool. No need to syncronise because the event loop
+// runs only in main thread.
+static inline Task* getFreeTask(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         if (taskPool[i].client_fd == -1) {
             return &taskPool[i];
@@ -38,39 +51,29 @@ static Task* getFreeTask(void) {
     return NULL;
 }
 
-static void PutTask(Task* task) {
+static inline void PutTask(Task* task) {
     task->client_fd = -1;
     task->epoll_fd  = -1;
 }
 
+// Delete client socket from epoll tracking and close the client socket.
 static inline void close_connection(int client_fd, int epoll_fd) {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
     close(client_fd);
 }
 
+// Connection handler thread worker.
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
 
     Request req;
     Response res;
-    MemoryPool* pool = mpool_create(2 * 1024 * 1024);
-    if (!pool) {
-        close_connection(task->client_fd, task->epoll_fd);
-        PutTask(task);
-        return;
-    }
 
-    if (!request_init(pool, &req, task->client_fd, task->epoll_fd)) {
-        close_connection(task->client_fd, task->epoll_fd);
-        PutTask(task);
-    }
-
-    if (!response_init(pool, &res, task->client_fd)) {
-        close_connection(task->client_fd, task->epoll_fd);
-        PutTask(task);
-        return;
-    };
-
+    // Initialize a per-request memory pool of 2MB
+    MemoryPool* pool = mpool_create(2 << 20);
+    if (!pool) goto error;
+    if (!request_init(pool, &req, task->client_fd, task->epoll_fd)) goto error;
+    if (!response_init(pool, &res, task->client_fd)) goto error;
     process_request(&req, pool);
 
     if (req.route != nullptr) {
@@ -87,13 +90,18 @@ static void handleConnection(void* arg) {
     close_connection(task->client_fd, task->epoll_fd);
 
     // cleanup request params
-    if (req.query_params) {
-        map_destroy(req.query_params);
-    }
-
+    if (req.query_params) map_destroy(req.query_params);
     PutTask(task);
-
     mpool_destroy(pool);
+    return;
+
+error:
+    http_error(task->client_fd, StatusInternalServerError, ERR_MEMORY_ALLOC_FAILED);
+    close_connection(task->client_fd, task->epoll_fd);
+    PutTask(task);
+    if (pool) {
+        mpool_destroy(pool);
+    }
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -251,6 +259,16 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port) {
     return server;
 }
 
+// Enable client keep alive.
+void epoll_server_enable_keepalive(EpollServer* server, bool flag) {
+    server->enable_keepalive = flag;
+}
+
+// Enable client keep alive.
+void epoll_server_enable_tcp_nodelay(EpollServer* server, bool flag) {
+    server->enable_tcp_nodelay = flag;
+}
+
 void handle_sigint(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         LOG_INFO("Received signal %s\n", strsignal(sig));
@@ -277,7 +295,7 @@ static void install_signal_handler(void) {
 
 // Listen and serve on the given port.
 int epoll_server_listen(EpollServer* server) {
-    srv = server;
+    epollServer = server;
 
     // Add the server socket to the epoll instance
     struct epoll_event event = {0}, events[MAXEVENTS] = {0};
@@ -297,7 +315,7 @@ int epoll_server_listen(EpollServer* server) {
     if (maxfd == -1) {
         perror("sysconf");
     } else {
-        printf("[Max file descriptors allowed: %ld]\n", maxfd);
+        printf("[Max open file descriptors allowed: %ld]\n", maxfd);
     }
 
     // Install signal handler for SIGINT and SIGTERM
@@ -344,19 +362,23 @@ int epoll_server_listen(EpollServer* server) {
                         continue;
                     }
 
-                    // Only disable based on configuation
-                    // // Disable Nagle's algorithm for the client socket
-                    int flag = 1;
-                    setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+                    // Disable Nagle's algorithm for the client socket
+                    if (server->enable_tcp_nodelay) {
+                        int flag = 1;
+                        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+                    }
 
                     // Enable keepalive for the client socket
-                    enable_keepalive(client_fd);
+                    if (server->enable_keepalive) {
+                        enable_keepalive(client_fd);
+                    }
 
-                    // TODO: Pass timeout as a configuration
-                    struct timeval timeout;
-                    timeout.tv_sec  = 5;  // 5 seconds timeout
-                    timeout.tv_usec = 0;
-                    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
+                    if (server->timeout_sec > 0) {
+                        struct timeval timeout;
+                        timeout.tv_sec  = server->timeout_sec;
+                        timeout.tv_usec = 0;
+                        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
+                    }
                 }
             } else {
                 int taskRetries = 10;
@@ -394,30 +416,24 @@ int epoll_server_listen(EpollServer* server) {
     return 0;
 }
 
-// shutdown the server.
-static void epoll_server_shutdown(EpollServer* server) {
-    if (!server) {
-        return;
-    }
-
-    if (server->pool) {
-        threadpool_destroy(server->pool);
-    }
-
-    if (server->epoll_fd != -1) {
-        close(server->epoll_fd);
-    }
-
-    if (server->server_fd != -1) {
-        close(server->server_fd);
-    }
-
-    free(server);
-    server = nullptr;
-}
-
 // Destructor extension for gcc and clang.
 // This is automatically called atexit.
 __attribute__((destructor)) void server_destructor(void) {
-    epoll_server_shutdown(srv);
+    if (!epollServer) {
+        return;
+    }
+
+    if (epollServer->pool) {
+        threadpool_destroy(epollServer->pool);
+    }
+
+    if (epollServer->epoll_fd != -1) {
+        close(epollServer->epoll_fd);
+    }
+
+    if (epollServer->server_fd != -1) {
+        close(epollServer->server_fd);
+    }
+
+    free(epollServer);
 }

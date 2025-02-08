@@ -6,8 +6,6 @@ extern "C" {
 #endif
 
 #include <assert.h>
-#include <cipherkit/cipherkit.h>
-#include <cjson/cJSON.h>
 #include <time.h>
 #include <unistd.h>
 

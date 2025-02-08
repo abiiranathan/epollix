@@ -5,31 +5,22 @@
 extern "C" {
 #endif
 
-#include <solidc/arena.h>
-#include <solidc/threadpool.h>
 #include "request.h"
 #include "static.h"
 #include "types.h"
 
-#define MAX_READ_TASKS 1024
-
-typedef struct read_task {
-    int epoll_fd;   // Epoll file descriptor
-    int client_fd;  // Client file descriptor
-} Task;
-
 // An epoll(2) powered TCP server.
-typedef struct EpollServer {
-    size_t num_workers;  // Number of worker threads
-    int port;            // Port the server is listening on
-    int server_fd;       // Server file descriptor
-    int epoll_fd;        // Epoll file descriptor
-    ThreadPool* pool;    // Thread pool
-} EpollServer;
+typedef struct EpollServer EpollServer;
 
 // Create a new EpollServer. If num_workers is 0, we use the num_cpus on the target machine.
 // The best num_workers is between 2 and 4. Otherwise LOCK contension will increase latency.
 EpollServer* epoll_server_create(size_t num_workers, const char* port);
+
+// Enable client keep alive.
+void epoll_server_enable_keepalive(EpollServer* server, bool flag);
+
+// Enable client keep alive.
+void epoll_server_enable_tcp_nodelay(EpollServer* server, bool flag);
 
 // Start the server and listen on the configured port.
 int epoll_server_listen(EpollServer* server);

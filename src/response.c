@@ -490,7 +490,7 @@ bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t fi
 }
 
 // Sends the file content, handling both full and partial responses
-ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request) {
+static inline ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request) {
     ssize_t total_bytes_sent = 0;
     ssize_t buffer_size      = 4 << 20;  // 2MB buffer
     int file_fd              = fileno(file);

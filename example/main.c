@@ -3,6 +3,9 @@
 
 #include <sys/cdefs.h>
 #include <stdio.h>
+#include <cipherkit/cipherkit.h>
+#include <cjson/cJSON.h>
+
 #include "../include/epollix.h"
 
 static void index_page(context_t* ctx) {
@@ -308,11 +311,10 @@ int main(int argc, char** argv) {
     use_group_middleware(group, 1, global_basic_auth);
 
     EpollServer* server = epoll_server_create(4, port);
-    if (server == nullptr) {
-        LOG_FATAL("Failed to create server\n");
-    }
+    LOG_ASSERT(server, "Unable to create server");
 
-    // Start the server
-    epoll_server_listen(server);
-    return 0;
+    epoll_server_enable_keepalive(server, true);
+    epoll_server_enable_tcp_nodelay(server, false);
+
+    return epoll_server_listen(server);
 }
