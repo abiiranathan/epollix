@@ -1,5 +1,6 @@
 #include <map.h>
 #include <solidc/memory_pool.h>
+#include <solidc/defer.h>
 #include "../include/constants.h"
 #include "../include/logging.h"
 #include "../include/net.h"
@@ -10,25 +11,28 @@
 static void test_parse_request_headers(void) {
     Request* req = (Request*)malloc(sizeof(Request));
     LOG_ASSERT(req != nullptr, "Failed to allocate memory for request");
+    defer({ free(req); });
 
     MemoryPool* pool = mpool_create(4096);
     LOG_ASSERT(pool != nullptr, "Memory pool alloc failed");
+    defer({ mpool_destroy(pool); });
 
-    req->body = nullptr;
-    req->content_length = 0;
-    req->route = nullptr;
-    req->query_params = map_create(10, key_compare_char_ptr, false);
-    req->header_count = 0;
-    req->path = nullptr;
-    req->method = M_GET;
+    req->body            = nullptr;
+    req->content_length  = 0;
+    req->route           = nullptr;
+    req->query_params    = map_create(10, key_compare_char_ptr, false);
+    req->header_count    = 0;
+    req->path            = nullptr;
+    req->method          = M_GET;
     req->header_capacity = 36;
-    req->headers = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
+    req->headers         = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
 
     LOG_ASSERT(req->headers != nullptr, "Failed to create headers");
     LOG_ASSERT(req->query_params != nullptr, "Failed to create map for query_params");
+    defer({ map_destroy(req->query_params); });
 
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    size_t length = strlen(header_text);
+    size_t length           = strlen(header_text);
 
     http_error_t result = parse_request_headers(pool, req, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
@@ -40,13 +44,6 @@ static void test_parse_request_headers(void) {
     LOG_ASSERT(strcmp(req->headers[1]->value, "curl/7.68.0") == 0, "Expected curl/7.68.0");
     LOG_ASSERT(strcmp(req->headers[2]->name, "Accept") == 0, "Expected Accept header");
     LOG_ASSERT(strcmp(req->headers[2]->value, "*/*") == 0, "Expected */*");
-
-    mpool_destroy(pool);
-
-    if (req->query_params) {
-        map_destroy(req->query_params);
-    }
-    free(req);
 
     LOG_INFO("test_parse_request_headers passed");
 }
@@ -65,7 +62,7 @@ static void test_decode_uri(void) {
 static void test_encode_uri(void) {
     char* decoded = "Hello World!";
     char* encoded = encode_uri(decoded);
-    bool result = strcmp(encoded, "Hello%20World%21") == 0;
+    bool result   = strcmp(encoded, "Hello%20World%21") == 0;
     LOG_ASSERT(result, "Failed to encode URI");
     (void)result;
     free(encoded);
@@ -127,16 +124,16 @@ static void test_parse_url_query_params(void) {
 // test match params in params.c
 static void test_match_params(void) {
     const char* pattern = "/about/{name}/profile/{id}/";
-    const char url[] = "/about/John Doe/profile/123/";
+    const char url[]    = "/about/John Doe/profile/123/";
 
     PathParams pathParams = {0};
-    bool matches = match_path_parameters(pattern, url, &pathParams);
+    bool matches          = match_path_parameters(pattern, url, &pathParams);
     LOG_ASSERT(matches, "Failed to match params");
     LOG_ASSERT(pathParams.match_count == 2, "Expected 2 matches");
 
     // Get param by name
     const char* name = get_path_param(&pathParams, "name");
-    const char* id = get_path_param(&pathParams, "id");
+    const char* id   = get_path_param(&pathParams, "id");
 
     LOG_ASSERT(name != nullptr, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John Doe") == 0, "Expected John Doe");
