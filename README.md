@@ -2,9 +2,6 @@
 
 Robust web server written in C using epoll.
 
-Warning: This is a work in progress and possibly not yet fit for production use.
-It's API is going to change. That said, give it a try and report bugs!
-
 ## Features
 
 - [x] Robust HTTP server with epoll.
@@ -14,7 +11,7 @@ It's API is going to change. That said, give it a try and report bugs!
 - [x] Form processing(application/x-www-form-urlencoded + multipart/form-data that supports multiple file uploads).
 - [x] Support for binary files in multipart/form-data
 - [x] Support for range requests( making it easy to stream videos and audio files)
-- [x] Very fast (30K - 40K req/sec on 2 threads) and efficient, uses epoll for event handling. Consumes ~= 5 MB of memory for > 1,000,000 concurrent connections and < 15% CPU usage.
+- [x] Very fast (80K - 90K req/sec on 4 threads) and efficient, uses epoll for event handling. Consumes ~= 6 MB of memory for > 1,000,000 concurrent connections and < 15% CPU usage.
 - [x] Robust Middleware support at route, group, and application level.
 - [x] CMAKE integration
 - [x] Use of `solidc` library for common data structures and utilities.
@@ -24,8 +21,6 @@ It's API is going to change. That said, give it a try and report bugs!
 - [x] `epollix` comes with a simple and easy to use logger middleware, BasicAuth middleware, and BearerAuth middleware using JWT.
 - [x] `epollix` has a crypto module that supports hashing, encryption, base64 encoding and decoding and decryption using openssl and libsodium.
 - [x] Support for gzip compression and decompression using zlib. Both static files and dynamic responses can be compressed.
-
-> No support for windows yet. Honestly, I don't know how to implement epoll on windows. If you know how to do it, please let me know.
 
 ## Big missing features
 
@@ -46,12 +41,14 @@ It's API is going to change. That said, give it a try and report bugs!
 
 ## Installation
 
-See below for instructions on how to install the solidc dependency.
+This repository contains a [./build.sh](./build.sh) script that will install all
+the required dependencies on Debian/Ubuntu and Arch, then build the library.
 
 ```bash
 git clone https://github.com/abiiranathan/epollix.git
-cd epollix
-make
+
+chmod +x build.sh
+./build.sh
 ```
 
 ### Dependencies
@@ -63,14 +60,6 @@ make
 - **cipherkit**: A personal C library for cryptographic functions, hashing etc. [Find solidc on Github](https://github.com/abiiranathan/cipherkit)
 
 The middleware and example are only built if the optional dependencies are found. If you want to build the middleware and example, you need to clone the `cipherkit` repository and build it. Not that it also depends on OpenSSL, libsodium, zlib, cjson.
-
-Find the installation instructions for `cipherkit` from the link above.
-
-```bash
-git clone https://github.com/abiiranathan/cipherkit.git
-cd cipherkit
-sudo make install
-```
 
 ## Run the example
 
