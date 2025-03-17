@@ -1,5 +1,4 @@
 #include <map.h>
-#include <solidc/memory_pool.h>
 #include <solidc/defer.h>
 #include "../include/constants.h"
 #include "../include/logging.h"
@@ -13,9 +12,9 @@ static void test_parse_request_headers(void) {
     LOG_ASSERT(req != nullptr, "Failed to allocate memory for request");
     defer({ free(req); });
 
-    MemoryPool* pool = mpool_create(4096);
-    LOG_ASSERT(pool != nullptr, "Memory pool alloc failed");
-    defer({ mpool_destroy(pool); });
+    Arena* arena = arena_create(4096);
+    LOG_ASSERT(arena != nullptr, "Memory pool alloc failed");
+    defer({ arena_destroy(arena); });
 
     req->body            = nullptr;
     req->content_length  = 0;
@@ -25,7 +24,7 @@ static void test_parse_request_headers(void) {
     req->path            = nullptr;
     req->method          = M_GET;
     req->header_capacity = 36;
-    req->headers         = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
+    req->headers         = arena_alloc(arena, sizeof(header_t*) * req->header_capacity);
 
     LOG_ASSERT(req->headers != nullptr, "Failed to create headers");
     LOG_ASSERT(req->query_params != nullptr, "Failed to create map for query_params");
@@ -34,7 +33,7 @@ static void test_parse_request_headers(void) {
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length           = strlen(header_text);
 
-    http_error_t result = parse_request_headers(pool, req, header_text, length);
+    http_error_t result = parse_request_headers(arena, req, header_text, length);
     LOG_ASSERT(result == http_ok, "Failed to parse request headers");
     (void)result;
 
@@ -74,16 +73,16 @@ static void test_encode_uri(void) {
 static void test_header_fromstring(void) {
     const char* header_text = "Content-Type: text/html";
 
-    MemoryPool* pool = mpool_create(0);
-    LOG_ASSERT(pool, "Pool must not be null");
+    Arena* arena = arena_create(4096);
+    LOG_ASSERT(arena, "Pool must not be null");
 
-    header_t* header = header_fromstring(pool, header_text);
+    header_t* header = header_fromstring(arena, header_text);
     LOG_ASSERT(strcmp(header->name, "Content-Type") == 0, "Expected Content-Type header, got %s", header->name);
     LOG_ASSERT(strcmp(header->value, "text/html") == 0, "Expected text/html, got %s", header->value);
 
     UNUSED(header);
     LOG_INFO("test_header_fromstring passed");
-    mpool_destroy(pool);
+    arena_destroy(arena);
 }
 
 // bool parse_url_query_params(char* query, map* query_params)
@@ -94,9 +93,9 @@ static void test_parse_url_query_params(void) {
     char* query = strdup("name=John&age=30&location=USA");
     LOG_ASSERT(query != nullptr, "Failed to allocate memory for query");
 
-    MemoryPool* pool = mpool_create(4096);
-    LOG_ASSERT(pool != nullptr, "Memory pool alloc failed");
-    bool result = parse_url_query_params(pool, query, query_params);
+    Arena* arena = arena_create(4096);
+    LOG_ASSERT(arena != nullptr, "Memory arena alloc failed");
+    bool result = parse_url_query_params(arena, query, query_params);
     LOG_ASSERT(result, "Failed to parse query params");
     (void)result;
 
@@ -118,7 +117,7 @@ static void test_parse_url_query_params(void) {
 
     map_destroy(query_params);
     free(query);
-    mpool_destroy(pool);
+    arena_destroy(arena);
 }
 
 // test match params in params.c

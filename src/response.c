@@ -17,7 +17,7 @@
 #include "../include/request.h"
 
 // Create a new response object.
-bool response_init(MemoryPool* pool, Response* res, int client_fd) {
+bool response_init(Arena* arena, Response* res, int client_fd) {
     res->client_fd        = client_fd;
     res->status           = StatusOK;
     res->data             = nullptr;
@@ -26,24 +26,24 @@ bool response_init(MemoryPool* pool, Response* res, int client_fd) {
     res->content_type_set = false;
     res->header_count     = 0;
     res->header_capacity  = 16;
-    res->headers          = mpool_alloc(pool, sizeof(header_t*) * res->header_capacity);
+    res->headers          = arena_alloc(arena, sizeof(header_t*) * res->header_capacity);
     return res->headers != NULL;
 }
 
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
-    header_t* header = mpool_alloc(ctx->pool, sizeof(header_t));
+    header_t* header = arena_alloc(ctx->arena, sizeof(header_t));
     if (!header) return false;
 
-    header->name  = mpool_copy_str(ctx->pool, name);
-    header->value = mpool_copy_str(ctx->pool, value);
+    header->name  = arena_alloc_string(ctx->arena, name);
+    header->value = arena_alloc_string(ctx->arena, value);
 
     if (!header->name || !header->value) return false;
 
     // Reallocate the headers
     if (ctx->response->header_count == ctx->response->header_capacity) {
         size_t capacity    = ctx->response->header_capacity * 2;
-        header_t** headers = mpool_alloc(ctx->pool, sizeof(header_t*) * capacity);
+        header_t** headers = arena_alloc(ctx->arena, sizeof(header_t*) * capacity);
         if (!headers) {
             return false;
         }
@@ -78,7 +78,7 @@ void process_response(context_t* ctx) {
     };
 
     // Combine global and route middleware
-    Middleware* combined_middleware = mpool_alloc(ctx->pool, sizeof(Middleware) * mw_ctx.count);
+    Middleware* combined_middleware = arena_alloc(ctx->arena, sizeof(Middleware) * mw_ctx.count);
     if (!combined_middleware) {
         LOG_ERROR("Failed to allocate memory for combined middleware");
         http_error(ctx->response->client_fd, StatusInternalServerError, "Internal server error");
@@ -110,8 +110,8 @@ static void write_headers(context_t* ctx) {
     size_t remaining = sizeof(header_res);
 
     // Precompute status code digits (3 characters)
-    unsigned int status = ctx->response->status;
-    char status_code[3] = {'0' + (status / 100), '0' + ((status / 10) % 10), '0' + (status % 10)};
+    http_status status  = ctx->response->status;
+    char status_code[3] = {('0' + (char)(status / 100)), '0' + ((status / 10) % 10), '0' + (status % 10)};
 
     // Get status text and length
     const char* status_text = http_status_text(status);
@@ -170,9 +170,8 @@ static void write_headers(context_t* ctx) {
     }
 
     // Calculate total length and send
-    const size_t total_len = current - header_res;
-    const int nbytes_sent  = sendall(ctx->response->client_fd, header_res, total_len);
-
+    const size_t total_len    = current - header_res;
+    const ssize_t nbytes_sent = sendall(ctx->response->client_fd, header_res, total_len);
     if (nbytes_sent == -1 && errno != EBADF) {
         LOG_ERROR("Send error: %s, fd: %d", strerror(errno), ctx->response->client_fd);
     }
@@ -187,7 +186,7 @@ void send_status(context_t* ctx, http_status code) {
 
 // Send the response to the client.
 // Returns the number of bytes sent or -1 on error.
-int send_response(context_t* ctx, const char* data, size_t len) {
+ssize_t send_response(context_t* ctx, const char* data, size_t len) {
     char content_len[32];
     snprintf(content_len, sizeof(content_len), "%ld", len);
     set_response_header(ctx, "Content-Length", content_len);
@@ -195,21 +194,21 @@ int send_response(context_t* ctx, const char* data, size_t len) {
     return sendall(ctx->response->client_fd, data, len);
 }
 
-int send_json(context_t* ctx, const char* data, size_t len) {
+ssize_t send_json(context_t* ctx, const char* data, size_t len) {
     set_response_header(ctx, CONTENT_TYPE_HEADER, "application/json");
     return send_response(ctx, data, len);
 }
 
 // Send null-terminated JSON string.
-int send_json_string(context_t* ctx, const char* data) {
+ssize_t send_json_string(context_t* ctx, const char* data) {
     return send_json(ctx, data, strlen(data));
 }
 
-int send_string(context_t* ctx, const char* data) {
+ssize_t send_string(context_t* ctx, const char* data) {
     return send_response(ctx, data, strlen(data));
 }
 
-__attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const char* fmt, ...) {
+__attribute__((format(printf, 2, 3))) ssize_t send_string_f(context_t* ctx, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     char* buffer = nullptr;
@@ -237,7 +236,7 @@ __attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const ch
     va_end(args);
 
     // Send the response
-    int result = send_response(ctx, buffer, len);
+    ssize_t result = send_response(ctx, buffer, len);
 
     // Free the allocated buffer
     free(buffer);
@@ -248,7 +247,7 @@ __attribute__((format(printf, 2, 3))) int send_string_f(context_t* ctx, const ch
 // Returns the number of bytes written.
 // To end the chunked response, call response_end.
 // The first-time call to this function will send the chunked header.
-int response_send_chunk(context_t* ctx, const char* data, size_t len) {
+ssize_t response_send_chunk(context_t* ctx, const char* data, size_t len) {
     if (!ctx->response->headers_sent) {
         ctx->response->status = StatusOK;
         set_response_header(ctx, "Transfer-Encoding", "chunked");
@@ -265,7 +264,7 @@ int response_send_chunk(context_t* ctx, const char* data, size_t len) {
         return -1;
     }
 
-    int nbytes_sent = send(ctx->response->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
+    ssize_t nbytes_sent = send(ctx->response->client_fd, chunked_header, strlen(chunked_header), MSG_NOSIGNAL);
     if (nbytes_sent == -1) {
         perror("error sending chunked header");
         response_end(ctx);
@@ -290,8 +289,8 @@ int response_send_chunk(context_t* ctx, const char* data, size_t len) {
 }
 
 // End the chunked response. Must be called after all chunks have been sent.
-int response_end(context_t* ctx) {
-    int nbytes_sent = sendall(ctx->response->client_fd, "0\r\n\r\n", 5);
+ssize_t response_end(context_t* ctx) {
+    ssize_t nbytes_sent = sendall(ctx->response->client_fd, "0\r\n\r\n", 5);
     if (nbytes_sent == -1) {
         perror("error sending end of chunked response");
         return -1;
@@ -343,7 +342,7 @@ static inline ssize_t send_file_content(int client_fd, FILE* file, ssize_t start
 static inline void set_content_disposition(context_t* ctx, const char* filename);
 
 // Main function to serve a file
-int servefile(context_t* ctx, const char* filename) {
+ssize_t servefile(context_t* ctx, const char* filename) {
     Request* req = ctx->request;
 
     // Guess content-type if not already set
@@ -405,7 +404,17 @@ int servefile(context_t* ctx, const char* filename) {
 // This is useful when the file is already opened by the caller and its not efficient to read
 // the contents of the file again.
 // The file is not closed by this function.
-int serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* filename) {
+ssize_t serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char* filename) {
+    if (file == nullptr) {
+        fprintf(stderr, "FILE*file is NULL\n");
+        return -1;
+    }
+
+    if (file_size == 0) {
+        fprintf(stderr, "file size must be greater than zero\n");
+        return -1;
+    }
+
     Request* req = ctx->request;
 
     // Guess content-type if not already set
@@ -492,7 +501,7 @@ bool validate_range(bool has_end_range, ssize_t* start, ssize_t* end, off64_t fi
 // Sends the file content, handling both full and partial responses
 static inline ssize_t send_file_content(int client_fd, FILE* file, ssize_t start, ssize_t end, bool is_range_request) {
     ssize_t total_bytes_sent = 0;
-    ssize_t buffer_size      = 4 << 20;  // 2MB buffer
+    ssize_t buffer_size      = 4 << 20;  // 4MB buffer
     int file_fd              = fileno(file);
     off_t offset             = start;
     ssize_t max_range        = end - start + 1;

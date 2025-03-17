@@ -6,6 +6,7 @@
 #include <solidc/arena.h>
 #include <solidc/cstr.h>
 #include <solidc/filepath.h>
+#include <solidc/defer.h>
 
 // Flag to enable or disable directory browsing.
 static bool browse_enabled = false;
@@ -13,10 +14,32 @@ static bool browse_enabled = false;
 // Not found route is defined by the request.c file.
 extern Route* notFoundRoute;
 
+static bool append_breadcrumbs(context_t* ctx, cstr* html, const char* base_prefix);
+static bool list_directory_contents(context_t* ctx, cstr* html, const char* dirname, const char* base_prefix);
+
 // Enable or disable directory browsing for the server.
 // If the requested path is a directory, the server will list the files in the directory.
 void enable_directory_browsing(bool enable) {
     browse_enabled = enable;
+}
+
+// Write human readable file size to buffer. A good buffer size is like >= 32.
+static void format_file_size(off_t size, char* buf, size_t buffer_size) {
+    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+
+    int i    = 0;
+    double s = (double)size;
+
+    while (s >= 1024 && i < 8) {
+        s /= 1024;
+        i++;
+    }
+
+    if (i == 0) {
+        snprintf(buf, buffer_size, "%ld %s", (long)size, units[i]);
+    } else {
+        snprintf(buf, buffer_size, "%.0f %s", s, units[i]);
+    }
 }
 
 static void send_error_page(context_t* ctx, http_status status) {
@@ -35,154 +58,214 @@ static void send_error_page(context_t* ctx, http_status status) {
     free(error_page);
 }
 
-static inline void append_or_error(context_t* ctx, Arena* arena, cstr* response, const char* str) {
-    if (!cstr_append(arena, response, str)) {
-        LOG_ERROR("Failed to append to response\n");
+static inline bool append_or_error(context_t* ctx, cstr* response, const char* str) {
+    bool ok;
+    if (!(ok = str_append(&response, str))) {
         send_error_page(ctx, StatusInternalServerError);
-        return;
     }
+    return ok;
 }
 
-// Write human readable file size to buffer. A good buffer size is like >= 32.
-static void format_file_size(off_t size, char* buf, size_t buffer_size) {
-    char units[][3] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
-
-    int i    = 0;
-    double s = size;
-
-    while (s >= 1024 && i < 8) {
-        s /= 1024;
-        i++;
-    }
-
-    if (i == 0) {
-        snprintf(buf, buffer_size, "%ld %s", (long)size, units[i]);
-    } else {
-        snprintf(buf, buffer_size, "%.0f %s", s, units[i]);
-    }
-}
-
+/**
+ * Generates and serves an HTML directory listing page
+ * 
+ * @param ctx The HTTP context
+ * @param dirname The directory path to list
+ * @param base_prefix The base URL prefix for links
+ */
 static void serve_directory_listing(context_t* ctx, const char* dirname, const char* base_prefix) {
-    DIR* dir;
-    struct dirent* ent;
+    // Initialize HTML response with header and styles
+    cstr* html = str_from(
+        "<!DOCTYPE html>"
+        "<html>"
+        "<head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+        "<title>Directory Listing</title>"
+        "<style>"
+        "body { font-family: Arial, sans-serif; padding: 1rem; max-width: 1200px; margin: 0 auto; }"
+        "h1 { color: #333; margin-bottom: 1rem; }"
+        "table { width: 100%; border-collapse: collapse; }"
+        "th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }"
+        "th { background-color: #f2f2f2; position: sticky; top: 0; }"
+        "a { text-decoration: none; color: #0066cc; }"
+        "a:hover { text-decoration: underline; }"
+        ".breadcrumbs { margin-bottom: 20px; padding: 10px; background-color: #f8f8f8; border-radius: 4px; }"
+        ".breadcrumbs a { color: #0066cc; margin: 0 5px; }"
+        "</style>"
+        "</head>"
+        "<body>"
+        "<h1>Directory Listing</h1>");
 
-    Arena* arena = arena_create(1 * 1024 * 1024);
-    if (!arena) {
-        LOG_ERROR("Failed to create arena\n");
+    if (!html) {
         send_error_page(ctx, StatusInternalServerError);
         return;
     }
 
-    cstr* html_response = cstr_from(arena,
-                                    "<html>"
-                                    "<head>"
-                                    "<style>"
-                                    "body { font-family: Arial, sans-serif; padding: 1rem; }"
-                                    "h1 { color: #333; }"
-                                    "table { width: 100%; border-collapse: collapse; }"
-                                    "th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }"
-                                    "th { background-color: #f2f2f2; }"
-                                    "a { text-decoration: none; color: #0066cc; }"
-                                    "a:hover { text-decoration: underline; }"
-                                    ".breadcrumbs { margin-bottom: 20px; }"
-                                    ".breadcrumbs a { color: #0066cc; text-decoration: none; }"
-                                    ".breadcrumbs a:hover { text-decoration: underline; }"
-                                    "</style>"
-                                    "</head>"
-                                    "<body>"
-                                    "<h1>Directory Listing</h1>");
-
-    if (!html_response) {
-        LOG_ERROR("Failed to create cstr\n");
+    // Reserve enough capacity(500KB)
+    if (!str_resize(&html, ((1 << 20) / 2))) {
         send_error_page(ctx, StatusInternalServerError);
-        arena_destroy(arena);
+        return;
+    };
+
+    // defer freeing the string
+    defer({ str_free(html); });
+
+    // Add breadcrumb navigation
+    if (!append_breadcrumbs(ctx, html, base_prefix)) {
         return;
     }
 
-    // Create breadcrumbs
-    append_or_error(ctx, arena, html_response, "<div class=\"breadcrumbs\">");
-    append_or_error(ctx, arena, html_response, "<a href=\"/\">Home</a>");
+    // Start the table
+    if (!append_or_error(ctx, html, "<table><tr><th>Name</th><th>Size</th></tr>")) {
+        return;
+    }
 
+    // List directory contents
+    if (!list_directory_contents(ctx, html, dirname, base_prefix)) {
+        return;
+    }
+
+    // Close the HTML
+    if (!append_or_error(ctx, html, "</table></body></html>")) {
+        return;
+    }
+
+    // Send the response
+    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    ctx->response->status = StatusOK;
+    send_string(ctx, str_data(html));
+}
+
+/**
+ * Appends breadcrumb navigation to the HTML string
+ * 
+ * @param ctx The HTTP context
+ * @param html The HTML string to append to
+ * @param base_prefix The base URL prefix
+ * @param arena Memory arena for allocations
+ * @return true on success, false on failure
+ */
+static bool append_breadcrumbs(context_t* ctx, cstr* html, const char* base_prefix) {
+    if (!append_or_error(ctx, html, "<div class=\"breadcrumbs\">")) {
+        return false;
+    }
+
+    if (!append_or_error(ctx, html, "<a href=\"/\">Home</a>")) {
+        return false;
+    }
+
+    // Skip processing if we're at the root
+    if (base_prefix == NULL || base_prefix[0] == '\0' || (base_prefix[0] == '/' && base_prefix[1] == '\0')) {
+        if (!append_or_error(ctx, html, "</div>")) {
+            return false;
+        }
+        return true;
+    }
+
+    // Allocate and copy the path for tokenization
     char* path = strdup(base_prefix);
     if (!path) {
-        LOG_ERROR("Failed to allocate memory for path\n");
         set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Failed to allocate memory for path");
-        arena_destroy(arena);
-        return;
+        return false;
     }
+    defer({ free(path); });
 
-    char* token                        = strtok(path, "/");
+    // Build breadcrumb path pieces
     char breadcrumb_path[MAX_PATH_LEN] = {0};
+    char* token                        = strtok(path, "/");
 
     while (token) {
         strcat(breadcrumb_path, "/");
         strcat(breadcrumb_path, token);
-        append_or_error(ctx, arena, html_response, " / <a href=\"");
-        append_or_error(ctx, arena, html_response, breadcrumb_path);
-        append_or_error(ctx, arena, html_response, "\">");
-        append_or_error(ctx, arena, html_response, token);
-        append_or_error(ctx, arena, html_response, "</a>");
+
+        if (!append_or_error(ctx, html, " / <a href=\"") || !append_or_error(ctx, html, breadcrumb_path) ||
+            !append_or_error(ctx, html, "\">") || !append_or_error(ctx, html, token) ||
+            !append_or_error(ctx, html, "</a>")) {
+            return false;
+        }
+
         token = strtok(nullptr, "/");
     }
-    free(path);
 
-    append_or_error(ctx, arena, html_response, "</div>");
-    append_or_error(ctx, arena, html_response,
-                    "<table>"
-                    "<tr><th>Name</th><th>Size</th></tr>");
+    if (!append_or_error(ctx, html, "</div>")) {
+        return false;
+    }
 
-    if ((dir = opendir(dirname)) != nullptr) {
-        while ((ent = readdir(dir)) != nullptr) {
-            if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0) {
-                append_or_error(ctx, arena, html_response, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"");
-                // Add base prefix if we are not using / as static prefix.
-                if (strcmp(base_prefix, "/") != 0) {
-                    append_or_error(ctx, arena, html_response, base_prefix);
-                }
+    return true;
+}
 
-                append_or_error(ctx, arena, html_response, "/");
-                append_or_error(ctx, arena, html_response, ent->d_name);
-                append_or_error(ctx, arena, html_response, "\">");
-                append_or_error(ctx, arena, html_response, ent->d_name);
-                append_or_error(ctx, arena, html_response, "</a></td>");
-
-                char filepath[MAX_PATH_LEN] = {0};
-                snprintf(filepath, MAX_PATH_LEN, "%s/%s", dirname, ent->d_name);
-
-                struct stat st;
-                if (stat(filepath, &st) == 0) {
-                    if (S_ISDIR(st.st_mode)) {
-                        append_or_error(ctx, arena, html_response, "<td>Directory</td>");
-                    } else {
-                        append_or_error(ctx, arena, html_response, "<td>");
-                        char fs[32];
-                        format_file_size(st.st_size, fs, sizeof(fs));
-                        append_or_error(ctx, arena, html_response, fs);
-                        append_or_error(ctx, arena, html_response, "</td>");
-                    }
-                } else {
-                    append_or_error(ctx, arena, html_response, "<td>Unknown</td>");
-                }
-                append_or_error(ctx, arena, html_response, "</tr>");
-            }
-        }
-        closedir(dir);
-    } else {
-        // Could not open directory
+/**
+ * Lists directory contents and appends them to the HTML string
+ * 
+ * @param ctx The HTTP context
+ * @param html The HTML string to append to
+ * @param dirname The directory to list
+ * @param base_prefix The base URL prefix for links
+ * @return true on success, false on failure
+ */
+static bool list_directory_contents(context_t* ctx, cstr* html, const char* dirname, const char* base_prefix) {
+    DIR* dir = opendir(dirname);
+    if (!dir) {
         set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Unable to open directory");
-        arena_destroy(arena);
-        return;
+        return false;
     }
 
-    append_or_error(ctx, arena, html_response, "</table></body></html>");
-    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
-    ctx->response->status = StatusOK;
-    send_string(ctx, html_response->data);
-    arena_destroy(arena);
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        // Skip . and .. entries
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        // Build the file path
+        char filepath[MAX_PATH_LEN] = {0};
+        snprintf(filepath, MAX_PATH_LEN, "%s/%s", dirname, ent->d_name);
+
+        // Get file information
+        struct stat st;
+        const char* size_str = "Unknown";
+        char size_buf[32]    = {0};
+
+        if (stat(filepath, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                size_str = "Directory";
+            } else {
+                format_file_size(st.st_size, size_buf, sizeof(size_buf));
+                size_str = size_buf;
+            }
+        }
+
+        // Create the table row
+        if (!append_or_error(ctx, html, "<tr><td><a target=\"_blank\" rel=\"noreferer\" href=\"")) {
+            closedir(dir);
+            return false;
+        }
+
+        // Add base prefix if not root
+        if (strcmp(base_prefix, "/") != 0) {
+            if (!append_or_error(ctx, html, base_prefix)) {
+                closedir(dir);
+                return false;
+            }
+        }
+
+        // Add the filename and size
+        if (!append_or_error(ctx, html, "/") || !append_or_error(ctx, html, ent->d_name) ||
+            !append_or_error(ctx, html, "\">") || !append_or_error(ctx, html, ent->d_name) ||
+            !append_or_error(ctx, html, "</a></td><td>") || !append_or_error(ctx, html, size_str) ||
+            !append_or_error(ctx, html, "</td></tr>")) {
+            closedir(dir);
+            return false;
+        }
+    }
+
+    closedir(dir);
+    return true;
 }
 
 void staticFileHandler(context_t* ctx) {

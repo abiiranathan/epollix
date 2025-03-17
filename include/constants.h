@@ -48,6 +48,18 @@
 #define MAX_GROUP_MIDDLEWARE 4
 #endif
 
+#ifndef ROUTE_ARENA_MEM
+#define ROUTE_ARENA_MEM ((size_t)8192)
+#endif
+
+#ifndef PER_REQUEST_ARENA_MEM
+#define PER_REQUEST_ARENA_MEM ((size_t)8192)
+#endif
+
+#ifndef MAX_HEADER_COUNT
+#define MAX_HEADER_COUNT 64
+#endif
+
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)(var))
 

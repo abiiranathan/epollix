@@ -2,14 +2,13 @@
 #define E809A397_804A_4866_8AE8_61C4E9E27E82
 
 #include <stdlib.h>
+#include <stddef.h>
+#include "constants.h"
+#include <solidc/arena.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <solidc/arena.h>
-#include <solidc/memory_pool.h>
-#include <stddef.h>
-#include "constants.h"
 
 // Header struct contains header name and value.
 typedef struct header {
@@ -18,7 +17,7 @@ typedef struct header {
 } header_t;
 
 // Parse header_t from http header string.
-header_t* header_fromstring(MemoryPool* pool, const char* str);
+header_t* header_fromstring(Arena* arena, const char* str);
 
 // Find the header_t value matching the name in the array of headers.
 // Returns nullptr if not found.

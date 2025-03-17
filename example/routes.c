@@ -30,9 +30,13 @@ void open_movie(void) {
 }
 
 void serve_movie(context_t* ctx) {
-    LOG_ASSERT(file != nullptr, "File is not opened");
-    set_content_type(ctx, "video/mp4");
-    serve_open_file(ctx, file, size, filename);
+    if (file == NULL) {
+        set_content_type(ctx, "video/mp4");
+        serve_open_file(ctx, file, size, filename);
+    } else {
+        ctx->response->status = StatusNotFound;
+        send_string(ctx, "FILE NOT FOUND");
+    }
 }
 
 // GET /greet/{name}
@@ -161,7 +165,7 @@ static void* send_time(void* arg) {
         timeinfo = localtime(&rawtime);
         strftime(buffer, 80, "%Y-%m-%d %H:%M:%S\n", timeinfo);
 
-        int ret = response_send_chunk(ctx, buffer, strlen(buffer));
+        ssize_t ret = response_send_chunk(ctx, buffer, strlen(buffer));
         if (ret < 0) {
             break;
         }

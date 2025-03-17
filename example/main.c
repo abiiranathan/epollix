@@ -61,7 +61,7 @@ static void defineRoutes() {
     route_get("/chunked", chunked_response);
 
     enable_directory_browsing(true);
-    route_static("/static", "./assets");
+    route_static("/static", "./");
 
     // Create a route group
     RouteGroup* group = route_group("/api/v1");

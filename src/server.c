@@ -13,6 +13,7 @@
 typedef struct read_task {
     int epoll_fd;   // Epoll file descriptor
     int client_fd;  // Client file descriptor
+    Arena* arena;   // task arena
 } Task;
 
 // An epoll(2) powered TCP server.
@@ -37,6 +38,8 @@ static inline void initTasks(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         taskPool[i].client_fd = -1;
         taskPool[i].epoll_fd  = -1;
+        taskPool[i].arena     = arena_create(PER_REQUEST_ARENA_MEM);
+        LOG_ASSERT(taskPool[i].arena, "error allocating arena");
     }
 }
 
@@ -54,6 +57,15 @@ static inline Task* getFreeTask(void) {
 static inline void PutTask(Task* task) {
     task->client_fd = -1;
     task->epoll_fd  = -1;
+    arena_reset(task->arena);
+}
+
+static void freeAllTasks(void) {
+    for (int i = 0; i < TASK_CAPACITY; i++) {
+        if (taskPool[i].client_fd == -1) {
+            arena_destroy(taskPool[i].arena);
+        }
+    }
 }
 
 // Delete client socket from epoll tracking and close the client socket.
@@ -66,25 +78,17 @@ static inline void close_connection(int client_fd, int epoll_fd) {
 static void handleConnection(void* arg) {
     Task* task = (Task*)arg;
 
-    Request req;
-    Response res;
+    Request req  = {};
+    Response res = {};
 
-    // Initialize a per-request memory pool of 2MB
-    MemoryPool* pool = mpool_create(2 << 20);
-    if (!pool) goto error;
-    if (!request_init(pool, &req, task->client_fd, task->epoll_fd)) goto error;
-    if (!response_init(pool, &res, task->client_fd)) goto error;
-    process_request(&req, pool);
+    if (!request_init(task->arena, &req, task->client_fd, task->epoll_fd)) goto error;
+    if (!response_init(task->arena, &res, task->client_fd)) goto error;
+    process_request(&req, task->arena);
 
     if (req.route != nullptr) {
-        // shutdown read end of the socket
-        shutdown(task->client_fd, SHUT_RD);
-        context_t ctx = {.request = &req, .response = &res, .pool = pool};
+        context_t ctx = {.request = &req, .response = &res, .arena = task->arena};
         process_response(&ctx);
         free_locals(&ctx);
-
-        // shutdown write end of the socket
-        shutdown(task->client_fd, SHUT_WR);
     }
 
     close_connection(task->client_fd, task->epoll_fd);
@@ -92,16 +96,12 @@ static void handleConnection(void* arg) {
     // cleanup request params
     if (req.query_params) map_destroy(req.query_params);
     PutTask(task);
-    mpool_destroy(pool);
     return;
 
 error:
     http_error(task->client_fd, StatusInternalServerError, ERR_MEMORY_ALLOC_FAILED);
     close_connection(task->client_fd, task->epoll_fd);
     PutTask(task);
-    if (pool) {
-        mpool_destroy(pool);
-    }
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -226,7 +226,7 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port) {
 
     server->num_workers = num_workers;
     server->port        = port_int;
-    server->pool        = threadpool_create(num_workers);
+    server->pool        = threadpool_create((int)num_workers);
     if (server->pool == nullptr) {
         free(server);
         return nullptr;
@@ -435,5 +435,6 @@ __attribute__((destructor)) void server_destructor(void) {
         close(epollServer->server_fd);
     }
 
+    freeAllTasks();
     free(epollServer);
 }

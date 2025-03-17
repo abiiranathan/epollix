@@ -13,8 +13,8 @@ extern "C" {
 
 // Context for middleware functions.
 typedef struct MiddlewareContext {
-    uint8_t count;           // Number of middleware functions
-    uint8_t index;           // Current index in the middleware array
+    size_t count;            // Number of middleware functions
+    size_t index;            // Current index in the middleware array
     Middleware* middleware;  // Array of middleware functions
     Handler handler;         // Handler function
 } MiddlewareContext;
@@ -35,13 +35,13 @@ Middleware* get_global_middleware(void);
 void execute_middleware_chain(struct epollix_context* ctx, MiddlewareContext* mw_ctx);
 
 // Apply middleware(s) to all registered routes.
-void use_global_middleware(int count, ...);
+void use_global_middleware(size_t count, ...);
 
 // Apply middleware(s) to a spacific route.
-void use_route_middleware(Route* route, int count, ...);
+void use_route_middleware(Route* route, size_t count, ...);
 
 // Apply middleware(s) to a group of routes.
-void use_group_middleware(RouteGroup* group, int count, ...);
+void use_group_middleware(RouteGroup* group, size_t count, ...);
 
 // Set route middleware context or userdata.
 // This user data is free automatically for you at exit.

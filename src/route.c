@@ -5,7 +5,6 @@
 
 #include <linux/limits.h>
 #include <solidc/filepath.h>
-#include <solidc/memory_pool.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -13,16 +12,16 @@
 
 static Route routeTable[MAX_ROUTES] = {};
 static size_t numRoutes             = 0;
-static MemoryPool* pool             = NULL;
+static Arena* arena                 = NULL;
 
 __attribute__((constructor())) void init(void) {
-    pool = mpool_create(4096);
-    LOG_ASSERT(pool, "pool is NULL");
+    arena = arena_create(ROUTE_ARENA_MEM);
+    LOG_ASSERT(arena, "arena is NULL");
 }
 
 __attribute__((destructor())) void cleanup(void) {
-    if (pool) {
-        mpool_destroy(pool);
+    if (arena) {
+        arena_destroy(arena);
     }
 
     for (size_t i = 0; i < numRoutes; ++i) {
@@ -71,14 +70,14 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->mw_data             = nullptr;
     route->middleware_count    = 0;
     route->middleware_capacity = 1;
-    route->middleware          = mpool_alloc(pool, sizeof(Middleware) * route->middleware_capacity);
+    route->middleware          = arena_alloc(arena, sizeof(Middleware) * route->middleware_capacity);
 
-    route->pattern = mpool_copy_str(pool, pattern);
-    route->params  = (PathParams*)mpool_alloc(pool, sizeof(PathParams));
+    route->pattern = arena_alloc_string(arena, pattern);
+    route->params  = (PathParams*)arena_alloc(arena, sizeof(PathParams));
 
-    LOG_ASSERT(route->pattern, "strdup failed");
-    LOG_ASSERT(route->params, "mpool_alloc failed");
-    LOG_ASSERT(route->middleware, "middleware failed");
+    LOG_ASSERT(route->pattern, "unable to allocate pattern");
+    LOG_ASSERT(route->params, "unable to allocate params");
+    LOG_ASSERT(route->middleware, "unable to allocate middleware");
 
     route->params->match_count = 0;
     memset(route->params->params, 0, sizeof(route->params->params));
@@ -118,7 +117,7 @@ Route* route_delete(const char* pattern, Handler handler) {
 Route* route_static(const char* pattern, const char* dir) {
     LOG_ASSERT(MAX_DIRNAME > strlen(dir) + 1, "dir name too long");
 
-    char* dirname = mpool_copy_str(pool, dir);
+    char* dirname = arena_alloc_string(arena, dir);
     LOG_ASSERT(dirname, "strdup failed");
 
     if (strstr(dirname, "~")) {
@@ -127,7 +126,7 @@ Route* route_static(const char* pattern, const char* dir) {
             LOG_ASSERT(dirname, "filepath_expanduser failed");
         };
 
-        dirname = mpool_copy_str(pool, buf);
+        dirname = arena_alloc_string(arena, buf);
         LOG_ASSERT(dirname, "strdup failed");
     }
 
@@ -152,7 +151,7 @@ Route* route_static(const char* pattern, const char* dir) {
 static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const char* pattern, Handler handler,
                                  RouteType type) {
 
-    char* route_pattern = (char*)mpool_alloc(pool, strlen(group->prefix) + strlen(pattern) + 1);
+    char* route_pattern = (char*)arena_alloc(arena, strlen(group->prefix) + strlen(pattern) + 1);
     LOG_ASSERT(route_pattern, "Failed to allocate memory for route pattern\n");
 
     int ret = snprintf(route_pattern, strlen(group->prefix) + strlen(pattern) + 1, "%s%s", group->prefix, pattern);
@@ -162,7 +161,7 @@ static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const cha
 
     if (group->count == group->capacity) {
         size_t capacity    = group->count * 2;
-        Route** new_routes = (Route**)mpool_alloc(pool, sizeof(Route*) * capacity);
+        Route** new_routes = (Route**)arena_alloc(arena, sizeof(Route*) * capacity);
         LOG_ASSERT(new_routes, "Failed to allocate memory for group routes");
 
         group->capacity = capacity;
@@ -212,8 +211,8 @@ Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handle
 Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname) {
     LOG_ASSERT(MAX_DIRNAME > strlen(dirname) + 1, "dirname is too long");
 
-    char* fullpath = mpool_copy_str(pool, dirname);
-    LOG_ASSERT(fullpath != nullptr, "mpool_copy_str failed");
+    char* fullpath = arena_alloc_string(arena, dirname);
+    LOG_ASSERT(fullpath != nullptr, "arena_alloc_string failed");
 
     if (strstr(fullpath, "~")) {
         char buf[PATH_MAX];
@@ -221,8 +220,8 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
             LOG_ASSERT(dirname, "filepath_expanduser failed");
         };
 
-        fullpath = mpool_copy_str(pool, buf);
-        LOG_ASSERT(fullpath, "mpool_copy_str failed");
+        fullpath = arena_alloc_string(arena, buf);
+        LOG_ASSERT(fullpath, "arena_alloc_string failed");
     }
 
     // Check that dirname exists
@@ -250,18 +249,18 @@ void* route_middleware_context(context_t* ctx) {
 
 // Create a new RouteGroup.
 RouteGroup* route_group(const char* pattern) {
-    RouteGroup* group = (RouteGroup*)mpool_alloc(pool, sizeof(RouteGroup));
+    RouteGroup* group = (RouteGroup*)arena_alloc(arena, sizeof(RouteGroup));
     LOG_ASSERT(group, "Failed to allocate memory for RouteGroup\n");
 
-    group->prefix = mpool_copy_str(pool, pattern);
+    group->prefix = arena_alloc_string(arena, pattern);
 
     group->middleware_count    = 0;
     group->middleware_capacity = 2;
-    group->middleware          = mpool_alloc(pool, sizeof(Middleware) * group->middleware_capacity);
+    group->middleware          = arena_alloc(arena, sizeof(Middleware) * group->middleware_capacity);
 
     group->count    = 0;
     group->capacity = 8;
-    group->routes   = mpool_alloc(pool, sizeof(Route*) * group->capacity);
+    group->routes   = arena_alloc(arena, sizeof(Route*) * group->capacity);
 
     LOG_ASSERT(group->prefix, "Failed to allocate memory for RouteGroup prefix\n");
     LOG_ASSERT(group->routes, "Failed to allocate memory for RouteGroup routes\n");

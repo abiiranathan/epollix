@@ -1,5 +1,3 @@
-#define _GNU_SOURCE
-
 #include "../include/request.h"
 #include "../include/middleware.h"
 #include "../include/route.h"
@@ -20,7 +18,7 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
-bool request_init(MemoryPool* pool, Request* req, int client_fd, int epoll_fd) {
+bool request_init(Arena* arena, Request* req, int client_fd, int epoll_fd) {
     req->client_fd       = client_fd;
     req->epoll_fd        = epoll_fd;
     req->path            = nullptr;
@@ -31,7 +29,7 @@ bool request_init(MemoryPool* pool, Request* req, int client_fd, int epoll_fd) {
     req->header_count    = 0;
     req->query_params    = nullptr;
     req->header_capacity = 36;
-    req->headers         = mpool_alloc(pool, sizeof(header_t*) * req->header_capacity);
+    req->headers         = arena_alloc(arena, sizeof(header_t*) * req->header_capacity);
     return req->headers != NULL;
 }
 
@@ -74,21 +72,19 @@ static const char* http_error_string(http_error_t code) {
     return "success";
 }
 
-http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* header_text, size_t length) {
+http_error_t parse_request_headers(Arena* arena, Request* req, const char* header_text, size_t length) {
     const char* ptr = header_text;
     const char* end = ptr + length;
 
+    header_t** headers = arena_alloc(arena, sizeof(header_t*) * MAX_HEADER_COUNT);
+    if (!headers) {
+        return false;
+    }
+
     while (ptr < end) {
         // Reallocate the headers
-        if (req->header_count == req->header_capacity) {
-            size_t capacity    = req->header_capacity * 2;
-            header_t** headers = mpool_alloc(pool, sizeof(header_t*) * capacity);
-            if (!headers) {
-                return false;
-            }
-
-            memcpy(headers, req->headers, sizeof(header_t*) * req->header_count);
-            req->headers = headers;
+        if (req->header_count == MAX_HEADER_COUNT) {
+            return http_max_headers_exceeded;
         }
 
         // Parse header name
@@ -96,7 +92,7 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
         if (!colon) break;
 
         size_t name_len = colon - ptr;
-        char* name      = mpool_alloc(pool, name_len + 1);
+        char* name      = arena_alloc(arena, name_len + 1);
         if (!name) {
             return http_memory_alloc_failed;
         }
@@ -114,7 +110,7 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
         if (!eol || eol + 1 >= end || eol[1] != '\n') break;
 
         size_t value_len = eol - ptr;
-        char* value      = mpool_alloc(pool, value_len + 1);
+        char* value      = arena_alloc(arena, value_len + 1);
         if (!value) {
             return http_memory_alloc_failed;
         }
@@ -122,7 +118,7 @@ http_error_t parse_request_headers(MemoryPool* pool, Request* req, const char* h
         memcpy(value, ptr, value_len);
         value[value_len] = '\0';
 
-        header_t* header = mpool_alloc(pool, sizeof(header_t*));
+        header_t* header = arena_alloc(arena, sizeof(header_t*));
         if (!header) {
             return http_memory_alloc_failed;
         }
@@ -232,7 +228,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     return strtoul(content_length_header + 15, nullptr, 10);
 }
 
-bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params) {
+bool parse_url_query_params(Arena* arena, char* query, map* query_params) {
     char* key   = nullptr;
     char* value = nullptr;
     char *save_ptr, *save_ptr2;
@@ -244,13 +240,13 @@ bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params) {
         value = strtok_r(nullptr, "=", &save_ptr2);
 
         if (key != nullptr && value != nullptr) {
-            char* queryName = mpool_copy_str(pool, key);
+            char* queryName = arena_alloc_string(arena, key);
             if (queryName == nullptr) {
                 success = false;
                 break;
             }
 
-            char* queryValue = mpool_copy_str(pool, value);
+            char* queryValue = arena_alloc_string(arena, value);
             if (queryValue == nullptr) {
                 success = false;
                 break;
@@ -264,9 +260,9 @@ bool parse_url_query_params(MemoryPool* pool, char* query, map* query_params) {
 }
 
 // Parse the URI, extracting path and query parameters
-static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, char** query, map** query_params) {
+static bool parse_uri(Arena* arena, const char* decoded_uri, char** path, char** query, map** query_params) {
     // *path = strdup(decoded_uri);
-    *path = mpool_copy_str(pool, decoded_uri);
+    *path = arena_alloc_string(arena, decoded_uri);
     if (!*path) {
         return false;
     }
@@ -283,7 +279,7 @@ static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, ch
             return false;
         }
 
-        if (!parse_url_query_params(pool, *query, *query_params)) {
+        if (!parse_url_query_params(arena, *query, *query_params)) {
             map_destroy(*query_params);
             return false;
         }
@@ -295,9 +291,9 @@ static bool parse_uri(MemoryPool* pool, const char* decoded_uri, char** path, ch
 }
 
 // Allocate memory for the body and read it from the socket
-bool allocate_and_read_body(MemoryPool* pool, int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
+bool allocate_and_read_body(Arena* arena, int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
                             const char* initial_body) {
-    *body = (uint8_t*)mpool_alloc(pool, body_size + 1);
+    *body = (uint8_t*)arena_alloc(arena, body_size + 1);
     if (!*body) return false;
 
     // copy the initial body read if any
@@ -330,7 +326,7 @@ bool allocate_and_read_body(MemoryPool* pool, int client_fd, uint8_t** body, siz
 }
 
 // Initialize the request structure with parsed data
-void initialize_request(MemoryPool* pool, Request* req, uint8_t* body, size_t content_length, map* query_params,
+void initialize_request(Arena* arena, Request* req, uint8_t* body, size_t content_length, map* query_params,
                         HttpMethod httpMethod, const char* http_version, const char* path) {
 
     req->body           = body;
@@ -342,7 +338,7 @@ void initialize_request(MemoryPool* pool, Request* req, uint8_t* body, size_t co
     strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
     req->http_version[sizeof(req->http_version) - 1] = '\0';
 
-    req->path = mpool_copy_str(pool, path);
+    req->path = arena_alloc_string(arena, path);
     LOG_ASSERT(req->path != nullptr, "malloc failed to allocate request path");
 }
 
@@ -377,7 +373,7 @@ int check_avx() {
 }
 
 // handle the request and send response.
-void process_request(Request* req, MemoryPool* pool) {
+void process_request(Request* req, Arena* arena) {
     int client_fd = req->client_fd;
 
     char headers[4096];
@@ -425,7 +421,7 @@ void process_request(Request* req, MemoryPool* pool) {
 
     decode_uri(uri, decoded_uri, sizeof(decoded_uri));
 
-    if (!parse_uri(pool, decoded_uri, &path, &query, &query_params)) {
+    if (!parse_uri(arena, decoded_uri, &path, &query, &query_params)) {
         http_error(client_fd, StatusInternalServerError, "error parsing query params");
         return;
     }
@@ -437,15 +433,15 @@ void process_request(Request* req, MemoryPool* pool) {
 
     total_read = inital_size - header_capacity;
     if (!is_safe_method(httpMethod) && body_size > 0) {
-        if (!allocate_and_read_body(pool, client_fd, &body, body_size, total_read, headers + header_capacity)) {
+        if (!allocate_and_read_body(arena, client_fd, &body, body_size, total_read, headers + header_capacity)) {
             http_error(client_fd, StatusInternalServerError, "Failed to read request body");
             return;
         }
     }
 
-    initialize_request(pool, req, body, body_size, query_params, httpMethod, http_version, path);
+    initialize_request(arena, req, body, body_size, query_params, httpMethod, http_version, path);
 
-    code = parse_request_headers(pool, req, header_start, header_capacity - 4);
+    code = parse_request_headers(arena, req, header_start, header_capacity - 4);
     if (code != http_ok) {
         http_error(client_fd, StatusRequestHeaderFieldsTooLarge, http_error_string(code));
     }

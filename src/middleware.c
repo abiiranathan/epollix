@@ -11,7 +11,9 @@
 static Middleware GLOBAL_MIDDLEWARE[MAX_GLOBAL_MIDDLEWARE] = {};       // Global middleware
 static size_t global_middleware_count                      = 0;        // Number of global middleware
 static map* global_middleware_context                      = nullptr;  // Global middleware context
-static MemoryPool* pool                                    = NULL;
+static Arena* arena                                        = NULL;
+
+#define MIDDLEWARE_ARENA_MEM ((MAX_GLOBAL_MIDDLEWARE + MAX_GROUP_MIDDLEWARE) * sizeof(Middleware) * 2)
 
 __attribute__((constructor())) void middleware_init(void) {
     // Initialize global middleware context
@@ -19,8 +21,8 @@ __attribute__((constructor())) void middleware_init(void) {
     LOG_ASSERT(global_middleware_context, "Failed to create global_middleware_context\n");
 
     // Initialize middleware memory pool
-    pool = mpool_create(4096);
-    LOG_ASSERT(pool, "pool is NULL");
+    arena = arena_create(MIDDLEWARE_ARENA_MEM);
+    LOG_ASSERT(arena, "pool is NULL");
 }
 
 __attribute__((destructor())) void middleware_cleanup(void) {
@@ -28,8 +30,8 @@ __attribute__((destructor())) void middleware_cleanup(void) {
         map_destroy(global_middleware_context);
     }
 
-    if (pool) {
-        mpool_destroy(pool);
+    if (arena) {
+        arena_destroy(arena);
     }
 }
 
@@ -55,12 +57,12 @@ void* get_global_middleware_context(const char* key) {
 }
 
 // get_global_middleware_count returns the number of global middleware functions.
-inline size_t get_global_middleware_count(void) {
+size_t get_global_middleware_count(void) {
     return global_middleware_count;
 }
 
 // get_global_middleware returns the global middleware functions.
-inline Middleware* get_global_middleware(void) {
+Middleware* get_global_middleware(void) {
     return GLOBAL_MIDDLEWARE;
 }
 
@@ -83,7 +85,7 @@ void execute_middleware_chain(context_t* ctx, MiddlewareContext* mw_ctx) {
 }
 
 // ================ Middleware logic ==================
-void use_global_middleware(int count, ...) {
+void use_global_middleware(size_t count, ...) {
     if (global_middleware_count + count > MAX_GLOBAL_MIDDLEWARE) {
         LOG_FATAL("Exceeded maximum global middleware count: %d. Recompile with a bigger -DMAX_GLOBAL_MIDDLEWARE \n",
                   MAX_GLOBAL_MIDDLEWARE);
@@ -91,7 +93,7 @@ void use_global_middleware(int count, ...) {
 
     va_list args;
     va_start(args, count);
-    for (int i = 0; i < count && global_middleware_count < MAX_GLOBAL_MIDDLEWARE; i++) {
+    for (size_t i = 0; i < count && global_middleware_count < MAX_GLOBAL_MIDDLEWARE; i++) {
         GLOBAL_MIDDLEWARE[global_middleware_count++] = va_arg(args, Middleware);
     }
 
@@ -99,20 +101,20 @@ void use_global_middleware(int count, ...) {
 }
 
 // Register middleware for a route
-void use_route_middleware(Route* route, int count, ...) {
+void use_route_middleware(Route* route, size_t count, ...) {
     if (count <= 0) {
         return;
     }
 
-    uint8_t new_count = route->middleware_count + (uint8_t)count;
+    size_t new_count = route->middleware_count + count;
     if (new_count <= route->middleware_capacity) {
         size_t capacity = new_count * 2;
 
-        Middleware* new_middleware = (Middleware*)mpool_alloc(pool, sizeof(Middleware) * capacity);
+        Middleware* new_middleware = (Middleware*)arena_alloc(arena, sizeof(Middleware) * capacity);
         LOG_ASSERT(new_middleware, "Failed to allocate memory for route middleware\n");
 
         memcpy(new_middleware, route->middleware, sizeof(Middleware) * route->middleware_count);
-        route->middleware_capacity = capacity;
+        route->middleware_capacity = (uint8_t)capacity;
         route->middleware          = new_middleware;
     }
 
@@ -129,16 +131,15 @@ void use_route_middleware(Route* route, int count, ...) {
 }
 
 // Attach route group middleware.
-void use_group_middleware(RouteGroup* group, int count, ...) {
+void use_group_middleware(RouteGroup* group, size_t count, ...) {
     if (count <= 0) {
         return;
     }
 
-    uint8_t new_count = group->middleware_count + (uint8_t)count;
+    size_t new_count = group->middleware_count + count;
     if (new_count <= group->middleware_capacity) {
-        size_t capacity = new_count * 2;
-
-        Middleware* new_middleware = (Middleware*)mpool_alloc(pool, sizeof(Middleware) * capacity);
+        size_t capacity            = new_count * 2;
+        Middleware* new_middleware = (Middleware*)arena_alloc(arena, sizeof(Middleware) * capacity);
         LOG_ASSERT(new_middleware, "Failed to allocate memory for group middleware\n");
         memcpy(new_middleware, group->middleware, sizeof(Middleware) * group->middleware_count);
         group->middleware_capacity = capacity;
@@ -150,6 +151,7 @@ void use_group_middleware(RouteGroup* group, int count, ...) {
     for (size_t i = group->middleware_count; i < new_count; i++) {
         group->middleware[i] = va_arg(args, Middleware);
     }
+
     group->middleware_count = new_count;
     va_end(args);
 }
