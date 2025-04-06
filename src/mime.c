@@ -1,7 +1,5 @@
 #include "../include/mime.h"
-#include "../include/logging.h"
-
-#include <ctype.h>
+#include "../include/fast_str.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -279,7 +277,7 @@ const char* get_mimetype(char* filename) {
     char* extension = last + 1;  // skip "."
 
     for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
-        if (strcasecmp(extension, mime_mapping[i].extension) == 0) {
+        if (fast_strcasecmp(extension, mime_mapping[i].extension) == 0) {
             return mime_mapping[i].contentType;
         }
     }

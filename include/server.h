@@ -1,13 +1,13 @@
 #ifndef BD7EB0BF_BCBB_4B11_A823_631B2A8D9532
 #define BD7EB0BF_BCBB_4B11_A823_631B2A8D9532
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "request.h"
 #include "static.h"
 #include "types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // An epoll(2) powered TCP server.
 typedef struct EpollServer EpollServer;

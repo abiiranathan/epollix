@@ -1,11 +1,12 @@
 #ifndef C09A2944_5DDC_4879_9E04_7CF7FB027FC3
 #define C09A2944_5DDC_4879_9E04_7CF7FB027FC3
 
+#include <stdio.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stdio.h>
 #include "middleware.h"
 #include "mime.h"
 #include "multipart.h"

@@ -20,14 +20,11 @@ typedef struct response {
     bool headers_sent;      // Headers already sent
     bool chunked;           // Is a chunked transfer
     bool content_type_set;  // Whether content type header is set
-
-    size_t header_capacity;  // Capacity of headers
-    size_t header_count;     // Number of headers set.
-    header_t** headers;      // Response headers
+    Headers headers;        // Response headers map
 } Response;
 
 // Create a new response object.
-bool response_init(Arena* arena, Response* res, int client_fd);
+bool response_init(Response* res, int client_fd);
 
 // Process the response.
 void process_response(context_t* ctx);

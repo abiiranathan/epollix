@@ -1,12 +1,13 @@
 #ifndef CD46D0A3_AC79_46D7_8A9C_993E1EAA4B34
 #define CD46D0A3_AC79_46D7_8A9C_993E1EAA4B34
 
+#include <inttypes.h>
+#include <solidc/arena.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <inttypes.h>
-#include <solidc/arena.h>
 #include "params.h"
 #include "route.h"
 #include "types.h"

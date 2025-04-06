@@ -212,7 +212,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // User Agent
     if (log_flags & LOG_USER_AGENT) {
-        const char* user_agent = find_header(ctx->request->headers, ctx->request->header_count, "User-Agent");
+        const char* user_agent = headers_value(ctx->request->headers, "User-Agent");
         if (user_agent) {
             buffer->offset +=
                 snprintf(buffer->buffer + buffer->offset, LOG_BUFFER_SIZE - buffer->offset, "%s ", user_agent);
@@ -228,7 +228,10 @@ void epollix_logger(context_t* ctx, Handler next) {
     // Add to batch
     pthread_mutex_lock(&log_batch.mutex);
     if (log_batch.count < LOG_BATCH_SIZE) {
-        snprintf(log_batch.logs[log_batch.count], LOG_BUFFER_SIZE, buffer->buffer);
+        // Ensure we never overflow, with explicit truncation
+        size_t copy_len = strnlen(buffer->buffer, LOG_BUFFER_SIZE - 1);
+        memcpy(log_batch.logs[log_batch.count], buffer->buffer, copy_len);
+        log_batch.logs[log_batch.count][copy_len] = '\0';
         log_batch.count++;
     }
     pthread_mutex_unlock(&log_batch.mutex);

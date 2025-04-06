@@ -1,33 +1,37 @@
-#ifndef E809A397_804A_4866_8AE8_61C4E9E27E82
-#define E809A397_804A_4866_8AE8_61C4E9E27E82
+#ifndef HEADERS_H
+#define HEADERS_H
 
 #include <stdlib.h>
-#include <stddef.h>
-#include "constants.h"
-#include <solidc/arena.h>
+#include <stdbool.h>
+#include <string.h>
 
-#ifdef __cplusplus
-extern "C" {
+#define LARGE_HEADER_FLAG 0x80000000
+
+// Headers opaque type for http headers.
+typedef struct header_list* Headers;
+
+// Allocate a new headers object with an initial capacity.
+Headers headers_new(size_t initial_capacity);
+
+// Get the number of headers.
+size_t headers_count(const Headers headers);
+
+// Get the name of a header at a given index.
+int headers_index(const Headers headers, const char* name);
+
+// Get the value of a header by name.
+const char* headers_value(const Headers headers, const char* name);
+
+// Get the value of a header by index.
+bool headers_append(Headers headers, const char* name, const char* value);
+
+// Append a header to the headers list.
+void headers_free(Headers headers);
+
+// Format headers to the standard http header format.
+// and store it in the buffer.
+// Returns true on success, false on failure.
+// For empty headers, it will write only "\r\n" to the buffer.
+bool headers_tostring(const Headers headers, char* buffer, size_t size);
+
 #endif
-
-// Header struct contains header name and value.
-typedef struct header {
-    const char* name;   // header name
-    const char* value;  // header value
-} header_t;
-
-// Parse header_t from http header string.
-header_t* header_fromstring(Arena* arena, const char* str);
-
-// Find the header_t value matching the name in the array of headers.
-// Returns nullptr if not found.
-const char* find_header(header_t** headers, size_t count, const char* name);
-
-// Find the index of the header matching name or -1 if not found.
-int find_header_index(header_t** headers, size_t count, const char* name);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* E809A397_804A_4866_8AE8_61C4E9E27E82 */

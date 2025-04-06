@@ -5,6 +5,7 @@
 
 #include "../include/logging.h"
 #include "../include/mime.h"
+#include "../include/fast_str.h"
 
 typedef struct {
     char* filename;
@@ -13,7 +14,7 @@ typedef struct {
 
 static void run_test(TestCase test) {
     const char* actual_content_type = get_mimetype(test.filename);
-    if (strcasecmp(actual_content_type, test.expected_content_type) != 0) {
+    if (fast_strcasecmp(actual_content_type, test.expected_content_type) != 0) {
         LOG_FATAL("Expected: %s, but got: %s", test.expected_content_type, actual_content_type);
     }
 }

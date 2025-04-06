@@ -17,55 +17,40 @@
 #include "../include/request.h"
 
 // Create a new response object.
-bool response_init(Arena* arena, Response* res, int client_fd) {
+bool response_init(Response* res, int client_fd) {
     res->client_fd        = client_fd;
     res->status           = StatusOK;
-    res->data             = nullptr;
+    res->data             = NULL;
     res->headers_sent     = false;
     res->chunked          = false;
     res->content_type_set = false;
-    res->header_count     = 0;
-    res->header_capacity  = 16;
-    res->headers          = arena_alloc(arena, sizeof(header_t*) * res->header_capacity);
+    res->headers          = headers_new(16);
     return res->headers != NULL;
 }
 
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
-    header_t* header = arena_alloc(ctx->arena, sizeof(header_t));
-    if (!header) return false;
-
-    header->name  = arena_alloc_string(ctx->arena, name);
-    header->value = arena_alloc_string(ctx->arena, value);
-
-    if (!header->name || !header->value) return false;
-
-    // Reallocate the headers
-    if (ctx->response->header_count == ctx->response->header_capacity) {
-        size_t capacity    = ctx->response->header_capacity * 2;
-        header_t** headers = arena_alloc(ctx->arena, sizeof(header_t*) * capacity);
-        if (!headers) {
-            return false;
-        }
-
-        memcpy(headers, ctx->response->headers, sizeof(header_t*) * ctx->response->header_count);
-        ctx->response->headers = headers;
+    char* header_name  = arena_alloc_string(ctx->arena, name);
+    char* header_value = arena_alloc_string(ctx->arena, value);
+    if (!header_name || !header_value) {
+        LOG_ERROR("Failed to allocate memory for header");
+        return false;
     }
 
-    ctx->response->headers[ctx->response->header_count++] = header;
+    headers_append(ctx->response->headers, header_name, header_value);
 
-    if (strcasecmp(header->name, CONTENT_TYPE_HEADER) == 0) {
+    if (!ctx->response->content_type_set && (strcasecmp(name, CONTENT_TYPE_HEADER) == 0)) {
         ctx->response->content_type_set = true;
     }
     return true;
 }
 
 void process_response(context_t* ctx) {
-    size_t globalCount = get_global_middleware_count();
-    Route* route       = ctx->request->route;
+    size_t global_count = get_global_middleware_count();
+    Route* route        = ctx->request->route;
 
     // Directly execute the handler if no middleware
-    if (route->middleware_count == 0 && globalCount == 0) {
+    if (route->middleware_count == 0 && global_count == 0) {
         route->handler(ctx);
         return;
     }
@@ -74,21 +59,21 @@ void process_response(context_t* ctx) {
     MiddlewareContext mw_ctx = {
         .handler = route->handler,
         .index   = 0,
-        .count   = globalCount + route->middleware_count,
+        .count   = global_count + route->middleware_count,
     };
 
     // Combine global and route middleware
-    Middleware* combined_middleware = arena_alloc(ctx->arena, sizeof(Middleware) * mw_ctx.count);
-    if (!combined_middleware) {
+    Middleware* combined = arena_alloc(ctx->arena, sizeof(Middleware) * mw_ctx.count);
+    if (!combined) {
         LOG_ERROR("Failed to allocate memory for combined middleware");
         http_error(ctx->response->client_fd, StatusInternalServerError, "Internal server error");
         return;
     }
 
-    memcpy(combined_middleware, get_global_middleware(), globalCount * sizeof(Middleware));
-    memcpy(combined_middleware + globalCount, route->middleware, route->middleware_count * sizeof(Middleware));
+    memcpy(combined, get_global_middleware(), global_count * sizeof(Middleware));
+    memcpy(combined + global_count, route->middleware, route->middleware_count * sizeof(Middleware));
 
-    mw_ctx.middleware = combined_middleware;
+    mw_ctx.middleware = combined;
 
     // Store middleware context in request context.
     ctx->mw_ctx = &mw_ctx;
@@ -101,82 +86,37 @@ static void write_headers(context_t* ctx) {
     if (ctx->response->headers_sent) return;
 
     // Set default status code if not set
-    if (ctx->response->status == 0) {
-        ctx->response->status = StatusOK;
-    }
+    if (ctx->response->status == 0) ctx->response->status = StatusOK;
 
-    char header_res[2048];
-    char* current    = header_res;
-    size_t remaining = sizeof(header_res);
+    char buffer[2048] = {0};
+    size_t total_len  = 0;
+    ssize_t nbytes_sent;
 
-    // Precompute status code digits (3 characters)
-    http_status status  = ctx->response->status;
-    char status_code[3] = {('0' + (char)(status / 100)), '0' + ((status / 10) % 10), '0' + (status % 10)};
-
-    // Get status text and length
-    const char* status_text = http_status_text(status);
-    size_t status_text_len  = strlen(status_text);
-
-    // Calculate status line space requirements
-    const size_t status_line_len = 9 + 3 + 1 + status_text_len + 2;  // "HTTP/1.1 200 OK\r\n"
-    if (remaining < status_line_len) {
-        LOG_ERROR("Status line too long for buffer");
+    // Write status line
+    int len = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d %s\r\n", ctx->response->status,
+                       http_status_text(ctx->response->status));
+    if (len < 0) {
+        LOG_ERROR("Failed to write status line");
         return;
     }
+    total_len += len;
+    buffer[total_len] = '\0';
 
-    // Build status line
-    memcpy(current, "HTTP/1.1 ", 9);
-    current += 9;
-    memcpy(current, status_code, 3);
-    current += 3;
-    *current++ = ' ';
-    memcpy(current, status_text, status_text_len);
-    current += status_text_len;
-    memcpy(current, "\r\n", 2);
-    current += 2;
-    remaining = sizeof(header_res) - (current - header_res);
+    // Write headers
+    char* ptr        = buffer + total_len;
+    size_t remaining = sizeof(buffer) - total_len;
+    if (!headers_tostring(ctx->response->headers, ptr, remaining)) {
+        LOG_ERROR("Failed to convert headers to string");
+        return;
+    };
 
-    // Process headers
-    for (size_t i = 0; i < ctx->response->header_count; i++) {
-        const char* name          = ctx->response->headers[i]->name;
-        const char* value         = ctx->response->headers[i]->value;
-        const size_t name_len     = strlen(name);
-        const size_t value_len    = strlen(value);
-        const size_t header_space = name_len + 2 + value_len + 2;  // "Name: Value\r\n"
-
-        if (remaining < header_space) {
-            LOG_ERROR("Out of buffer space for headers");
-            break;
-        }
-
-        memcpy(current, name, name_len);
-        current += name_len;
-        memcpy(current, ": ", 2);
-        current += 2;
-        memcpy(current, value, value_len);
-        current += value_len;
-        memcpy(current, "\r\n", 2);
-        current += 2;
-        remaining -= header_space;
-    }
-
-    // Add final CRLF
-    if (remaining >= 2) {
-        memcpy(current, "\r\n", 2);
-        current += 2;
-    } else {
-        LOG_ERROR("Insufficient space for final CRLF");
+    // Send the headers to the client
+    nbytes_sent = sendall(ctx->response->client_fd, buffer, strlen(buffer));
+    if (nbytes_sent == -1) {
+        perror("error sending headers");
         return;
     }
-
-    // Calculate total length and send
-    const size_t total_len    = current - header_res;
-    const ssize_t nbytes_sent = sendall(ctx->response->client_fd, header_res, total_len);
-    if (nbytes_sent == -1 && errno != EBADF) {
-        LOG_ERROR("Send error: %s, fd: %d", strerror(errno), ctx->response->client_fd);
-    }
-
-    ctx->response->headers_sent = nbytes_sent != -1;
+    ctx->response->headers_sent = true;
 }
 
 void send_status(context_t* ctx, http_status code) {
@@ -224,7 +164,7 @@ __attribute__((format(printf, 2, 3))) ssize_t send_string_f(context_t* ctx, cons
     }
 
     // Allocate a buffer of the required size
-    buffer = (char*)malloc(len + 1);  // +1 for the null terminator
+    buffer = (char*)arena_alloc(ctx->arena, len + 1);  // +1 for the null terminator
     if (!buffer) {
         fprintf(stderr, "Memory allocation failed\n");
         return -1;
@@ -237,9 +177,6 @@ __attribute__((format(printf, 2, 3))) ssize_t send_string_f(context_t* ctx, cons
 
     // Send the response
     ssize_t result = send_response(ctx, buffer, len);
-
-    // Free the allocated buffer
-    free(buffer);
     return result;
 }
 
@@ -374,7 +311,7 @@ ssize_t servefile(context_t* ctx, const char* filename) {
     // Handle range requests
     ssize_t start = 0, end = 0;
     bool has_end_range = false, range_valid = false;
-    const char* range_header = find_header(req->headers, req->header_count, "Range");
+    const char* range_header = headers_value(req->headers, "Range");
 
     if (range_header && parse_range(range_header, &start, &end, &has_end_range)) {
         range_valid = validate_range(has_end_range, &start, &end, file_size);
@@ -425,7 +362,7 @@ ssize_t serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char
     // Handle range requests
     ssize_t start = 0, end = 0;
     bool has_end_range = false, range_valid = false;
-    const char* range_header = find_header(req->headers, req->header_count, "Range");
+    const char* range_header = headers_value(req->headers, "Range");
 
     if (range_header && parse_range(range_header, &start, &end, &has_end_range)) {
         range_valid = validate_range(has_end_range, &start, &end, file_size);

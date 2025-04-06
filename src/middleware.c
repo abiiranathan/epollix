@@ -1,6 +1,5 @@
 #include "../include/middleware.h"
 #include "../include/net.h"
-#include "../include/request.h"
 #include "constants.h"
 #include "logging.h"
 

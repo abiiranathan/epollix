@@ -1,11 +1,11 @@
 #ifndef METHOD_H
 #define METHOD_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdbool.h>
 
 typedef enum {
     M_INVALID = -1,

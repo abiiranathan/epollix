@@ -5,7 +5,7 @@
 
 // Maximum number of epoll events to process in one go.
 #ifndef MAXEVENTS
-#define MAXEVENTS 4096
+#define MAXEVENTS 1024
 #endif
 
 // Determines the buffer size to read from the socket initially.
@@ -19,6 +19,8 @@
 #define IDLE_TIMEOUT 5
 #endif
 
+// Max number of context locals that can be defined.
+// This is a per-request limit.
 #ifndef MAX_CONTEXT_LOCALS
 #define MAX_CONTEXT_LOCALS 8
 #endif
@@ -48,16 +50,25 @@
 #define MAX_GROUP_MIDDLEWARE 4
 #endif
 
+// Arena memory allocated for the router.
 #ifndef ROUTE_ARENA_MEM
-#define ROUTE_ARENA_MEM ((size_t)8192)
+#define ROUTE_ARENA_MEM (1 << 20)
 #endif
 
+// Per-request arena memory size.
 #ifndef PER_REQUEST_ARENA_MEM
-#define PER_REQUEST_ARENA_MEM ((size_t)8192)
+#define PER_REQUEST_ARENA_MEM ((size_t)8192 * 2)
 #endif
 
-#ifndef MAX_HEADER_COUNT
-#define MAX_HEADER_COUNT 64
+// Maximum length of a header name.
+#ifndef MAX_HEADER_NAME_LEN
+#define MAX_HEADER_NAME_LEN (size_t)64
+#endif
+
+// Header values exceeding this length will be dynamically allocated.
+// This is a trade-off between memory usage and performance.
+#ifndef SMALL_HEADER_VALUE_LEN
+#define SMALL_HEADER_VALUE_LEN (size_t)128  // Covers ~90% of cases
 #endif
 
 // Macro to silence unused variable errors.

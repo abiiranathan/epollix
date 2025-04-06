@@ -85,6 +85,9 @@ set(SOURCES
   src/server.c
   src/static.c
   src/status.c
+  src/taskpool.c
+  src/url.c
+  src/fast_str.c
 )
 
 if(CIPHERKIT_FOUND)
@@ -114,6 +117,9 @@ set(HEADERS
   include/response.h
   include/server.h
   include/epollix.h
+  include/taskpool.h
+  include/url.h
+  include/fast_str.h
 )
 
 # Conditionally add automem.h for GCC/Clang (when not in C++ mode)
@@ -146,6 +152,8 @@ target_link_libraries(epollix PUBLIC
   solidc
 )
 
+
+
 if(CIPHERKIT_FOUND)
   target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
 
@@ -156,7 +164,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Compiler Options & Platform Specific Settings
 # -----------------------------------------------------------------------------
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -mavx2 -mfma -mtune=native -march=native)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
   target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)

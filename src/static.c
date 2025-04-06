@@ -306,7 +306,7 @@ void staticFileHandler(context_t* ctx) {
     // decoding the path is necessary to handle special characters in the path
     // The buffer is large enough to hold the decoded path.
     char filepath[MAX_PATH_LEN] = {0};
-    decode_uri(fullpath, filepath, sizeof(filepath));
+    url_percent_decode(fullpath, filepath, sizeof(filepath));
 
     // In: solidc/filepath.h
     if (is_dir(filepath)) {

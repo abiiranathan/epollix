@@ -1,12 +1,12 @@
 #ifndef A308B9B1_4C38_4C7E_888F_0EFEA346C0CF
 #define A308B9B1_4C38_4C7E_888F_0EFEA346C0CF
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdio.h>
-#include <stdlib.h>
 
 #ifdef __clang__
 #pragma clang diagnostic push

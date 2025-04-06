@@ -64,7 +64,7 @@ static void userUnathorized(context_t* ctx) {
 }
 
 static void handle(context_t* ctx, Handler next, BasicAuthUser* auth_data) {
-    const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
+    const char* auth_header = headers_value(ctx->request->headers, "Authorization");
     if (auth_header == nullptr) {
         userUnathorized(ctx);
         return;

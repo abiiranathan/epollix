@@ -66,28 +66,32 @@ void enable_keepalive(int sockfd) {
     int keepcnt   = 3;   // 3 keepalive probes before closing the connection
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int)) < 0) {
-        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
+        perror("setsockopt");
+        LOG_FATAL("setsockopt(): new_tcpserver failed: sockfd=%d\n", sockfd);
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int)) < 0) {
-        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
+        perror("setsockopt");
+        LOG_FATAL("setsockopt(): new_tcpserver failed: sockfd=%d\n", sockfd);
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(int)) < 0) {
-        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
+        perror("setsockopt");
+        LOG_FATAL("setsockopt(): new_tcpserver failed: sockfd=%d\n", sockfd);
     }
 
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(int)) < 0) {
-        LOG_FATAL("setsockopt(): new_tcpserver failed\n");
+        perror("setsockopt");
+        LOG_FATAL("setsockopt(): new_tcpserver failed: sockfd=%d\n", sockfd);
     }
 }
 
 char* get_ip_address(context_t* ctx) {
     // try the forwarded header
-    const char* ip_addr = find_header(ctx->request->headers, ctx->request->header_count, "X-Forwarded-For");
+    const char* ip_addr = headers_value(ctx->request->headers, "X-Forwarded-For");
     if (!ip_addr) {
         // try the real ip address
-        ip_addr = find_header(ctx->request->headers, ctx->request->header_count, "X-Real-IP");
+        ip_addr = headers_value(ctx->request->headers, "X-Real-IP");
     }
 
     if (!ip_addr) {

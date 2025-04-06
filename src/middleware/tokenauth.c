@@ -16,7 +16,7 @@ void handleUnauthorized(context_t* ctx) {
 }
 
 void BearerAuthMiddleware(context_t* ctx, Handler next) {
-    const char* auth_header = find_header(ctx->request->headers, ctx->request->header_count, "Authorization");
+    const char* auth_header = headers_value(ctx->request->headers, "Authorization");
     if (auth_header == nullptr) {
         LOG_ERROR("Authorization header is missing");
         handleUnauthorized(ctx);

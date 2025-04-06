@@ -1,12 +1,12 @@
 #ifndef __MULTIPART_H__
 #define __MULTIPART_H__
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdbool.h>
-#include <stddef.h>
 
 // Constants that can be overriden
 #ifndef INITIAL_FIELD_CAPACITY

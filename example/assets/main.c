@@ -16,13 +16,13 @@ void logging_middleware(context_t* ctx, Handler next) {
 }
 
 void auth_middleware(context_t* ctx, Handler next) {
-    const char* auth = get_request_header(ctx->request, "Authorization");
+    const char* auth = headers_value(ctx->request->headers, "Authorization");
     if (auth && strcmp(auth, "secret") == 0) {
         printf("Authenticated!!\n");
         next(ctx);
     } else {
         ctx->response->status = 401;
-        send_response(ctx->response, "Unauthorized", strlen("Unauthorized"));
+        send_response(ctx, "Unauthorized", strlen("Unauthorized"));
     }
 }
 
@@ -40,8 +40,8 @@ void handle_greet(context_t* ctx) {
     assert(name);
     printf("Hello %s\n", name);
 
-    set_response_header(ctx->response, "Content-Type", "text/plain");
-    send_response(ctx->response, name, strlen(name));
+    set_response_header(ctx, "Content-Type", "text/plain");
+    send_response(ctx, name, strlen(name));
 }
 
 // /POST /users/create
@@ -52,8 +52,8 @@ void handle_create_user(context_t* ctx) {
     printf("Content-Type: %s\n", content_type);
 
     char boundary[128] = {0};
-    const char* body = (const char*)ctx->request->body;
-    size_t len = ctx->request->content_length;
+    const char* body   = (const char*)ctx->request->body;
+    size_t len         = ctx->request->content_length;
 
     // You can also parse it from the body.
     bool ok = multipart_parse_boundary_from_header(content_type, boundary, sizeof(boundary));
@@ -61,14 +61,14 @@ void handle_create_user(context_t* ctx) {
         code = multipart_parse_form(body, len, boundary, &form);
         if (code != MULTIPART_OK) {
             ctx->response->status = StatusBadRequest;
-            const char* error = multipart_error_message(code);
-            send_response(ctx->response, (char*)error, strlen(error));
+            const char* error     = multipart_error_message(code);
+            send_response(ctx, (char*)error, strlen(error));
             return;
         }
 
         const char* username = multipart_get_field_value(&form, "username");
         const char* password = multipart_get_field_value(&form, "password");
-        const char* email = multipart_get_field_value(&form, "email");
+        const char* email    = multipart_get_field_value(&form, "email");
 
         printf("[Username]: %s, Password: %s, Email: %s\n", username, password, email);
         printf("\n******************Got %ld files *********************************\n", form.num_files);
@@ -80,11 +80,11 @@ void handle_create_user(context_t* ctx) {
         }
 
         multipart_free_form(&form);
-        response_redirect(ctx->response, "/");
+        response_redirect(ctx, "/");
     } else {
         ctx->response->status = StatusBadRequest;
-        const char* error = multipart_error_message(INVALID_FORM_BOUNDARY);
-        send_response(ctx->response, (char*)error, strlen(error));
+        const char* error     = multipart_error_message(INVALID_FORM_BOUNDARY);
+        send_response(ctx, (char*)error, strlen(error));
     }
 }
 
@@ -95,7 +95,7 @@ void render_register_form(context_t* ctx) {
 
 void* send_time(void* arg) {
     context_t* ctx = (context_t*)arg;
-    int count = 1000;
+    int count      = 1000;
     while (1) {
         time_t rawtime;
         struct tm* timeinfo;
@@ -105,7 +105,7 @@ void* send_time(void* arg) {
         timeinfo = localtime(&rawtime);
         strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", timeinfo);
 
-        int ret = response_send_chunk(ctx->response, buffer, strlen(buffer));
+        ssize_t ret = response_send_chunk(ctx, buffer, strlen(buffer));
         if (ret < 0) {
             break;
         }
@@ -124,7 +124,7 @@ void chunked_response(context_t* ctx) {
     pthread_t thread;
     pthread_create(&thread, nullptr, send_time, ctx);
     pthread_join(thread, nullptr);
-    response_end(ctx->response);
+    response_end(ctx);
 }
 
 int main(int argc, char** argv) {
@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
     // Add middleware
     use_global_middleware(1, logging_middleware);
 
-    EpollServer* server = epoll_server_create(0, port, nullptr);
+    EpollServer* server = epoll_server_create(2, port);
     if (server == nullptr) {
         LOG_FATAL("Failed to create server\n");
     }

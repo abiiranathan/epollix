@@ -1,12 +1,12 @@
 #ifndef D227A8DB_94E5_4627_A7A8_A35E2CA3AA04
 #define D227A8DB_94E5_4627_A7A8_A35E2CA3AA04
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdbool.h>
-#include <stddef.h>
 
 // Maximum length of a parameter name
 #ifndef MAX_PARAM_NAME
