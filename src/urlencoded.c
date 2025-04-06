@@ -3,7 +3,7 @@
 // Parse x-www-form-urlencoded form from request and return map containing fields.
 // All keys and values are char*.
 map* parse_urlencoded_form(const char* url) {
-    map* params = map_create(0, key_compare_char_ptr);
+    map* params = map_create(0, key_compare_char_ptr, true);
     if (!params) {
         return nullptr;
     }
@@ -36,14 +36,14 @@ map* parse_urlencoded_form(const char* url) {
                 break;
             }
 
-            char* value = strdup(value);
-            if (value == nullptr) {
+            char* v = strdup(value);
+            if (v == nullptr) {
                 free(name);
                 perror("strdup");
                 success = false;
                 break;
             }
-            map_set(params, name, value);
+            map_set(params, name, v);
         }
         token = strtok_r(nullptr, "&", &save_ptr);
     }
@@ -51,7 +51,7 @@ map* parse_urlencoded_form(const char* url) {
     free(query);
 
     if (!success) {
-        map_destroy(params, true);
+        map_destroy(params);
         return nullptr;
     }
     return params;

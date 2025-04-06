@@ -88,6 +88,7 @@ set(SOURCES
   src/taskpool.c
   src/url.c
   src/fast_str.c
+  src/urlencoded.c
 )
 
 if(CIPHERKIT_FOUND)
@@ -120,6 +121,7 @@ set(HEADERS
   include/taskpool.h
   include/url.h
   include/fast_str.h
+  include/urlencoded.h
 )
 
 # Conditionally add automem.h for GCC/Clang (when not in C++ mode)
