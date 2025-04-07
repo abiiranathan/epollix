@@ -43,7 +43,7 @@ const char* get_param(Request* req, const char* name);
 const char* get_content_type(Request* req);
 
 // Handle Request and send response to the client.
-void process_request(Request* req, Arena* arena);
+bool parse_http_request(Request* req, Arena* arena);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns nullptr.

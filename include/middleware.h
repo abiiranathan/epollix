@@ -12,12 +12,25 @@ extern "C" {
 #include "route.h"
 #include "types.h"
 
+typedef enum { MwGlobal = 1, MwLocal } MwCtxType;
+
 // Context for middleware functions.
 typedef struct MiddlewareContext {
-    size_t count;            // Number of middleware functions
-    size_t index;            // Current index in the middleware array
-    Middleware* middleware;  // Array of middleware functions
-    Handler handler;         // Handler function
+    union {
+        struct {
+            // Global middleware context
+            size_t g_count;            // Number of middleware golabl mw functions
+            size_t g_index;            // Current index in the global middleware array
+            Middleware* g_middleware;  // Array of global middleware functions
+        } Global;
+        struct {
+            size_t r_count;            // Number of route middleware functions
+            size_t r_index;            // Current index in the route middleware array
+            Middleware* r_middleware;  // Array of route middleware functions
+        } Local;
+    } ctx;
+
+    MwCtxType ctx_type;
 } MiddlewareContext;
 
 // Initialize global middleware context.

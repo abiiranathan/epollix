@@ -62,9 +62,11 @@ void handle_create_user(context_t* ctx) {
         send_string(ctx, error);
         return;
     }
+    printf("Boundary: %s\n", boundary);
 
     char* body = (char*)ctx->request->body;
-    code       = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
+    printf("Body: %s\n", body);
+    code = multipart_parse_form((char*)body, ctx->request->content_length, boundary, &form);
     if (code != MULTIPART_OK) {
         ctx->response->status = StatusBadRequest;
         const char* error     = multipart_error_message(code);

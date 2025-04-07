@@ -196,10 +196,15 @@ static bool parse_uri(Arena* arena, const char* decoded_uri, char** path, char**
 }
 
 // Allocate memory for the body and read it from the socket
-bool allocate_and_read_body(Arena* arena, int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
+bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
                             const char* initial_body) {
-    *body = (uint8_t*)arena_alloc(arena, body_size + 1);
-    if (!*body) return false;
+    *body = (uint8_t*)malloc(body_size + 1);
+    if (!*body) {
+        perror("unable to allocate memory for body");
+        return false;
+    }
+
+    printf("Allocated body\n");
 
     // copy the initial body read if any
     if (initial_read > 0) {
@@ -215,7 +220,7 @@ bool allocate_and_read_body(Arena* arena, int client_fd, uint8_t** body, size_t 
                 usleep(1000);
                 continue;
             } else {
-                perror("recv");
+                perror("error reading body");
                 *body = NULL;
                 return false;
             }
@@ -228,23 +233,6 @@ bool allocate_and_read_body(Arena* arena, int client_fd, uint8_t** body, size_t 
 
     (*body)[total_read] = '\0';
     return true;
-}
-
-// Initialize the request structure with parsed data
-void set_request_data(Arena* arena, Request* req, uint8_t* body, size_t content_length, map* query_params,
-                      HttpMethod httpMethod, const char* http_version, const char* path) {
-
-    req->body           = body;            // set request body
-    req->content_length = content_length;  // set content length
-    req->query_params   = query_params;    // set params in the request
-    req->headers        = NULL;            // headers are allocated in the arena when parsing headers
-    req->method         = httpMethod;      // set request method
-
-    strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
-    req->http_version[sizeof(req->http_version) - 1] = '\0';
-
-    req->path = arena_alloc_string(arena, path);
-    LOG_ASSERT(req->path != NULL, "malloc failed to allocate request path");
 }
 
 // Handle the case when a route is not found
@@ -277,10 +265,15 @@ int check_avx() {
     return ecx & bit_AVX;
 }
 
-// handle the request and send response.
-void process_request(Request* req, Arena* arena) {
-    int client_fd = req->client_fd;
+#define SEND_ERR(client_fd, status, msg)                                                                               \
+    http_error((client_fd), (status), (msg));                                                                          \
+    return false
 
+#define BAD_REQ(client_fd, msg)    SEND_ERR(client_fd, StatusBadRequest, msg);
+#define SERVER_ERR(client_fd, msg) SEND_ERR(client_fd, StatusInternalServerError, msg);
+
+bool parse_http_request(Request* req, Arena* arena) {
+    int client_fd          = req->client_fd;
     char* path             = NULL;       // Request path
     char* query            = NULL;       // Query string
     map* query_params      = NULL;       // Query parameters
@@ -293,28 +286,24 @@ void process_request(Request* req, Arena* arena) {
     char headers[4096];
     ssize_t bytes_read = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (bytes_read <= 0) {
-        http_error(client_fd, StatusBadRequest, "Error receiving data from client socket");
-        return;
+        BAD_REQ(client_fd, "Error receiving data from client socket");
     }
     headers[bytes_read] = '\0';
 
     char *method, *uri, *http_version, *header_start, *end_of_headers;
     if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
-        http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        return;
+        BAD_REQ(client_fd, ERR_INVALID_STATUS_LINE);
     }
 
     httpMethod = method_fromstring(method);
     if (httpMethod == M_INVALID) {
-        http_error(client_fd, StatusBadRequest, ERR_INVALID_STATUS_LINE);
-        return;
+        BAD_REQ(client_fd, ERR_INVALID_STATUS_LINE);
     }
 
     // memmem  is slower than strstr but safer!
     end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
     if (!end_of_headers) {
-        http_error(client_fd, StatusBadRequest, "Invalid Http Payload");
-        return;
+        BAD_REQ(client_fd, "Invalid Http Payload");
     }
 
     header_capacity = end_of_headers - headers + 4;
@@ -328,30 +317,40 @@ void process_request(Request* req, Arena* arena) {
     }
 
     if (!parse_uri(arena, decoded_uri, &path, &query, &query_params)) {
-        http_error(client_fd, StatusInternalServerError, "error parsing query params");
-        return;
+        SERVER_ERR(client_fd, "error parsing query params");
+    }
+
+    req->headers = parse_request_headers(header_start, header_capacity - 4);
+    if (!req->headers) {
+        SERVER_ERR(client_fd, "Failed to parse request headers");
     }
 
     req->route = default_route_matcher(httpMethod, path);
     if (req->route == NULL && !handle_not_found(req, method, http_version, path)) {
-        return;
+        return false;
     }
 
     total_read = bytes_read - header_capacity;
     if (!is_safe_method(httpMethod) && body_size > 0) {
-        if (!allocate_and_read_body(arena, client_fd, &body, body_size, total_read, headers + header_capacity)) {
-            http_error(client_fd, StatusInternalServerError, "Failed to read request body");
-            return;
+        if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
+            SERVER_ERR(client_fd, "Failed to read request body");
         }
     }
 
-    set_request_data(arena, req, body, body_size, query_params, httpMethod, http_version, path);
-
-    Headers parsed_headers = parse_request_headers(header_start, header_capacity - 4);
-    if (parsed_headers == NULL) {
-        http_error(client_fd, StatusInternalServerError, "Failed to parse request headers");
-        return;
+    req->path = arena_alloc_string(arena, path);
+    if (!req->path) {
+        LOG_ERROR("arena_alloc_string failed to allocate request path");
+        SERVER_ERR(client_fd, "arena out of memory");
     }
 
-    req->headers = parsed_headers;
+    req->body           = body;          // set request body
+    req->content_length = body_size;     // set content length
+    req->query_params   = query_params;  // set params in the request
+    req->method         = httpMethod;    // set request method
+
+    // copy http_version
+    strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
+    req->http_version[sizeof(req->http_version) - 1] = '\0';
+
+    return true;
 }

@@ -25,6 +25,7 @@ typedef struct epollix_context {
     ctx_value locals[MAX_CONTEXT_LOCALS];  // Local context values
     size_t locals_count;                   // Number of local context values
     Arena* arena;                          // Arena pool
+    bool abort;                            // Abort request and stop processing middleware.
 } context_t __attribute__((aligned(64)));
 
 void enable_keepalive(int sockfd);

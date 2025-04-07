@@ -46,40 +46,48 @@ bool set_response_header(context_t* ctx, const char* name, const char* value) {
 }
 
 void process_response(context_t* ctx) {
-    size_t global_count = get_global_middleware_count();
-    Route* route        = ctx->request->route;
+    size_t global_mw_count = get_global_middleware_count();
+    Route* route           = ctx->request->route;
 
     // Directly execute the handler if no middleware
-    if (route->middleware_count == 0 && global_count == 0) {
+    if (route->middleware_count == 0 && global_mw_count == 0) {
         route->handler(ctx);
         return;
     }
 
-    // Define middleware context
-    MiddlewareContext mw_ctx = {
-        .handler = route->handler,
-        .index   = 0,
-        .count   = global_count + route->middleware_count,
-    };
+    // Execute global middleware.
+    if (global_mw_count > 0) {
+        MiddlewareContext mw_ctx = {
+            .ctx_type = MwGlobal,
+            .ctx      = {.Global = {.g_count = global_mw_count, .g_index = 0, .g_middleware = get_global_middleware()}},
+        };
+        ctx->mw_ctx = &mw_ctx;
+        execute_middleware_chain(ctx, &mw_ctx);
 
-    // Combine global and route middleware
-    Middleware* combined = arena_alloc(ctx->arena, sizeof(Middleware) * mw_ctx.count);
-    if (!combined) {
-        LOG_ERROR("Failed to allocate memory for combined middleware");
-        http_error(ctx->response->client_fd, StatusInternalServerError, "Internal server error");
-        return;
+        // If request was aborted, stop request.
+        if (ctx->abort) {
+            return;
+        }
     }
 
-    memcpy(combined, get_global_middleware(), global_count * sizeof(Middleware));
-    memcpy(combined + global_count, route->middleware, route->middleware_count * sizeof(Middleware));
+    // Execute route specific middleware.
+    if (route->middleware_count > 0) {
+        MiddlewareContext mw_ctx = {
+            .ctx_type = MwLocal,
+            .ctx = {.Local = {.r_count = route->middleware_count, .r_index = 0, .r_middleware = route->middleware}},
+        };
 
-    mw_ctx.middleware = combined;
+        ctx->mw_ctx = &mw_ctx;
+        execute_middleware_chain(ctx, &mw_ctx);
 
-    // Store middleware context in request context.
-    ctx->mw_ctx = &mw_ctx;
+        // If request was aborted, stop request.
+        if (ctx->abort) {
+            return;
+        }
+    }
 
-    // Execute middleware chain
-    execute_middleware_chain(ctx, &mw_ctx);
+    // Execute the handler after the middleware.
+    route->handler(ctx);
 }
 
 static void write_headers(context_t* ctx) {

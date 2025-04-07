@@ -66,21 +66,42 @@ Middleware* get_global_middleware(void) {
 }
 
 static void middleware_next(context_t* ctx) {
-    MiddlewareContext* mw_ctx = ctx->mw_ctx;
-    mw_ctx->index++;
-    execute_middleware_chain(ctx, mw_ctx);
+    if (ctx->abort) return;
+
+    switch (ctx->mw_ctx->ctx_type) {
+        case MwGlobal: {
+            MiddlewareContext* mw_ctx = ctx->mw_ctx;
+            mw_ctx->ctx.Global.g_index++;
+            execute_middleware_chain(ctx, mw_ctx);
+        } break;
+        case MwLocal: {
+            MiddlewareContext* mw_ctx = ctx->mw_ctx;
+            mw_ctx->ctx.Local.r_index++;
+            execute_middleware_chain(ctx, mw_ctx);
+        } break;
+    }
 }
 
 // Advance middleware group without calling the handler.
 void execute_middleware_chain(context_t* ctx, MiddlewareContext* mw_ctx) {
-    if (mw_ctx->index < mw_ctx->count) {
-        // Execute the next middleware in the chain
-        mw_ctx->middleware[mw_ctx->index](ctx, middleware_next);
-        return;
-    }
+    if (ctx->abort) return;
 
-    // Execute the handler
-    mw_ctx->handler(ctx);
+    switch (ctx->mw_ctx->ctx_type) {
+        case MwGlobal: {
+            if (mw_ctx->ctx.Global.g_index < mw_ctx->ctx.Global.g_count) {
+                // Execute the next global middleware in the chain
+                mw_ctx->ctx.Global.g_middleware[mw_ctx->ctx.Global.g_index](ctx, middleware_next);
+                return;
+            }
+        } break;
+        case MwLocal: {
+            if (mw_ctx->ctx.Local.r_index < mw_ctx->ctx.Local.r_count) {
+                // Execute the next local middleware in the chain
+                mw_ctx->ctx.Local.r_middleware[mw_ctx->ctx.Local.r_index](ctx, middleware_next);
+                return;
+            }
+        }
+    }
 }
 
 // ================ Middleware logic ==================

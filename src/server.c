@@ -49,20 +49,23 @@ static void handle_client(void* arg) {
         return;
     };
 
-    process_request(&req, task->arena);
+    if (!parse_http_request(&req, task->arena)) {
+        goto cleanup;
+    };
 
     if (req.route != nullptr) {
-        context_t ctx = {.request = &req, .response = &res, .arena = task->arena};
+        context_t ctx = {.request = &req, .response = &res, .arena = task->arena, .abort = false};
         process_response(&ctx);
         close_connection(task->client_fd, task->epoll_fd);
         free_locals(&ctx);
     }
 
-    if (req.query_params) map_destroy(req.query_params);
-    if (req.headers) headers_free(req.headers);
-    if (res.headers) headers_free(res.headers);
-
-    taskpool_put(task);
+cleanup:
+    if (req.body) free(req.body);                         // free allocated req body
+    if (req.query_params) map_destroy(req.query_params);  // free query params map
+    if (req.headers) headers_free(req.headers);           // free request headers
+    if (res.headers) headers_free(res.headers);           // free response hedaers
+    taskpool_put(task);                                   // Return task to pool
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -114,7 +117,7 @@ void http_error(int client_fd, http_status status, const char* message) {
 
     if (message_length >= max_message_length) {
         // use asprintf to allocate memory for the message if it's too long
-        char* msg = nullptr;
+        char* msg = NULL;
         int ret   = asprintf(&msg, fmt, status, status_str, message_length, message);
         if (ret < 0) {
             LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
@@ -122,6 +125,7 @@ void http_error(int client_fd, http_status status, const char* message) {
         }
 
         sendall(client_fd, msg, strlen(msg));
+        free(msg);
         return;
     }
 
