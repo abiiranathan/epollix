@@ -1,8 +1,9 @@
-#include <map.h>
+#include <solidc/map.h>
 #include <solidc/defer.h>
 
 #include "../include/net.h"
 #include "../include/fast_str.h"
+
 #include "../include/url.h"
 #include "../include/logging.h"
 
@@ -11,7 +12,7 @@ void test_parse_request_headers(void) {
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length           = strlen(header_text);
 
-    Headers headers = parse_request_headers(header_text, length);
+    Headers* headers = parse_request_headers(header_text, length);
     LOG_ASSERT(headers, "Failed to parse request headers");
 
     const char* host_header = headers_value(headers, "Host");
@@ -81,7 +82,7 @@ void test_parse_url_query_params(void) {
     char* query = strdup("name=John&age=30&location=USA");
     LOG_ASSERT(query != nullptr, "Failed to allocate memory for query");
 
-    Arena* arena = arena_create(4096);
+    LArena* arena = larena_create(4096);
     LOG_ASSERT(arena != nullptr, "Memory arena alloc failed");
     bool result = parse_url_query_params(arena, query, query_params);
     LOG_ASSERT(result, "Failed to parse query params");
@@ -100,7 +101,7 @@ void test_parse_url_query_params(void) {
 
     map_destroy(query_params);
     free(query);
-    arena_destroy(arena);
+    larena_destroy(arena);
 }
 
 // test match params in params.c

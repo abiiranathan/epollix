@@ -1,12 +1,12 @@
 #ifndef TASKPOOL_H
 #define TASKPOOL_H
 
-#include <solidc/arena.h>
+#include <solidc/larena.h>
 
 typedef struct {
     int epoll_fd;   // Epoll file descriptor
     int client_fd;  // Client file descriptor
-    Arena* arena;   // task arena
+    LArena* arena;  // task arena
 } Task;
 
 // Initialize the task pool

@@ -9,7 +9,6 @@
 extern "C" {
 #endif
 
-#include <solidc/arena.h>
 #include <stdio.h>
 #include "net.h"
 
@@ -20,7 +19,7 @@ typedef struct response {
     bool headers_sent;      // Headers already sent
     bool chunked;           // Is a chunked transfer
     bool content_type_set;  // Whether content type header is set
-    Headers headers;        // Response headers map
+    Headers* headers;       // Response headers
 } Response;
 
 // Create a new response object.

@@ -30,8 +30,8 @@ bool response_init(Response* res, int client_fd) {
 
 // Response headers are pre-allocated in the arena.
 bool set_response_header(context_t* ctx, const char* name, const char* value) {
-    char* header_name  = arena_alloc_string(ctx->arena, name);
-    char* header_value = arena_alloc_string(ctx->arena, value);
+    char* header_name  = larena_alloc_string(ctx->arena, name);
+    char* header_value = larena_alloc_string(ctx->arena, value);
     if (!header_name || !header_value) {
         LOG_ERROR("Failed to allocate memory for header");
         return false;
@@ -172,7 +172,7 @@ __attribute__((format(printf, 2, 3))) ssize_t send_string_f(context_t* ctx, cons
     }
 
     // Allocate a buffer of the required size
-    buffer = (char*)arena_alloc(ctx->arena, len + 1);  // +1 for the null terminator
+    buffer = (char*)larena_alloc(ctx->arena, len + 1);  // +1 for the null terminator
     if (!buffer) {
         fprintf(stderr, "Memory allocation failed\n");
         return -1;

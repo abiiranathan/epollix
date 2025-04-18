@@ -12,16 +12,16 @@
 
 static Route routeTable[MAX_ROUTES] = {};
 static size_t numRoutes             = 0;
-static Arena* arena                 = NULL;
+static LArena* arena                = NULL;
 
 __attribute__((constructor())) void init(void) {
-    arena = arena_create(ROUTE_ARENA_MEM);
+    arena = larena_create(ROUTE_ARENA_MEM);
     LOG_ASSERT(arena, "arena is NULL");
 }
 
 __attribute__((destructor())) void cleanup(void) {
     if (arena) {
-        arena_destroy(arena);
+        larena_destroy(arena);
     }
 
     for (size_t i = 0; i < numRoutes; ++i) {
@@ -32,7 +32,7 @@ __attribute__((destructor())) void cleanup(void) {
 }
 
 const char* get_route_pattern(Route* route) {
-    return route->pattern;
+    return route->pattern.data;
 }
 
 Route* default_route_matcher(HttpMethod method, const char* path) {
@@ -43,13 +43,13 @@ Route* default_route_matcher(HttpMethod method, const char* path) {
         }
 
         if (routeTable[i].type == NormalRoute) {
-            matches = match_path_parameters(routeTable[i].pattern, path, routeTable[i].params);
+            matches = match_path_parameters(routeTable[i].pattern.data, path, routeTable[i].params);
             if (matches) {
                 return &routeTable[i];
             }
         } else {
             // For static routes, we match only the prefix as an exact match.
-            if (strncmp(routeTable[i].pattern, path, strlen(routeTable[i].pattern)) == 0) {
+            if (strncmp(routeTable[i].pattern.data, path, routeTable[i].pattern.length) == 0) {
                 return &routeTable[i];
             }
         }
@@ -63,6 +63,8 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
         LOG_FATAL("Number of routes %ld exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
     }
 
+    printf("/%s %s\n", method_tostring(method), pattern);
+
     Route* route               = &routeTable[numRoutes];
     route->method              = method;
     route->handler             = handler;
@@ -70,12 +72,14 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->mw_data             = nullptr;
     route->middleware_count    = 0;
     route->middleware_capacity = 1;
-    route->middleware          = arena_alloc(arena, sizeof(Middleware) * route->middleware_capacity);
+    route->middleware          = larena_alloc(arena, sizeof(Middleware) * route->middleware_capacity);
 
-    route->pattern = arena_alloc_string(arena, pattern);
-    route->params  = (PathParams*)arena_alloc(arena, sizeof(PathParams));
+    char* pat = larena_alloc_string(arena, pattern);
+    LOG_ASSERT(pat, "unable to allocate pattern");
 
-    LOG_ASSERT(route->pattern, "unable to allocate pattern");
+    route->pattern = (str_view){.data = pat, .length = strlen(pat)};
+    route->params  = (PathParams*)larena_alloc(arena, sizeof(PathParams));
+
     LOG_ASSERT(route->params, "unable to allocate params");
     LOG_ASSERT(route->middleware, "unable to allocate middleware");
 
@@ -117,7 +121,7 @@ Route* route_delete(const char* pattern, Handler handler) {
 Route* route_static(const char* pattern, const char* dir) {
     LOG_ASSERT(MAX_DIRNAME > strlen(dir) + 1, "dir name too long");
 
-    char* dirname = arena_alloc_string(arena, dir);
+    char* dirname = larena_alloc_string(arena, dir);
     LOG_ASSERT(dirname, "strdup failed");
 
     if (strstr(dirname, "~")) {
@@ -126,7 +130,7 @@ Route* route_static(const char* pattern, const char* dir) {
             LOG_ASSERT(dirname, "filepath_expanduser failed");
         };
 
-        dirname = arena_alloc_string(arena, buf);
+        dirname = larena_alloc_string(arena, buf);
         LOG_ASSERT(dirname, "strdup failed");
     }
 
@@ -144,24 +148,21 @@ Route* route_static(const char* pattern, const char* dir) {
     LOG_ASSERT(route, "registerRoute failed");
 
     route->type    = StaticRoute;
-    route->dirname = dirname;
+    route->dirname = (str_view){.data = dirname, .length = strlen(dirname)};
     return route;
 }
 
 static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const char* pattern, Handler handler,
                                  RouteType type) {
 
-    char* route_pattern = (char*)arena_alloc(arena, strlen(group->prefix) + strlen(pattern) + 1);
+    size_t pattern_len  = strlen(pattern);
+    char* route_pattern = (char*)malloc(group->prefix.length + pattern_len + 1);
     LOG_ASSERT(route_pattern, "Failed to allocate memory for route pattern\n");
-
-    int ret = snprintf(route_pattern, strlen(group->prefix) + strlen(pattern) + 1, "%s%s", group->prefix, pattern);
-    if (ret < 0 || ret >= (int)(strlen(group->prefix) + strlen(pattern) + 1)) {
-        LOG_FATAL("Failed to concatenate route pattern");
-    }
+    snprintf(route_pattern, group->prefix.length + pattern_len + 1, "%s%s", group->prefix.data, pattern);
 
     if (group->count == group->capacity) {
         size_t capacity    = group->count * 2;
-        Route** new_routes = (Route**)arena_alloc(arena, sizeof(Route*) * capacity);
+        Route** new_routes = (Route**)larena_alloc(arena, sizeof(Route*) * capacity);
         LOG_ASSERT(new_routes, "Failed to allocate memory for group routes");
 
         group->capacity = capacity;
@@ -173,6 +174,7 @@ static Route* registerGroupRoute(RouteGroup* group, HttpMethod method, const cha
     // Should not be freed in route_group_free.
     Route* route                  = (Route*)registerRoute(method, route_pattern, handler, type);
     group->routes[group->count++] = route;
+    free(route_pattern);
     return route;
 }
 
@@ -211,8 +213,8 @@ Route* route_group_delete(RouteGroup* group, const char* pattern, Handler handle
 Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname) {
     LOG_ASSERT(MAX_DIRNAME > strlen(dirname) + 1, "dirname is too long");
 
-    char* fullpath = arena_alloc_string(arena, dirname);
-    LOG_ASSERT(fullpath != nullptr, "arena_alloc_string failed");
+    char* fullpath = larena_alloc_string(arena, dirname);
+    LOG_ASSERT(fullpath != nullptr, "larena_alloc_string failed");
 
     if (strstr(fullpath, "~")) {
         char buf[PATH_MAX];
@@ -220,8 +222,8 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
             LOG_ASSERT(dirname, "filepath_expanduser failed");
         };
 
-        fullpath = arena_alloc_string(arena, buf);
-        LOG_ASSERT(fullpath, "arena_alloc_string failed");
+        fullpath = larena_alloc_string(arena, buf);
+        LOG_ASSERT(fullpath, "larena_alloc_string failed");
     }
 
     // Check that dirname exists
@@ -239,7 +241,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     Route* route = (Route*)registerGroupRoute(group, M_GET, pattern, (Handler)staticFileHandler, StaticRoute);
     LOG_ASSERT(route != nullptr, "registerGroupRoute failed");
     route->type    = StaticRoute;
-    route->dirname = fullpath;
+    route->dirname = (str_view){.data = fullpath, .length = strlen(fullpath)};
     return route;
 }
 
@@ -249,20 +251,21 @@ void* route_middleware_context(context_t* ctx) {
 
 // Create a new RouteGroup.
 RouteGroup* route_group(const char* pattern) {
-    RouteGroup* group = (RouteGroup*)arena_alloc(arena, sizeof(RouteGroup));
+    RouteGroup* group = (RouteGroup*)larena_alloc(arena, sizeof(RouteGroup));
     LOG_ASSERT(group, "Failed to allocate memory for RouteGroup\n");
 
-    group->prefix = arena_alloc_string(arena, pattern);
+    char* prefix = larena_alloc_string(arena, pattern);
+    LOG_ASSERT(prefix, "Failed to allocate memory for RouteGroup prefix");
+    group->prefix = (str_view){.data = prefix, .length = strlen(prefix)};
 
     group->middleware_count    = 0;
     group->middleware_capacity = 2;
-    group->middleware          = arena_alloc(arena, sizeof(Middleware) * group->middleware_capacity);
+    group->middleware          = larena_alloc(arena, sizeof(Middleware) * group->middleware_capacity);
 
     group->count    = 0;
     group->capacity = 8;
-    group->routes   = arena_alloc(arena, sizeof(Route*) * group->capacity);
+    group->routes   = larena_alloc(arena, sizeof(Route*) * group->capacity);
 
-    LOG_ASSERT(group->prefix, "Failed to allocate memory for RouteGroup prefix\n");
     LOG_ASSERT(group->routes, "Failed to allocate memory for RouteGroup routes\n");
     LOG_ASSERT(group->middleware, "Failed to allocate memory for RouteGroup middleware\n");
 

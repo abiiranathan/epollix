@@ -1,6 +1,4 @@
 #include "../include/params.h"
-#include "../include/logging.h"
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,11 +14,9 @@
  */
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams) {
     // Initialize parameters for efficiency
-    char* pattern_ptr = (char*)pattern;
-    char* url_ptr     = (char*)url_path;
-    size_t idx        = 0;
-
-    // Reset counter
+    char* pattern_ptr       = (char*)pattern;
+    char* url_ptr           = (char*)url_path;
+    size_t idx              = 0;
     pathParams->match_count = 0;
 
     // Fast path: if no parameters in pattern, do a simple comparison

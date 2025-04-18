@@ -1,7 +1,6 @@
 #define _GNU_SOURCE 1
 
 #include <arpa/inet.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
@@ -9,7 +8,6 @@
 #include <unistd.h>
 
 #include "../include/net.h"
-#include "response.h"
 
 int set_nonblocking(int sock) {
     int flags, s;

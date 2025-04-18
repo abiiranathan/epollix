@@ -1,15 +1,15 @@
 #ifndef D76789EA_14B2_4E19_93EE_24E5F15B2317
 #define D76789EA_14B2_4E19_93EE_24E5F15B2317
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define _GNU_SOURCE 1
 
 #include <assert.h>
-#include <time.h>
+#include <time.h>  // NOLINT
 #include <unistd.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include "middleware/basicauth.h"
 #include "middleware/logger.h"

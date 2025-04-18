@@ -19,10 +19,10 @@ typedef void (*Handler)(struct epollix_context* ctx);
 typedef struct Route {
     HttpMethod method;           // HTTP Method.
     RouteType type;              // Type of Route (Normal or Static)
-    char* pattern;               // Pattern to match
+    str_view pattern;            // Pattern to match
     Handler handler;             // Handler for the route
     PathParams* params;          // Parameters extracted from the URL
-    char* dirname;               // Dirname for static route(dynamic memory)
+    str_view dirname;            // Dirname for static route(dynamic memory)
     Middleware* middleware;      // Array of middleware functions(allocated dynamically)
     size_t middleware_count;     // Number of middleware functions
     size_t middleware_capacity;  // Capacity of middleware
@@ -31,7 +31,7 @@ typedef struct Route {
 
 // Route group is a collection of routes that share the same prefix.
 typedef struct RouteGroup {
-    char* prefix;                // Prefix for the group
+    str_view prefix;             // Prefix for the group
     Route** routes;              // Array of routes(dynamic memory)
     size_t count;                // Number of routes in the group
     size_t capacity;             // capacity of routes in the group

@@ -8,11 +8,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-// Not found route.
-Route* notFoundRoute = NULL;
+Route* notFoundRoute = NULL;  // 404 Route.
 
 typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderState;
 
+// Function to report http errors while still parsing the request.
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
@@ -49,8 +49,8 @@ const char* get_query_param(Request* req, const char* name) {
     return map_get(req->query_params, (void*)name);
 }
 
-Headers parse_request_headers(const char* header_text, size_t length) {
-    Headers headers = headers_new(32);
+Headers* parse_request_headers(const char* header_text, size_t length) {
+    Headers* headers = headers_new(32);
     if (!headers) {
         LOG_ERROR("Failed to create headers");
         return NULL;
@@ -134,7 +134,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     return strtoul(content_length_header + 15, NULL, 10);
 }
 
-bool parse_url_query_params(Arena* arena, char* query, map* query_params) {
+bool parse_url_query_params(LArena* arena, char* query, map* query_params) {
     char* key   = NULL;
     char* value = NULL;
     char *save_ptr, *save_ptr2;
@@ -146,13 +146,13 @@ bool parse_url_query_params(Arena* arena, char* query, map* query_params) {
         value = strtok_r(NULL, "=", &save_ptr2);
 
         if (key != NULL && value != NULL) {
-            char* queryName = arena_alloc_string(arena, key);
+            char* queryName = larena_alloc_string(arena, key);
             if (queryName == NULL) {
                 success = false;
                 break;
             }
 
-            char* queryValue = arena_alloc_string(arena, value);
+            char* queryValue = larena_alloc_string(arena, value);
             if (queryValue == NULL) {
                 success = false;
                 break;
@@ -166,8 +166,8 @@ bool parse_url_query_params(Arena* arena, char* query, map* query_params) {
 }
 
 // Parse the URI, extracting path and query parameters
-static bool parse_uri(Arena* arena, const char* decoded_uri, char** path, char** query, map** query_params) {
-    *path = arena_alloc_string(arena, decoded_uri);
+static bool parse_uri(LArena* arena, const char* decoded_uri, char** path, char** query, map** query_params) {
+    *path = larena_alloc_string(arena, decoded_uri);
     if (!*path) {
         return false;
     }
@@ -272,7 +272,7 @@ int check_avx() {
 #define BAD_REQ(client_fd, msg)    SEND_ERR(client_fd, StatusBadRequest, msg);
 #define SERVER_ERR(client_fd, msg) SEND_ERR(client_fd, StatusInternalServerError, msg);
 
-bool parse_http_request(Request* req, Arena* arena) {
+bool parse_http_request(Request* req, LArena* arena) {
     int client_fd          = req->client_fd;
     char* path             = NULL;       // Request path
     char* query            = NULL;       // Query string
@@ -337,7 +337,7 @@ bool parse_http_request(Request* req, Arena* arena) {
         }
     }
 
-    req->path = arena_alloc_string(arena, path);
+    req->path = larena_alloc_string(arena, path);
     if (!req->path) {
         LOG_ERROR("arena_alloc_string failed to allocate request path");
         SERVER_ERR(client_fd, "arena out of memory");

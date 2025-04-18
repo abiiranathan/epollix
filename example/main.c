@@ -2,6 +2,7 @@
 
 #define NUM_THREADS  4
 #define DEFAULT_PORT "3000"
+#define USE_LOGGER   0
 
 // Routes, defined in ./routes.c
 extern void open_movie(void);

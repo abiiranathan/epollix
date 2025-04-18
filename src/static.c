@@ -2,8 +2,6 @@
 
 #include "../include/request.h"
 #include "../include/response.h"
-
-#include <solidc/arena.h>
 #include <solidc/cstr.h>
 #include <solidc/filepath.h>
 #include <solidc/defer.h>
@@ -272,7 +270,7 @@ void staticFileHandler(context_t* ctx) {
     Request* req = ctx->request;
     Route* route = req->route;
 
-    const char* dirname = route->dirname;
+    const char* dirname = route->dirname.data;
 
     // Replace . and .. with ./ and ../
     if (strcmp(dirname, ".") == 0) {
@@ -282,12 +280,12 @@ void staticFileHandler(context_t* ctx) {
     }
 
     // Trim the static pattern from the path
-    const char* static_path = req->path + strlen(route->pattern);
+    const char* static_path = req->path + route->pattern.length;
 
     // Concatenate the dirname and the static path
     char fullpath[MAX_PATH_LEN] = {0};
     int n;
-    if (dirname[strlen(dirname) - 1] == '/') {
+    if (dirname[route->dirname.length - 1] == '/') {
         n = snprintf(fullpath, MAX_PATH_LEN, "%s%s", dirname, static_path);
     } else {
         n = snprintf(fullpath, MAX_PATH_LEN, "%s/%s", dirname, static_path);
@@ -322,7 +320,7 @@ void staticFileHandler(context_t* ctx) {
         if (!path_exists(index_file)) {
             if (browse_enabled) {
                 char prefix[MAX_PATH_LEN] = {0};
-                snprintf(prefix, MAX_PATH_LEN, "%s%s", route->pattern, static_path);
+                snprintf(prefix, MAX_PATH_LEN, "%s%s", route->pattern.data, static_path);
                 serve_directory_listing(ctx, filepath, prefix);
             } else {
                 set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");

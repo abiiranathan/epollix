@@ -1,8 +1,10 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <solidc/larena.h>
 #include <solidc/map.h>
-#include <solidc/arena.h>
+#include <solidc/cstr.h>
+
 #include <sys/types.h>
 
 #include "constants.h"

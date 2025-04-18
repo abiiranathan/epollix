@@ -9,7 +9,7 @@ void taskpool_init(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         taskPool[i].client_fd = -1;
         taskPool[i].epoll_fd  = -1;
-        taskPool[i].arena     = arena_create(PER_REQUEST_ARENA_MEM);
+        taskPool[i].arena     = larena_create(PER_REQUEST_ARENA_MEM);
         LOG_ASSERT(taskPool[i].arena, "error allocating arena");
     }
 }
@@ -26,13 +26,13 @@ Task* taskpool_get(void) {
 void taskpool_put(Task* task) {
     task->client_fd = -1;
     task->epoll_fd  = -1;
-    arena_reset(task->arena);
+    larena_reset(task->arena);
 }
 
 void taskpool_destroy(void) {
     for (int i = 0; i < TASK_CAPACITY; i++) {
         if (taskPool[i].client_fd == -1) {
-            arena_destroy(taskPool[i].arena);
+            larena_destroy(taskPool[i].arena);
         }
     }
 }

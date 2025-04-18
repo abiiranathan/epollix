@@ -1,8 +1,6 @@
 #include "../include/method.h"
 #include "../include/logging.h"
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static const char* method_mapping[7] = {

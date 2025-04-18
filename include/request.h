@@ -8,7 +8,6 @@ extern "C" {
 #endif
 
 #include "route.h"
-#include "types.h"
 
 typedef struct request {
     int client_fd;          // Peer connection file descriptor
@@ -16,7 +15,7 @@ typedef struct request {
     HttpMethod method;      // Http request method as an integer enum
     size_t content_length;  // Content length or size of body
     struct Route* route;    // Matching route
-    Headers headers;        // Request headers map.
+    Headers* headers;       // Request headers.
     map* query_params;      // Query parameters (consider replacing with a more efficient structure)
     char http_version[12];  // Http version (e.g., "HTTP/1.1")
     char* path;             // Request path and query string (dynamically allocated)
@@ -27,11 +26,11 @@ typedef struct request {
 void request_init(Request* req, int client_fd, int epoll_fd);
 
 // Parse request headers from text.
-Headers parse_request_headers(const char* header_text, size_t length);
+Headers* parse_request_headers(const char* header_text, size_t length);
 
 // Parse URL query parameters from a query string.
 // Populates the map.
-bool parse_url_query_params(Arena* arena, char* query, map* query_params);
+bool parse_url_query_params(LArena* arena, char* query, map* query_params);
 
 // Get the value of a query parameter by name.
 const char* get_query_param(Request* req, const char* name);
@@ -43,7 +42,7 @@ const char* get_param(Request* req, const char* name);
 const char* get_content_type(Request* req);
 
 // Handle Request and send response to the client.
-bool parse_http_request(Request* req, Arena* arena);
+bool parse_http_request(Request* req, LArena* arena);
 
 // Set a NotFoundHandler. This is handy for SPAs.
 // It will be called if the RouteMatcher returns nullptr.

@@ -10,9 +10,9 @@
 static Middleware GLOBAL_MIDDLEWARE[MAX_GLOBAL_MIDDLEWARE] = {};       // Global middleware
 static size_t global_middleware_count                      = 0;        // Number of global middleware
 static map* global_middleware_context                      = nullptr;  // Global middleware context
-static Arena* arena                                        = NULL;
+static LArena* arena                                       = NULL;
 
-#define MIDDLEWARE_ARENA_MEM ((MAX_GLOBAL_MIDDLEWARE + MAX_GROUP_MIDDLEWARE) * sizeof(Middleware) * 2)
+#define MIDDLEWARE_ARENA_MEM (size_t)((MAX_GLOBAL_MIDDLEWARE + MAX_GROUP_MIDDLEWARE) * sizeof(Middleware) * 1.2)
 
 __attribute__((constructor())) void middleware_init(void) {
     // Initialize global middleware context
@@ -20,7 +20,7 @@ __attribute__((constructor())) void middleware_init(void) {
     LOG_ASSERT(global_middleware_context, "Failed to create global_middleware_context\n");
 
     // Initialize middleware memory pool
-    arena = arena_create(MIDDLEWARE_ARENA_MEM);
+    arena = larena_create(MIDDLEWARE_ARENA_MEM);
     LOG_ASSERT(arena, "pool is NULL");
 }
 
@@ -30,7 +30,7 @@ __attribute__((destructor())) void middleware_cleanup(void) {
     }
 
     if (arena) {
-        arena_destroy(arena);
+        larena_destroy(arena);
     }
 }
 
@@ -130,7 +130,7 @@ void use_route_middleware(Route* route, size_t count, ...) {
     if (new_count <= route->middleware_capacity) {
         size_t capacity = new_count * 2;
 
-        Middleware* new_middleware = (Middleware*)arena_alloc(arena, sizeof(Middleware) * capacity);
+        Middleware* new_middleware = (Middleware*)larena_alloc(arena, sizeof(Middleware) * capacity);
         LOG_ASSERT(new_middleware, "Failed to allocate memory for route middleware\n");
 
         memcpy(new_middleware, route->middleware, sizeof(Middleware) * route->middleware_count);
@@ -159,7 +159,7 @@ void use_group_middleware(RouteGroup* group, size_t count, ...) {
     size_t new_count = group->middleware_count + count;
     if (new_count <= group->middleware_capacity) {
         size_t capacity            = new_count * 2;
-        Middleware* new_middleware = (Middleware*)arena_alloc(arena, sizeof(Middleware) * capacity);
+        Middleware* new_middleware = (Middleware*)larena_alloc(arena, sizeof(Middleware) * capacity);
         LOG_ASSERT(new_middleware, "Failed to allocate memory for group middleware\n");
         memcpy(new_middleware, group->middleware, sizeof(Middleware) * group->middleware_count);
         group->middleware_capacity = capacity;
