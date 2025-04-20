@@ -16,7 +16,7 @@ typedef struct request {
     size_t content_length;  // Content length or size of body
     struct Route* route;    // Matching route
     Headers* headers;       // Request headers.
-    map* query_params;      // Query parameters (consider replacing with a more efficient structure)
+    Map* query_params;      // Query parameters (consider replacing with a more efficient structure)
     char http_version[12];  // Http version (e.g., "HTTP/1.1")
     char* path;             // Request path and query string (dynamically allocated)
     uint8_t* body;          // Body of the request (dynamically allocated)
@@ -30,7 +30,7 @@ Headers* parse_request_headers(const char* header_text, size_t length);
 
 // Parse URL query parameters from a query string.
 // Populates the map.
-bool parse_url_query_params(LArena* arena, char* query, map* query_params);
+bool parse_url_query_params(LArena* arena, char* query, Map* query_params);
 
 // Get the value of a query parameter by name.
 const char* get_query_param(Request* req, const char* name);

@@ -2,8 +2,8 @@
 
 // Parse x-www-form-urlencoded form from request and return map containing fields.
 // All keys and values are char*.
-map* parse_urlencoded_form(const char* url) {
-    map* params = map_create(0, key_compare_char_ptr, true);
+Map* parse_urlencoded_form(const char* url) {
+    Map* params = map_create(MapConfigStr);
     if (!params) {
         return nullptr;
     }
@@ -60,7 +60,7 @@ map* parse_urlencoded_form(const char* url) {
 #if 0 
 int main(void) {
     const char* url = "http://localhost:8080?username=nabiizy&email=example@gmail.com&password=password";
-    map* m = parse_urlencoded_form(url);
+    Map* m = parse_urlencoded_form(url);
     if (!m) {
         return 1;
     }

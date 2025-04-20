@@ -134,7 +134,7 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     return strtoul(content_length_header + 15, NULL, 10);
 }
 
-bool parse_url_query_params(LArena* arena, char* query, map* query_params) {
+bool parse_url_query_params(LArena* arena, char* query, Map* query_params) {
     char* key   = NULL;
     char* value = NULL;
     char *save_ptr, *save_ptr2;
@@ -165,8 +165,17 @@ bool parse_url_query_params(LArena* arena, char* query, map* query_params) {
     return success;
 }
 
+// Map configuration for Query Parameters.
+// key and value are allocated in pool and thus should not be freed.
+static const MapConfig* cfg = &(MapConfig){
+    .key_free     = NOFREE,
+    .value_free   = NOFREE,
+    .key_compare  = key_compare_char_ptr,
+    .key_len_func = key_len_char_ptr,
+};
+
 // Parse the URI, extracting path and query parameters
-static bool parse_uri(LArena* arena, const char* decoded_uri, char** path, char** query, map** query_params) {
+static bool parse_uri(LArena* arena, const char* decoded_uri, char** path, char** query, Map** query_params) {
     *path = larena_alloc_string(arena, decoded_uri);
     if (!*path) {
         return false;
@@ -177,9 +186,7 @@ static bool parse_uri(LArena* arena, const char* decoded_uri, char** path, char*
         **query = '\0';
         (*query)++;
 
-        // key and value are allocated in pool and thus should not be freed.
-        bool free_entries = false;
-        *query_params     = map_create(4, key_compare_char_ptr, free_entries);
+        *query_params = map_create(cfg);
         if (!*query_params) {
             return false;
         }
@@ -276,7 +283,7 @@ bool parse_http_request(Request* req, LArena* arena) {
     int client_fd          = req->client_fd;
     char* path             = NULL;       // Request path
     char* query            = NULL;       // Query string
-    map* query_params      = NULL;       // Query parameters
+    Map* query_params      = NULL;       // Query parameters
     uint8_t* body          = NULL;       // Request body (dynamically allocated)
     size_t total_read      = 0;          // Total bytes read
     HttpMethod httpMethod  = M_INVALID;  // Http method

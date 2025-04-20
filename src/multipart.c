@@ -31,7 +31,7 @@ static FormField* realloc_fields(MultipartForm* form);
 static bool insert_header(MultipartForm* form, FileHeader header) {
     if (form->num_files >= INITIAL_FILE_CAPACITY) {
         if (!realloc_files(form)) {
-            LOG_ERROR("Failed to reallocate files");
+            LOG_ERROR("Failed to reallocate memory for files");
             return false;
         }
     }

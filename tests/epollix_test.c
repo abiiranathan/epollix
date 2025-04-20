@@ -3,9 +3,7 @@
 
 #include "../include/net.h"
 #include "../include/fast_str.h"
-
 #include "../include/url.h"
-#include "../include/logging.h"
 
 // test parse request headers
 void test_parse_request_headers(void) {
@@ -74,9 +72,13 @@ void test_encode_uri_simd(void) {
     LOG_ASSERT(result, "Failed to encode URI");
 }
 
-// bool parse_url_query_params(char* query, map* query_params)
+// bool parse_url_query_params(char* query, Map* query_params)
 void test_parse_url_query_params(void) {
-    map* query_params = map_create(10, key_compare_char_ptr, false);
+    MapConfig* cfg  = MapConfigStr;
+    cfg->key_free   = NOFREE;
+    cfg->value_free = NOFREE;
+
+    Map* query_params = map_create(cfg);
     LOG_ASSERT(query_params != nullptr, "Failed to create map for query_params");
 
     char* query = strdup("name=John&age=30&location=USA");
