@@ -24,7 +24,7 @@ static void user_route_mw(context_t* ctx, Handler next) {
 }
 
 static void defineRoutes() {
-    BasicAuthUser *guest = nullptr, *admin = nullptr;
+    BasicAuthUser *guest = NULL, *admin = NULL;
 
 #if USE_LOGGER > 0
     // Logging middleware
@@ -38,8 +38,8 @@ static void defineRoutes() {
     guest = new_basic_auth_user("guest", "guest", "Protected");
     admin = new_basic_auth_user("admin", "admin", "ProtectedAdmin");
 
-    LOG_ASSERT(guest != nullptr, "Failed to allocate memory for BasicAuthData");
-    LOG_ASSERT(admin != nullptr, "Failed to allocate memory for BasicAuthData");
+    LOG_ASSERT(guest != NULL, "Failed to allocate memory for BasicAuthData");
+    LOG_ASSERT(admin != NULL, "Failed to allocate memory for BasicAuthData");
 
     set_global_mw_context(BASIC_AUTH_KEY, guest);
     // use_global_middleware(1, global_basic_auth);

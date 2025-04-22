@@ -207,11 +207,9 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
                             const char* initial_body) {
     *body = (uint8_t*)malloc(body_size + 1);
     if (!*body) {
-        perror("unable to allocate memory for body");
+        perror("unable to allocate memory for the request body");
         return false;
     }
-
-    printf("Allocated body\n");
 
     // copy the initial body read if any
     if (initial_read > 0) {
