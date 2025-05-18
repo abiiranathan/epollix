@@ -63,8 +63,6 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
         LOG_FATAL("Number of routes %ld exceeds MAX_ROUTES: %d\n", numRoutes, MAX_ROUTES);
     }
 
-    printf("/%s %s\n", method_tostring(method), pattern);
-
     Route* route               = &routeTable[numRoutes];
     route->method              = method;
     route->handler             = handler;

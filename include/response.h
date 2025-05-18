@@ -1,5 +1,5 @@
-#ifndef C4C2FBAD_C23C_4F88_95D5_67AAD2406076
-#define C4C2FBAD_C23C_4F88_95D5_67AAD2406076
+#ifndef RESPONSE_H
+#define RESPONSE_H
 
 #include <stddef.h>
 #define _GNU_SOURCE     1
@@ -89,4 +89,4 @@ ssize_t serve_open_file(context_t* ctx, FILE* file, size_t file_size, const char
 }
 #endif
 
-#endif /* C4C2FBAD_C23C_4F88_95D5_67AAD2406076 */
+#endif /* RESPONSE_H */

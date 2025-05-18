@@ -19,13 +19,17 @@ typedef struct {
 ARRAY_DEFINE(Headers, header_t)
 
 Headers* headers_new(size_t initial_capacity) {
-    Headers* headers = malloc(sizeof(Headers));
+
+    // Create headers with default capacity.
+    Headers* headers = Headers_new();
     if (!headers) {
         return NULL;
     }
 
-    Headers_init(headers);
-    Headers_resize(headers, initial_capacity ? initial_capacity : 32);
+    if (headers->capacity < initial_capacity) {
+        Headers_resize(headers, initial_capacity);
+    }
+
     return headers;
 }
 
@@ -110,5 +114,4 @@ void headers_free(Headers* headers) {
     }
 
     Headers_free(headers);
-    free(headers);
 }
