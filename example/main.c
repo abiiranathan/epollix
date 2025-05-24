@@ -1,7 +1,7 @@
 #include "../include/epollix.h"
 
 #define NUM_THREADS  4
-#define DEFAULT_PORT "3000"
+#define DEFAULT_PORT 3000
 #define USE_LOGGER   0
 
 // Routes, defined in ./routes.c
@@ -78,9 +78,13 @@ static void defineRoutes() {
 }
 
 int main(int argc, char** argv) {
-    char* port = DEFAULT_PORT;
+    uint16_t port = DEFAULT_PORT;
     if (argc == 2) {
-        port = argv[1];
+        bool ok;
+        port = parse_port(argv[1], &ok);
+        if (!ok) {
+            LOG_FATAL("Invalid port");
+        }
     }
 
     open_movie();
@@ -90,7 +94,7 @@ int main(int argc, char** argv) {
 
     defineRoutes();
 
-    EpollServer* server = epoll_server_create(4, port);
+    EpollServer* server = epoll_server_create(8, port);
     LOG_ASSERT(server, "Unable to create server");
 
     epoll_server_enable_keepalive(server, true);

@@ -38,6 +38,9 @@ ssize_t sendall(int fd, const void* buf, size_t n);
 // Send error back to client as html with a status code.
 void http_error(int client_fd, http_status status, const char* message);
 
+// Set high performance socket options, socket reuse and congestion control.
+int optimize_server_socket(int server_fd);
+
 // Returns the IP address of the client.
 char* get_ip_address(context_t* ctx);
 

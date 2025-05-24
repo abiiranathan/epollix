@@ -1,5 +1,4 @@
 #include "../include/mime.h"
-#include "../include/fast_str.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -263,21 +262,21 @@ const char* get_mimetype(char* filename) {
     }
 
     // Get the file extension.
-    char *ptr, *start = filename, *last = nullptr;
+    char *ptr, *start = filename, *last = NULL;
     while ((ptr = strstr(start, "."))) {
         last = ptr;
         start++;
     }
 
     // No extension.
-    if (last == nullptr) {
+    if (last == NULL) {
         return DEFAULT_CONTENT_TYPE;
     }
 
     char* extension = last + 1;  // skip "."
 
     for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
-        if (fast_strcasecmp(extension, mime_mapping[i].extension) == 0) {
+        if (strcasecmp(extension, mime_mapping[i].extension) == 0) {
             return mime_mapping[i].contentType;
         }
     }

@@ -3,8 +3,6 @@
 #include <immintrin.h>
 #include <limits.h>
 #include <ctype.h>
-#include "../include/url.h"
-#include "../include/fast_str.h"
 
 static const unsigned char ASCII[256] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
@@ -22,18 +20,11 @@ static const unsigned char ASCII[256] = {
     0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6,
     0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff};
 
-static int fast_strcasecmp_sse(const char* s1, const char* s2) {
+int fast_strcasecmp_sse(const char* s1, const char* s2) {
     static const unsigned char* const table = ASCII;
     while (1) {
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wcast-align"
-#endif
         __m128i vec1 = _mm_loadu_si128((const __m128i*)s1);
         __m128i vec2 = _mm_loadu_si128((const __m128i*)s2);
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 
         // Compare 16 bytes at a time
         __m128i cmp   = _mm_cmpeq_epi8(vec1, vec2);
@@ -61,48 +52,42 @@ static int fast_strcasecmp_sse(const char* s1, const char* s2) {
 
 // Use AVX/SSE to do case-insensitive char* comparison.
 int fast_strcasecmp(const char* s1, const char* s2) {
-    if (has_avx2()) {
-        while (1) {
-// Use AVX2 if available, else fall back to SSE.
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wcast-align"
-#endif
-            __m256i v1 = _mm256_loadu_si256((const __m256i*)s1);
-            __m256i v2 = _mm256_loadu_si256((const __m256i*)s2);
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+#ifdef __AVX2__
+    while (1) {
+        __m256i v1 = _mm256_loadu_si256((const __m256i*)s1);
+        __m256i v2 = _mm256_loadu_si256((const __m256i*)s2);
 
-            // Compare 32 bytes at once
-            __m256i cmp   = _mm256_cmpeq_epi8(v1, v2);
-            unsigned mask = _mm256_movemask_epi8(cmp);
+        // Compare 32 bytes at once
+        __m256i cmp   = _mm256_cmpeq_epi8(v1, v2);
+        unsigned mask = _mm256_movemask_epi8(cmp);
 
-            if (mask != 0xFFFFFFFF) {
-                // Mismatch found, check each byte
-                for (int i = 0; i < 32; i++) {
-                    unsigned char c1 = (unsigned char)tolower(s1[i]);
-                    unsigned char c2 = (unsigned char)tolower(s2[i]);
-                    if (c1 != c2) return c1 - c2;
-                    if (c1 == 0) return 0;
-                }
+        if (mask != 0xFFFFFFFF) {
+            // Mismatch found, check each byte
+            for (int i = 0; i < 32; i++) {
+                unsigned char c1 = (unsigned char)tolower(s1[i]);
+                unsigned char c2 = (unsigned char)tolower(s2[i]);
+                if (c1 != c2) return c1 - c2;
+                if (c1 == 0) return 0;
             }
-
-            // Check for null terminator
-            if (_mm256_movemask_epi8(_mm256_cmpeq_epi8(v1, _mm256_setzero_si256()))) {
-                return 0;
-            }
-
-            s1 += 32;
-            s2 += 32;
         }
-    } else {
-        return fast_strcasecmp_sse(s1, s2);
+
+        // Check for null terminator
+        if (_mm256_movemask_epi8(_mm256_cmpeq_epi8(v1, _mm256_setzero_si256()))) {
+            return 0;
+        }
+
+        s1 += 32;
+        s2 += 32;
     }
+#elifdef __SSE2__
+    return fast_strcasecmp_sse(s1, s2);
+#else
+    return strcasecmp(s1, s2);
+#endif
 }
 
-#if 0
-
+#if 1
+#include "../include/fast_str.h"
 #include <string.h>
 #include <locale.h>
 #include <stdio.h>

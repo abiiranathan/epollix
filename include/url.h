@@ -3,7 +3,9 @@
 
 #include <stddef.h>
 
-// Check if the CPU supports AVX2
+// Check if the CPU supports AVX2 at runtime.
+// Its better to check this at compile-time by checjing
+// if __AVX2__ is defined.
 // Returns 1 if supported, 0 otherwise.
 int has_avx2();
 

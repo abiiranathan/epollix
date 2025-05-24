@@ -38,16 +38,13 @@ void test_decode_uri_scalar(void) {
 }
 
 void test_decode_uri_simd(void) {
-    if (!has_avx2()) {
-        LOG_INFO("AVX2 not supported, skipping SIMD test");
-        return;
-    }
-
+#ifdef __AVX2__
     char* encoded = "This%20is%20a%20test:%2F%3F%23%5B%5D%40%21%24%26%27%28%29%2A%2B%2C%3B%3D%25";
     char decoded[100];
     url_percent_decode_simd(encoded, decoded, sizeof(decoded));
     bool result = strcmp(decoded, "This is a test:/?#[]@!$&'()*+,;=%") == 0;
     LOG_ASSERT(result, "Failed to decode URI");
+#endif
 }
 
 // encode_uri
@@ -60,16 +57,16 @@ void test_encode_uri_scalar(void) {
 }
 
 void test_encode_uri_simd(void) {
-    if (!has_avx2()) {
-        LOG_INFO("AVX2 not supported, skipping SIMD test");
-        return;
-    }
+#ifdef __AVX2__
+    LOG_INFO("AVX2 not supported, skipping SIMD test");
+    return;
 
     char* decoded = "This is a test:/?#[]@!$&'()*+,;=%";
     char encoded[100];
     url_percent_encode_simd(decoded, encoded, sizeof(encoded));
     bool result = strcmp(encoded, "This%20is%20a%20test%3A%2F%3F%23%5B%5D%40%21%24%26%27%28%29%2A%2B%2C%3B%3D%25") == 0;
     LOG_ASSERT(result, "Failed to encode URI");
+#endif
 }
 
 // bool parse_url_query_params(char* query, Map* query_params)

@@ -277,6 +277,19 @@ int check_avx() {
 #define BAD_REQ(client_fd, msg)    SEND_ERR(client_fd, StatusBadRequest, msg);
 #define SERVER_ERR(client_fd, msg) SEND_ERR(client_fd, StatusInternalServerError, msg);
 
+static inline char* find_end_of_headers(const char* headers, size_t bytes_read) {
+    // Ensure we have at least 4 bytes to check
+    if (bytes_read < 4) return NULL;
+
+    // Scan for \r\n\r\n
+    for (size_t i = 0; i <= bytes_read - 4; i++) {
+        if (headers[i] == '\r' && headers[i + 1] == '\n' && headers[i + 2] == '\r' && headers[i + 3] == '\n') {
+            return (char*)&headers[i];
+        }
+    }
+    return NULL;
+}
+
 bool parse_http_request(Request* req, LArena* arena) {
     int client_fd          = req->client_fd;
     char* path             = NULL;       // Request path
@@ -305,8 +318,9 @@ bool parse_http_request(Request* req, LArena* arena) {
         BAD_REQ(client_fd, ERR_INVALID_STATUS_LINE);
     }
 
-    // memmem  is slower than strstr but safer!
-    end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
+    // memmem is rather slow.
+    // end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
+    end_of_headers = find_end_of_headers(headers, bytes_read);
     if (!end_of_headers) {
         BAD_REQ(client_fd, "Invalid Http Payload");
     }

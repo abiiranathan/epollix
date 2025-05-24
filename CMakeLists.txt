@@ -10,7 +10,8 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-# Add these to supress warnings about exec stack
+# Add these to supress warnings about exec stack.
+# defer implementation requires it.
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-warn-execstack")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-warn-execstack")
 set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,--no-warn-execstack")
@@ -166,7 +167,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Compiler Options & Platform Specific Settings
 # -----------------------------------------------------------------------------
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -mavx2 -mfma -mtune=native -march=native)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -mavx2 -msse4.2 -mfma -mtune=native -march=native)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
   target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)

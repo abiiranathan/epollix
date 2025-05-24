@@ -15,7 +15,7 @@
 // An epoll(2) powered TCP server.
 typedef struct EpollServer {
     size_t num_workers;       // Number of worker threads
-    int port;                 // Port the server is listening on
+    uint16_t port;            // Port the server is listening on
     int server_fd;            // Server file descriptor
     int epoll_fd;             // Epoll file descriptor
     int timeout_sec;          // client timeout in seconds
@@ -138,61 +138,90 @@ void http_error(int client_fd, http_status status, const char* message) {
     sendall(client_fd, reply, strlen(reply));
 }
 
-static int setup_server_socket(const char* port) {
+static int setup_server_socket(uint16_t port) {
     struct addrinfo hints;
-    struct addrinfo *result, *rp;
+    struct addrinfo* result;
     int s, sfd;
+    char port_str[6];  // Enough for "65535\0"
 
+    // Convert port to string
+    snprintf(port_str, sizeof(port_str), "%u", port);
+
+    // Initialize hints
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family   = AF_UNSPEC;   /* Return IPv4 and IPv6 choices */
-    hints.ai_socktype = SOCK_STREAM; /* We want a TCP socket */
+    hints.ai_family   = AF_UNSPEC;   /* Return IPv4 or IPv6 */
+    hints.ai_socktype = SOCK_STREAM; /* TCP socket */
     hints.ai_flags    = AI_PASSIVE;  /* All interfaces */
 
-    s = getaddrinfo(nullptr, port, &hints, &result);
+    // Get address info
+    s = getaddrinfo(NULL, port_str, &hints, &result);
     if (s != 0) {
         LOG_ERROR("getaddrinfo: %s", gai_strerror(s));
         return -1;
     }
 
-    for (rp = result; rp != nullptr; rp = rp->ai_next) {
-        sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sfd == -1) continue;
-
-        // Allow reuse of the port.
-        int enable = 1;
-        if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
-            perror("setsockopt");
-            LOG_FATAL("setsockopt(): new_tcpserver failed\n");
-        }
-
-        s = bind(sfd, rp->ai_addr, rp->ai_addrlen);
-        if (s == 0) {
-            /* We managed to bind successfully! */
-            break;
-        }
-
-        close(sfd);
-    }
-
-    if (rp == nullptr) {
-        LOG_ERROR("Could not bind");
+    // Create socket with the first result
+    sfd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    if (sfd == -1) {
+        LOG_ERROR("socket: %s", strerror(errno));
+        freeaddrinfo(result);
         return -1;
     }
 
+    // Optimize the server socket be4 binding
+    if (optimize_server_socket(sfd) == -1) {
+        LOG_ERROR("socket option failed: %s\n", strerror(errno));
+    };
+
+    // Attempt to bind
+    s = bind(sfd, result->ai_addr, result->ai_addrlen);
+    if (s != 0) {
+        LOG_ERROR("bind: %s", strerror(errno));
+        close(sfd);
+        freeaddrinfo(result);
+        return -1;
+    }
+
+    // Free addrinfo and return socket descriptor
     freeaddrinfo(result);
     return sfd;
 }
 
+uint16_t parse_port(const char* _port, bool* success) {
+    errno = 0;  // Reset errno before conversion
+    char* endptr;
+    long port = strtol(_port, &endptr, 10);
+
+    // Check if the entire string was consumed and is non-empty
+    if (endptr == _port || *endptr != '\0') {
+        LOG_ERROR("Invalid port: '%s' is not a number", _port);
+        *success = false;
+        return 0;
+    }
+
+    // Check for out-of-range or negative values
+    if (port < 0 || port > UINT16_MAX) {
+        LOG_ERROR("Port out of range: %ld (must be 0-65535)", port);
+        *success = false;
+        return 0;
+    }
+
+    // Check for conversion errors (e.g., overflow)
+    if (errno == ERANGE) {
+        LOG_ERROR("Port conversion error: %s", strerror(errno));
+        *success = false;
+        return 0;
+    }
+
+    *success = true;
+    return (uint16_t)port;
+}
+
 // Create a new EpollServer.
-EpollServer* epoll_server_create(size_t num_workers, const char* port) {
+EpollServer* epoll_server_create(size_t num_workers, const uint16_t port) {
     EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
     if (server == nullptr) {
         return nullptr;
-    }
-
-    int port_int = atoi(port);
-    if (port_int == 0) {
-        LOG_FATAL("Invalid port number\n");
     }
 
     // Get the number of threads to use for the server.
@@ -202,7 +231,7 @@ EpollServer* epoll_server_create(size_t num_workers, const char* port) {
     }
 
     server->num_workers = num_workers;
-    server->port        = port_int;
+    server->port        = port;
     server->timeout_sec = 0;
     server->pool        = threadpool_create((int)num_workers);
     if (server->pool == nullptr) {

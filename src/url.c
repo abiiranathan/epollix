@@ -34,11 +34,11 @@ int has_avx2() {
 // Encode a string for safe use in a URL.
 // Returns a pointer to the encoded string.
 void url_percent_encode(const char* src, char* dst, size_t dst_size) {
-    if (has_avx2()) {
-        url_percent_encode_simd(src, dst, dst_size);
-    } else {
-        url_percent_encode_scalar(src, dst, dst_size);
-    }
+#ifdef __AVX2__
+    url_percent_encode_simd(src, dst, dst_size);
+#else
+    url_percent_encode_scalar(src, dst, dst_size);
+#endif
 }
 
 // Encode a string for safe use in a URL using SIMD if available, otherwise fallback to scalar implementation.
@@ -137,11 +137,11 @@ void url_percent_encode_scalar(const char* src, char* dst, size_t dst_size) {
 
 // Decode a URI-encoded string using SIMD if available, otherwise fallback to scalar implementation.
 void url_percent_decode(const char* src, char* dst, size_t dst_size) {
-    if (has_avx2()) {
-        url_percent_decode_simd(src, dst, dst_size);
-    } else {
-        url_percent_decode_scalar(src, dst, dst_size);
-    }
+#ifdef __AVX2__
+    url_percent_decode_simd(src, dst, dst_size);
+#else
+    url_percent_decode_scalar(src, dst, dst_size);
+#endif
 }
 
 // Decode a URI-encoded string using SIMD if available, otherwise fallback to scalar implementation.

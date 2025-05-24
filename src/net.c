@@ -84,6 +84,60 @@ void enable_keepalive(int sockfd) {
     }
 }
 
+int optimize_server_socket(int server_fd) {
+    int enabled = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) == -1) {
+        return -1;
+    }
+
+    int qlen = 256;
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
+        return -1;
+    }
+
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled)) == -1) {
+        return -1;
+    }
+
+    int secs = 1;
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &secs, sizeof(secs)) == -1) {
+        return -1;
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(enabled)) == -1) {
+        return -1;
+    }
+
+    const int bufsize = 2 * 1024 * 1024;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize)) == -1) {
+        return -1;
+    }
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize)) == -1) {
+        return -1;
+    }
+
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_QUICKACK, &enabled, sizeof(enabled)) == -1) {
+        return -1;
+    }
+
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_CORK, &enabled, sizeof(enabled)) == -1) {
+        return -1;
+    }
+
+#ifdef TCP_CONGESTION
+    const char* algo = "bbr";
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_CONGESTION, algo, strlen(algo)) == -1) {
+        algo = "cubic";
+        if (setsockopt(server_fd, IPPROTO_TCP, TCP_CONGESTION, algo, strlen(algo)) == -1) {
+            return -1;
+        }
+    }
+#endif
+
+    return 0;
+}
+
 char* get_ip_address(context_t* ctx) {
     // try the forwarded header
     const char* ip_addr = headers_value(ctx->request->headers, "X-Forwarded-For");

@@ -1,6 +1,4 @@
 #include "../include/header.h"
-#include "../include/fast_str.h"
-
 #include "../include/constants.h"
 #include <solidc/cstr.h>
 #include <solidc/array.h>
@@ -39,7 +37,7 @@ static inline bool is_large_value(const header_t* h) {
 
 const char* headers_value(const Headers* headers, const char* name) {
     for (size_t i = 0; i < headers->count; ++i) {
-        if (fast_strcasecmp(name, headers->items[i].name) == 0) {
+        if (strcasecmp(name, headers->items[i].name) == 0) {
             header_t* item = &headers->items[i];
             return is_large_value(item) ? str_data(item->ptr) : item->small_value;
         }

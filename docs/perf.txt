@@ -1,0 +1,16 @@
+13.68%  example  libc.so.6             [.] 0x000000000016ca53
+4.22%  example  [unknown]             [k] 0xffffffff9a8001c8
+2.37%  example  libc.so.6             [.] pthread_mutex_lock
+2.28%  example  libc.so.6             [.] malloc
+2.01%  example  example               [.] handle_client
+1.97%  example  example               [.] parse_http_request
+1.79%  example  libc.so.6             [.] 0x000000000016e143
+1.76%  example  libc.so.6             [.] 0x000000000016ed1d
+1.64%  example  example               [.] headers_append
+1.41%  example  libc.so.6             [.] cfree
+1.26%  example  example               [.] larena_alloc
+1.25%  example  libc.so.6             [.] __strcasestr
+1.23%  example  example               [.] parse_request_headers
+1.16%  example  example               [.] match_path_parameters
+1.05%  example  libc.so.6             [.] 0x000000000009de22
+1.05%  example  example               [.] larena_alloc_string
