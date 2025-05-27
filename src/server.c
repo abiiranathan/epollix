@@ -49,7 +49,7 @@ static void handle_client(void* arg) {
         return;
     };
 
-    if (!parse_http_request(&req, task->arena)) {
+    if (!parse_http_request(&req)) {
         goto cleanup;
     };
 
@@ -60,12 +60,9 @@ static void handle_client(void* arg) {
         free_locals(&ctx);
     }
 cleanup:
-    if (req.path) cstr_free(req.path);
-    if (req.body) free(req.body);                         // free allocated req body
-    if (req.query_params) map_destroy(req.query_params);  // free query params map
-    if (req.headers) headers_free(req.headers);           // free request headers
-    if (res.headers) headers_free(res.headers);           // free response hedaers
-    taskpool_put(task);                                   // Return task to pool
+    request_destroy(&req);
+    if (res.headers) headers_free(res.headers);  // free response hedaers
+    taskpool_put(task);                          // Return task to pool
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {

@@ -45,79 +45,60 @@ const char* get_query_param(Request* req, const char* name) {
     if (!req->query_params) {
         return NULL;
     }
-
-    return map_get(req->query_params, (void*)name);
+    return headers_value(req->query_params, (void*)name);
 }
 
 Headers* parse_request_headers(const char* header_text, size_t length) {
-    if (!header_text || length == 0) {
-        return NULL;
-    }
-
     Headers* headers = headers_new(32);
     if (!headers) {
-        LOG_ERROR("Failed to allocate headers structure");
+        LOG_ERROR("Failed to create headers");
         return NULL;
     }
 
-    const char* current   = header_text;
-    const char* const end = header_text + length;
+    const char* ptr = header_text;
+    const char* end = ptr + length;
 
-    while (current < end) {
-        // Find header name (until colon)
-        const char* colon = memchr(current, ':', end - current);
+    char name[MAX_HEADER_NAME_LENGTH];    // Buffer to hold header name
+    char value[MAX_HEADER_VALUE_LENGTH];  // Buffer to hold header value
+
+    while (ptr < end) {
+        // Parse header name
+        const char* colon = (const char*)memchr(ptr, ':', end - ptr);
         if (!colon) break;
 
-        // Extract header name
-        size_t name_length = colon - current;
-        if (name_length >= MAX_HEADER_NAME_LENGTH) {
-            LOG_ERROR("Header name exceeds maximum length");
-            goto error_cleanup;
+        size_t name_len = colon - ptr;
+        if (name_len + 1 > MAX_HEADER_NAME_LENGTH) {
+            LOG_ERROR("Header name is too long\n");
+            headers_free(headers);
+            return NULL;
         }
 
-        char header_name[MAX_HEADER_NAME_LENGTH];
-        memcpy(header_name, current, name_length);
-        header_name[name_length] = '\0';
+        memcpy(name, ptr, name_len);
+        name[name_len] = '\0';  // null-terminate name
 
-        // Skip colon and whitespace
-        current = colon + 1;
-        while (current < end && *current == ' ') {
-            current++;
+        // Move to header value
+        ptr = colon + 1;
+        while (ptr < end && *ptr == ' ')
+            ptr++;
+
+        // Parse header value
+        const char* eol = (const char*)memchr(ptr, '\r', end - ptr);
+        if (!eol || eol + 1 >= end || eol[1] != '\n') break;
+
+        size_t value_len = eol - ptr;
+        if (value_len + 1 > MAX_HEADER_VALUE_LENGTH) {
+            headers_free(headers);
+            LOG_ERROR("Header value is too long");
+            return NULL;
         }
 
-        // Find end of line (CRLF)
-        const char* line_end = memchr(current, '\r', end - current);
-        if (!line_end || line_end + 1 >= end || line_end[1] != '\n') {
-            LOG_ERROR("Malformed header line ending");
-            goto error_cleanup;
-        }
-
-        // Extract header value
-        size_t value_length = line_end - current;
-        if (value_length >= MAX_HEADER_VALUE_LENGTH) {
-            LOG_ERROR("Header value exceeds maximum length");
-            goto error_cleanup;
-        }
-
-        char header_value[MAX_HEADER_VALUE_LENGTH];
-        memcpy(header_value, current, value_length);
-        header_value[value_length] = '\0';
-
-        // Add to headers collection
-        if (!headers_append(headers, header_name, header_value)) {
-            LOG_ERROR("Failed to add header to collection");
-            goto error_cleanup;
-        }
-
-        // Move to next line
-        current = line_end + 2;
+        memcpy(value, ptr, value_len);
+        value[value_len] = '\0';  // null-terminate value
+        headers_append(headers, name, value);
+        ptr = eol + 2;  // Skip CRLF
     }
 
     return headers;
-
-error_cleanup:
-    headers_free(headers);
-    return NULL;
 }
 
 // Parse the request line (first line of the HTTP request)
@@ -150,49 +131,35 @@ static size_t parse_content_length(const char* header_start, const char* end_of_
     return strtoul(content_length_header + 15, NULL, 10);
 }
 
-bool parse_url_query_params(LArena* arena, char* query, Map* query_params) {
-    char* key   = NULL;
-    char* value = NULL;
-    char *save_ptr, *save_ptr2;
-    bool success = true;
-    char* token  = strtok_r(query, "&", &save_ptr);
+bool parse_url_query_params(char* query, QueryParams* query_params) {
+    char* save_ptr1 = NULL;
+    char* save_ptr2 = NULL;
+    char* pair      = strtok_r(query, "&", &save_ptr1);
 
-    while (token != NULL) {
-        key   = strtok_r(token, "=", &save_ptr2);
-        value = strtok_r(NULL, "=", &save_ptr2);
+    while (pair != NULL) {
+        // Split into key and value
+        char* key   = strtok_r(pair, "=", &save_ptr2);
+        char* value = strtok_r(NULL, "", &save_ptr2);  // Get rest of string after first '='
 
-        if (key != NULL && value != NULL) {
-            char* queryName = larena_alloc_string(arena, key);
-            if (queryName == NULL) {
-                success = false;
-                break;
+        // Handle cases:
+        // 1. key=value (normal case)
+        // 2. key= (empty value)
+        // 3. key (no equals)
+        if (key != NULL) {
+            if (!headers_append(query_params, key, value ? value : "")) {
+                return false;
             }
-
-            char* queryValue = larena_alloc_string(arena, value);
-            if (queryValue == NULL) {
-                success = false;
-                break;
-            }
-
-            map_set(query_params, queryName, queryValue);
         }
-        token = strtok_r(NULL, "&", &save_ptr);
+        pair = strtok_r(NULL, "&", &save_ptr1);
     }
-    return success;
-}
 
-// Map configuration for Query Parameters.
-// key and value are allocated in pool and thus should not be freed.
-static const MapConfig* cfg = &(MapConfig){
-    .key_free     = NOFREE,
-    .value_free   = NOFREE,
-    .key_compare  = key_compare_char_ptr,
-    .key_len_func = key_len_char_ptr,
-};
+    return true;
+}
 
 // Allocate memory for the body and read it from the socket
 bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
                             const char* initial_body) {
+
     *body = (uint8_t*)malloc(body_size + 1);
     if (!*body) {
         perror("unable to allocate memory for the request body");
@@ -278,9 +245,8 @@ static inline char* find_end_of_headers(const char* headers, size_t bytes_read) 
     return NULL;
 }
 
-bool parse_http_request(Request* req, LArena* arena) {
+bool parse_http_request(Request* req) {
     int client_fd          = req->client_fd;
-    Map* query_params      = NULL;       // Query parameters
     uint8_t* body          = NULL;       // Request body (dynamically allocated)
     size_t total_read      = 0;          // Total bytes read
     HttpMethod httpMethod  = M_INVALID;  // Http method
@@ -314,35 +280,40 @@ bool parse_http_request(Request* req, LArena* arena) {
     header_capacity = end_of_headers - headers + 4;
     body_size       = parse_content_length(header_start, end_of_headers);
 
-    const char* decoded_uri = uri;
+    // Decode the URL with percent_decoding if needed
     char decoded[1024];
-    if (strstr(uri, "%")) {
-        url_percent_decode(uri, decoded, sizeof(decoded));
+    char* decoded_uri   = uri;  // Default to original URI
+    bool needs_decoding = strstr(uri, "%") != NULL;
+
+    if (needs_decoding) {
+        url_percent_decode(uri, decoded, sizeof(decoded) - 1);
         decoded_uri = decoded;
     }
 
-    // Parse URI
+    // Extract path and query string
+    char* query_string = strchr(decoded_uri, '?');
+    if (query_string) {
+        *query_string = '\0';  // Terminate path at question mark
+        query_string++;        // Now points to query string
+
+        // Only parse query params if there's actually content after the ?
+        if (*query_string != '\0' && strstr(query_string, "=")) {
+            req->query_params = headers_new(0);
+            if (!req->query_params) {
+                return false;
+            }
+
+            // Parse ONLY the query string portion
+            if (!parse_url_query_params(query_string, req->query_params)) {
+                return false;
+            }
+        }
+    }
+
+    // Store the path (already terminated at '?' if there was one)
     req->path = cstr_new(decoded_uri);
     if (!req->path) {
         return false;
-    }
-
-    const char* path_ptr = cstr_data_const(req->path);
-    char* query_string   = strchr(path_ptr, '?');
-    if (query_string) {
-        *query_string = '\0';
-        (*query_string)++;
-
-        // Create a map of query params
-        query_params = map_create(cfg);
-        if (!query_params) {
-            return false;
-        }
-
-        if (!parse_url_query_params(arena, query_string, query_params)) {
-            map_destroy(query_params);
-            return false;
-        }
     }
 
     req->headers = parse_request_headers(header_start, header_capacity - 4);
@@ -350,8 +321,8 @@ bool parse_http_request(Request* req, LArena* arena) {
         SERVER_ERR(client_fd, "Failed to parse request headers");
     }
 
-    req->route = default_route_matcher(httpMethod, path_ptr);
-    if (req->route == NULL && !handle_not_found(req, method, http_version, path_ptr)) {
+    req->route = default_route_matcher(httpMethod, cstr_data(req->path));
+    if (req->route == NULL && !handle_not_found(req, method, http_version, cstr_data(req->path))) {
         return false;
     }
 
@@ -362,11 +333,9 @@ bool parse_http_request(Request* req, LArena* arena) {
         }
     }
 
-    req->body           = body;          // set request body
-    req->content_length = body_size;     // set content length
-    req->query_params   = query_params;  // set params in the request
-    req->method         = httpMethod;    // set request method
-
+    req->body           = body;        // set request body
+    req->content_length = body_size;   // set content length
+    req->method         = httpMethod;  // set request method
     // copy http_version
     strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
     req->http_version[sizeof(req->http_version) - 1] = '\0';

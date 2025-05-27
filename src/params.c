@@ -13,90 +13,66 @@
  * @return true if the pattern and URL match, false otherwise
  */
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams) {
-    // Initialize parameters for efficiency
-    char* pattern_ptr       = (char*)pattern;
-    char* url_ptr           = (char*)url_path;
+    const char* p           = pattern;
+    const char* u           = url_path;
     size_t idx              = 0;
     pathParams->match_count = 0;
 
-    // Fast path: if no parameters in pattern, do a simple comparison
-    if (!strchr(pattern, '{')) {
-        size_t lpattern = strlen(pattern_ptr);
-        size_t lurl     = strlen(url_ptr);
-
-        // Handle trailing slashes for both strings
-        if (lpattern > 1 && pattern_ptr[lpattern - 1] == '/') lpattern--;
-        if (lurl > 1 && url_ptr[lurl - 1] == '/') lurl--;
-
-        return (lpattern == lurl && memcmp(pattern_ptr, url_ptr, lpattern) == 0);
+    // Fast path: exact match when no parameters
+    if (!strchr(p, '{')) {
+        while (*p && *u && *p == *u) {
+            p++;
+            u++;
+        }
+        // Skip trailing slashes
+        while (*p == '/')
+            p++;
+        while (*u == '/')
+            u++;
+        return (*p == '\0' && *u == '\0');
     }
 
-    // Main matching loop with minimized branches
-    while (*pattern_ptr && *url_ptr) {
-        if (*pattern_ptr == '{') {
-            // Check parameter array bounds early
-            if (idx >= MAX_PARAMS) {
-                return false;
-            }
+    while (*p && *u) {
+        if (*p == '{') {
+            // Bounds check
+            if (idx >= MAX_PARAMS) return false;
+            PathParam* param = &pathParams->params[idx++];
 
-            // Skip the opening brace
-            pattern_ptr++;
+            // Extract parameter name
+            p++;  // Skip '{'
+            const char* name_start = p;
+            while (*p && *p != '}')
+                p++;
+            if (*p != '}') return false;
+            size_t name_len = p - name_start;
+            if (name_len >= MAX_PARAM_NAME) return false;
+            memcpy(param->name, name_start, name_len);
+            param->name[name_len] = '\0';
+            p++;  // Skip '}'
 
-            // Find closing brace
-            char* brace_end = strchr(pattern_ptr, '}');
-            if (!brace_end) return false;
-
-            // Get parameter name length
-            size_t param_name_len = brace_end - pattern_ptr;
-            if (param_name_len >= MAX_PARAM_NAME) return false;
-
-            // Set up parameter reference (avoid struct access in tight loop)
-            PathParam* param = &pathParams->params[idx];
-
-            // Copy parameter name (single operation instead of loop)
-            memcpy(param->name, pattern_ptr, param_name_len);
-            param->name[param_name_len] = '\0';
-
-            // Move pattern pointer past closing brace
-            pattern_ptr = brace_end + 1;
-
-            // Record start of parameter value
-            char* value_start = url_ptr;
-
-            // Find value end (next slash or end of string)
-            while (*url_ptr && *url_ptr != '/') {
-                url_ptr++;
-            }
-
-            // Check parameter value size
-            size_t value_len = url_ptr - value_start;
-            if (value_len >= MAX_PARAM_VALUE) return false;
-
-            // Copy parameter value
-            memcpy(param->value, value_start, value_len);
-            param->value[value_len] = '\0';
-
-            // Increment parameter count (only once per match, not in tight loop)
-            idx++;
+            // Extract parameter value
+            const char* val_start = u;
+            while (*u && *u != '/' && *u != *p)
+                u++;
+            size_t val_len = u - val_start;
+            if (val_len >= MAX_PARAM_VALUE) return false;
+            memcpy(param->value, val_start, val_len);
+            param->value[val_len] = '\0';
         } else {
-            // Direct comparison of static parts
-            if (*pattern_ptr != *url_ptr) return false;
-            pattern_ptr++;
-            url_ptr++;
+            if (*p != *u) return false;
+            p++;
+            u++;
         }
     }
 
-    // Handle trailing slashes efficiently
-    while (*pattern_ptr == '/')
-        pattern_ptr++;
-    while (*url_ptr == '/')
-        url_ptr++;
+    // Skip trailing slashes
+    while (*p == '/')
+        p++;
+    while (*u == '/')
+        u++;
 
-    // Update match count at the end (just once)
     pathParams->match_count = idx;
-
-    // Check if both strings are fully consumed
-    return (*pattern_ptr == '\0' && *url_ptr == '\0');
+    return (*p == '\0' && *u == '\0');
 }
 
 const char* get_path_param(const PathParams* pathParams, const char* name) {
