@@ -58,7 +58,7 @@ static void send_error_page(context_t* ctx, http_status status) {
 
 static inline bool append_or_error(context_t* ctx, cstr* response, const char* str) {
     bool ok;
-    if (!(ok = str_append(&response, str))) {
+    if (!(ok = cstr_append(response, str))) {
         send_error_page(ctx, StatusInternalServerError);
     }
     return ok;
@@ -73,7 +73,7 @@ static inline bool append_or_error(context_t* ctx, cstr* response, const char* s
  */
 static void serve_directory_listing(context_t* ctx, const char* dirname, const char* base_prefix) {
     // Initialize HTML response with header and styles
-    cstr* html = str_from(
+    cstr* html = cstr_new(
         "<!DOCTYPE html>"
         "<html>"
         "<head>"
@@ -100,14 +100,14 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
         return;
     }
 
-    // Reserve enough capacity(500KB)
-    if (!str_resize(&html, ((1 << 20) / 2))) {
+    // Reserve enough capacity(0.5 MB)
+    if (!cstr_resize(html, ((1 << 20) / 2))) {
         send_error_page(ctx, StatusInternalServerError);
         return;
     };
 
     // defer freeing the string
-    defer({ str_free(html); });
+    defer({ cstr_free(html); });
 
     // Add breadcrumb navigation
     if (!append_breadcrumbs(ctx, html, base_prefix)) {
@@ -132,7 +132,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     // Send the response
     set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->response->status = StatusOK;
-    send_string(ctx, str_data(html));
+    send_string(ctx, cstr_data_const(html));
 }
 
 /**
@@ -280,7 +280,7 @@ void staticFileHandler(context_t* ctx) {
     }
 
     // Trim the static pattern from the path
-    const char* static_path = req->path + route->pattern.length;
+    const char* static_path = cstr_data(ctx->request->path) + route->pattern.length;
 
     // Concatenate the dirname and the static path
     char fullpath[MAX_PATH_LEN] = {0};

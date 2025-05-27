@@ -18,7 +18,7 @@ typedef struct request {
     Headers* headers;       // Request headers.
     Map* query_params;      // Query parameters (consider replacing with a more efficient structure)
     char http_version[12];  // Http version (e.g., "HTTP/1.1")
-    char* path;             // Request path and query string (dynamically allocated)
+    cstr* path;             // Request path and query string (dynamically allocated)
     uint8_t* body;          // Body of the request (dynamically allocated)
 } Request;
 

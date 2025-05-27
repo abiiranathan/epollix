@@ -50,58 +50,74 @@ const char* get_query_param(Request* req, const char* name) {
 }
 
 Headers* parse_request_headers(const char* header_text, size_t length) {
-    Headers* headers = headers_new(32);
-    if (!headers) {
-        LOG_ERROR("Failed to create headers");
+    if (!header_text || length == 0) {
         return NULL;
     }
 
-    const char* ptr = header_text;
-    const char* end = ptr + length;
+    Headers* headers = headers_new(32);
+    if (!headers) {
+        LOG_ERROR("Failed to allocate headers structure");
+        return NULL;
+    }
 
-    char name[MAX_HEADER_NAME_LEN];
-    char value[2048];
+    const char* current   = header_text;
+    const char* const end = header_text + length;
 
-    while (ptr < end) {
-        // Parse header name
-        const char* colon = (const char*)memchr(ptr, ':', end - ptr);
+    while (current < end) {
+        // Find header name (until colon)
+        const char* colon = memchr(current, ':', end - current);
         if (!colon) break;
 
-        size_t name_len = colon - ptr;
-        if (name_len + 1 > sizeof(name)) {
-            LOG_ERROR("Header name is too long\n");
-            headers_free(headers);
-            return NULL;
+        // Extract header name
+        size_t name_length = colon - current;
+        if (name_length >= MAX_HEADER_NAME_LENGTH) {
+            LOG_ERROR("Header name exceeds maximum length");
+            goto error_cleanup;
         }
 
-        memcpy(name, ptr, name_len);
-        name[name_len] = '\0';
+        char header_name[MAX_HEADER_NAME_LENGTH];
+        memcpy(header_name, current, name_length);
+        header_name[name_length] = '\0';
 
-        // Move to header value
-        ptr = colon + 1;
-        while (ptr < end && *ptr == ' ')
-            ptr++;
-
-        // Parse header value
-        const char* eol = (const char*)memchr(ptr, '\r', end - ptr);
-        if (!eol || eol + 1 >= end || eol[1] != '\n') break;
-
-        size_t value_len = eol - ptr;
-        if (value_len + 1 > sizeof(value)) {
-            headers_free(headers);
-            LOG_ERROR("Header value is too long");
-            return NULL;
+        // Skip colon and whitespace
+        current = colon + 1;
+        while (current < end && *current == ' ') {
+            current++;
         }
 
-        memcpy(value, ptr, value_len);
-        value[value_len] = '\0';
+        // Find end of line (CRLF)
+        const char* line_end = memchr(current, '\r', end - current);
+        if (!line_end || line_end + 1 >= end || line_end[1] != '\n') {
+            LOG_ERROR("Malformed header line ending");
+            goto error_cleanup;
+        }
 
-        // Add header to the map
-        headers_append(headers, name, value);
-        ptr = eol + 2;  // Skip CRLF
+        // Extract header value
+        size_t value_length = line_end - current;
+        if (value_length >= MAX_HEADER_VALUE_LENGTH) {
+            LOG_ERROR("Header value exceeds maximum length");
+            goto error_cleanup;
+        }
+
+        char header_value[MAX_HEADER_VALUE_LENGTH];
+        memcpy(header_value, current, value_length);
+        header_value[value_length] = '\0';
+
+        // Add to headers collection
+        if (!headers_append(headers, header_name, header_value)) {
+            LOG_ERROR("Failed to add header to collection");
+            goto error_cleanup;
+        }
+
+        // Move to next line
+        current = line_end + 2;
     }
 
     return headers;
+
+error_cleanup:
+    headers_free(headers);
+    return NULL;
 }
 
 // Parse the request line (first line of the HTTP request)
@@ -173,34 +189,6 @@ static const MapConfig* cfg = &(MapConfig){
     .key_compare  = key_compare_char_ptr,
     .key_len_func = key_len_char_ptr,
 };
-
-// Parse the URI, extracting path and query parameters
-static bool parse_uri(LArena* arena, const char* decoded_uri, char** path, char** query, Map** query_params) {
-    *path = larena_alloc_string(arena, decoded_uri);
-    if (!*path) {
-        return false;
-    }
-
-    *query = strchr(*path, '?');
-    if (*query) {
-        **query = '\0';
-        (*query)++;
-
-        *query_params = map_create(cfg);
-        if (!*query_params) {
-            return false;
-        }
-
-        if (!parse_url_query_params(arena, *query, *query_params)) {
-            map_destroy(*query_params);
-            return false;
-        }
-    } else {
-        *query_params = NULL;
-    }
-
-    return true;
-}
 
 // Allocate memory for the body and read it from the socket
 bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, size_t initial_read,
@@ -292,8 +280,6 @@ static inline char* find_end_of_headers(const char* headers, size_t bytes_read) 
 
 bool parse_http_request(Request* req, LArena* arena) {
     int client_fd          = req->client_fd;
-    char* path             = NULL;       // Request path
-    char* query            = NULL;       // Query string
     Map* query_params      = NULL;       // Query parameters
     uint8_t* body          = NULL;       // Request body (dynamically allocated)
     size_t total_read      = 0;          // Total bytes read
@@ -328,15 +314,35 @@ bool parse_http_request(Request* req, LArena* arena) {
     header_capacity = end_of_headers - headers + 4;
     body_size       = parse_content_length(header_start, end_of_headers);
 
-    char* decoded_uri = uri;
+    const char* decoded_uri = uri;
     char decoded[1024];
     if (strstr(uri, "%")) {
         url_percent_decode(uri, decoded, sizeof(decoded));
         decoded_uri = decoded;
     }
 
-    if (!parse_uri(arena, decoded_uri, &path, &query, &query_params)) {
-        SERVER_ERR(client_fd, "error parsing query params");
+    // Parse URI
+    req->path = cstr_new(decoded_uri);
+    if (!req->path) {
+        return false;
+    }
+
+    const char* path_ptr = cstr_data_const(req->path);
+    char* query_string   = strchr(path_ptr, '?');
+    if (query_string) {
+        *query_string = '\0';
+        (*query_string)++;
+
+        // Create a map of query params
+        query_params = map_create(cfg);
+        if (!query_params) {
+            return false;
+        }
+
+        if (!parse_url_query_params(arena, query_string, query_params)) {
+            map_destroy(query_params);
+            return false;
+        }
     }
 
     req->headers = parse_request_headers(header_start, header_capacity - 4);
@@ -344,8 +350,8 @@ bool parse_http_request(Request* req, LArena* arena) {
         SERVER_ERR(client_fd, "Failed to parse request headers");
     }
 
-    req->route = default_route_matcher(httpMethod, path);
-    if (req->route == NULL && !handle_not_found(req, method, http_version, path)) {
+    req->route = default_route_matcher(httpMethod, path_ptr);
+    if (req->route == NULL && !handle_not_found(req, method, http_version, path_ptr)) {
         return false;
     }
 
@@ -354,12 +360,6 @@ bool parse_http_request(Request* req, LArena* arena) {
         if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
             SERVER_ERR(client_fd, "Failed to read request body");
         }
-    }
-
-    req->path = larena_alloc_string(arena, path);
-    if (!req->path) {
-        LOG_ERROR("arena_alloc_string failed to allocate request path");
-        SERVER_ERR(client_fd, "arena out of memory");
     }
 
     req->body           = body;          // set request body

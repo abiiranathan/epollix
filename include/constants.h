@@ -60,15 +60,12 @@
 #define PER_REQUEST_ARENA_MEM ((size_t)8192 * 2)
 #endif
 
-// Maximum length of a header name.
-#ifndef MAX_HEADER_NAME_LEN
-#define MAX_HEADER_NAME_LEN (size_t)64
+#ifndef MAX_HEADER_NAME_LENGTH
+#define MAX_HEADER_NAME_LENGTH (size_t)64
 #endif
 
-// Header values exceeding this length will be dynamically allocated.
-// This is a trade-off between memory usage and performance.
-#ifndef SMALL_HEADER_VALUE_LEN
-#define SMALL_HEADER_VALUE_LEN (size_t)128  // Covers ~90% of cases
+#ifndef MAX_HEADER_VALUE_LENGTH
+#define MAX_HEADER_VALUE_LENGTH (size_t)1024
 #endif
 
 // Macro to silence unused variable errors.

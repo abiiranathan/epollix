@@ -6,18 +6,13 @@
 #define LARGE_HEADER_FLAG 0x80000000
 
 typedef struct {
-    char name[MAX_HEADER_NAME_LEN];  // Header name
-    union {
-        char small_value[SMALL_HEADER_VALUE_LEN];  // Small value buffer
-        cstr* ptr;                                 // Heap-allocated large value
-    };
-    unsigned int flags;  // Stores LARGE_HEADER_FLAG if value is heap-allocated
+    cstr* name;   // Header name
+    cstr* value;  // Header value
 } header_t;
 
 ARRAY_DEFINE(Headers, header_t)
 
 Headers* headers_new(size_t initial_capacity) {
-
     // Create headers with default capacity.
     Headers* headers = Headers_new();
     if (!headers) {
@@ -31,51 +26,32 @@ Headers* headers_new(size_t initial_capacity) {
     return headers;
 }
 
-static inline bool is_large_value(const header_t* h) {
-    return h->flags & LARGE_HEADER_FLAG;
-}
-
 const char* headers_value(const Headers* headers, const char* name) {
+    if (!name) return NULL;
+
     for (size_t i = 0; i < headers->count; ++i) {
-        if (strcasecmp(name, headers->items[i].name) == 0) {
-            header_t* item = &headers->items[i];
-            return is_large_value(item) ? str_data(item->ptr) : item->small_value;
+        const char* h_name = cstr_data_const(headers->items[i].name);
+        if (!h_name) {
+            continue;
+        }
+        if (strcasecmp(name, h_name) == 0) {
+            return cstr_data_const(headers->items[i].value);
         }
     }
     return NULL;
 }
 
 bool headers_append(Headers* headers, const char* name, const char* value) {
-    size_t name_len  = strlen(name);
-    size_t value_len = strlen(value);
+    header_t hdr = {
+        .name  = cstr_new(name),
+        .value = cstr_new(value),
+    };
 
-    if (name_len >= MAX_HEADER_NAME_LEN) {
-        printf("Header name: %s too long\n", name);
-        return false;
+    if (hdr.name && hdr.value) {
+        Headers_append(headers, hdr);
+        return true;
     }
-
-    header_t hdr = {0};
-
-    // Copy name (safe because we checked length)
-    memcpy(hdr.name, name, name_len);
-    hdr.name[name_len] = '\0';
-    hdr.flags          = 0;
-
-    // Handle value
-    if (value_len < SMALL_HEADER_VALUE_LEN) {
-        memcpy(hdr.small_value, value, value_len);
-        hdr.small_value[value_len] = '\0';
-    } else {
-        hdr.ptr = str_from(value);
-        if (!hdr.ptr) {
-            headers->count--;  // Rollback
-            return false;
-        }
-        hdr.flags |= LARGE_HEADER_FLAG;
-    }
-
-    Headers_append(headers, hdr);
-    return true;
+    return false;
 }
 
 bool headers_tostring(const Headers* headers, char* buffer, size_t size) {
@@ -86,8 +62,11 @@ bool headers_tostring(const Headers* headers, char* buffer, size_t size) {
 
     for (size_t i = 0; i < headers->count; i++) {
         const header_t* h = &headers->items[i];
-        const char* value = is_large_value(h) ? str_data(h->ptr) : h->small_value;
-        int written       = snprintf(ptr, remaining, "%s: %s\r\n", h->name, value);
+
+        const char* name  = cstr_data_const(h->name);
+        const char* value = cstr_data_const(h->value);
+
+        int written = snprintf(ptr, remaining, "%s: %s\r\n", name, value);
         if (written < 0 || (size_t)written >= remaining) {
             return false;
         }
@@ -104,12 +83,9 @@ bool headers_tostring(const Headers* headers, char* buffer, size_t size) {
 void headers_free(Headers* headers) {
     if (!headers) return;
 
-    // Free large values
     for (size_t i = 0; i < headers->count; i++) {
-        if (is_large_value(&headers->items[i])) {
-            str_free(headers->items[i].ptr);
-        }
+        cstr_free(headers->items[i].name);
+        cstr_free(headers->items[i].value);
     }
-
     Headers_free(headers);
 }

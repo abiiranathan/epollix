@@ -138,7 +138,7 @@ void epollix_logger(context_t* ctx, Handler next) {
 
     // Path
     if (log_flags & LOG_PATH) {
-        const char* path = ctx->request->path;
+        const char* path = cstr_data_const(ctx->request->path);
         if (path) {
             buffer->offset += snprintf(buffer->buffer + buffer->offset, LOG_BUFFER_SIZE - buffer->offset, "%s ", path);
         }

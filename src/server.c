@@ -59,8 +59,8 @@ static void handle_client(void* arg) {
         close_connection(task->client_fd, task->epoll_fd);
         free_locals(&ctx);
     }
-
 cleanup:
+    if (req.path) cstr_free(req.path);
     if (req.body) free(req.body);                         // free allocated req body
     if (req.query_params) map_destroy(req.query_params);  // free query params map
     if (req.headers) headers_free(req.headers);           // free request headers

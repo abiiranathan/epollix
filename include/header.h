@@ -6,6 +6,9 @@
 // Dynamic Array of headers.
 typedef struct Headers Headers;
 
+// Query params are also stored as headers. (key/value)
+typedef struct Headers QueryParams;
+
 // Allocate a new headers object with an initial capacity.
 Headers* headers_new(size_t initial_capacity);
 
