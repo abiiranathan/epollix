@@ -167,7 +167,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Compiler Options & Platform Specific Settings
 # -----------------------------------------------------------------------------
-target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -mavx2 -msse4.2 -mfma -mtune=native -march=native)
+target_compile_options(epollix PUBLIC -Wall -Wextra -Werror -mavx2 -msse4.2 -mfma -mtune=native -march=native -lto)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
   target_compile_options(epollix PUBLIC -Wno-gnu-zero-variadic-macro-arguments -fblocks)

@@ -48,13 +48,7 @@ const char* get_query_param(Request* req, const char* name) {
     return headers_value(req->query_params, (void*)name);
 }
 
-Headers* parse_request_headers(const char* header_text, size_t length) {
-    Headers* headers = headers_new(32);
-    if (!headers) {
-        LOG_ERROR("Failed to create headers");
-        return NULL;
-    }
-
+bool parse_request_headers(const char* header_text, size_t length, Headers* headers) {
     const char* ptr = header_text;
     const char* end = ptr + length;
 
@@ -69,8 +63,7 @@ Headers* parse_request_headers(const char* header_text, size_t length) {
         size_t name_len = colon - ptr;
         if (name_len + 1 > MAX_HEADER_NAME_LENGTH) {
             LOG_ERROR("Header name is too long\n");
-            headers_free(headers);
-            return NULL;
+            return false;
         }
 
         memcpy(name, ptr, name_len);
@@ -87,7 +80,6 @@ Headers* parse_request_headers(const char* header_text, size_t length) {
 
         size_t value_len = eol - ptr;
         if (value_len + 1 > MAX_HEADER_VALUE_LENGTH) {
-            headers_free(headers);
             LOG_ERROR("Header value is too long");
             return NULL;
         }
@@ -97,8 +89,7 @@ Headers* parse_request_headers(const char* header_text, size_t length) {
         headers_append(headers, name, value);
         ptr = eol + 2;  // Skip CRLF
     }
-
-    return headers;
+    return true;
 }
 
 // Parse the request line (first line of the HTTP request)
@@ -298,7 +289,7 @@ bool parse_http_request(Request* req) {
 
         // Only parse query params if there's actually content after the ?
         if (*query_string != '\0' && strstr(query_string, "=")) {
-            req->query_params = headers_new(0);
+            req->query_params = kv_new();
             if (!req->query_params) {
                 return false;
             }
@@ -316,8 +307,12 @@ bool parse_http_request(Request* req) {
         return false;
     }
 
-    req->headers = parse_request_headers(header_start, header_capacity - 4);
+    req->headers = kv_new();
     if (!req->headers) {
+        SERVER_ERR(client_fd, "Failed to parse request headers");
+    }
+
+    if (!parse_request_headers(header_start, header_capacity - 4, req->headers)) {
         SERVER_ERR(client_fd, "Failed to parse request headers");
     }
 

@@ -33,7 +33,7 @@ static inline void request_destroy(Request* req) {
 }
 
 // Parse request headers from text.
-Headers* parse_request_headers(const char* header_text, size_t length);
+bool parse_request_headers(const char* header_text, size_t length, Headers* headers);
 
 // Parse URL query parameters from a query string.
 // Populates the map.

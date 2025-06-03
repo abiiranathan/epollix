@@ -24,7 +24,7 @@ bool response_init(Response* res, int client_fd) {
     res->headers_sent     = false;
     res->chunked          = false;
     res->content_type_set = false;
-    res->headers          = headers_new(16);
+    res->headers          = kv_new();
     return res->headers != NULL;
 }
 

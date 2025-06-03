@@ -2,7 +2,6 @@
 #include <solidc/defer.h>
 
 #include "../include/net.h"
-#include "../include/fast_str.h"
 #include "../include/url.h"
 
 // test parse request headers
@@ -10,7 +9,8 @@ void test_parse_request_headers(void) {
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length           = strlen(header_text);
 
-    Headers* headers = parse_request_headers(header_text, length);
+    Headers* headers = kv_new();
+    parse_request_headers(header_text, length, headers);
     LOG_ASSERT(headers, "Failed to parse request headers");
 
     const char* host_header = headers_value(headers, "Host");
@@ -71,7 +71,7 @@ void test_encode_uri_simd(void) {
 
 // bool parse_url_query_params(char* query, Map* query_params)
 void test_parse_url_query_params(void) {
-    QueryParams* query_params = headers_new(0);
+    QueryParams* query_params = kv_new();
     LOG_ASSERT(query_params != nullptr, "Failed to create map for query_params");
 
     char* query = strdup("name=John&age=30&location=USA");

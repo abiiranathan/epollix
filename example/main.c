@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
 
     defineRoutes();
 
-    EpollServer* server = epoll_server_create(8, port);
+    EpollServer* server = epoll_server_create(4, port);
     LOG_ASSERT(server, "Unable to create server");
 
     epoll_server_enable_keepalive(server, true);

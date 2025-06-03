@@ -1,57 +1,25 @@
 #include "../include/header.h"
 #include "../include/constants.h"
-#include <solidc/cstr.h>
-#include <solidc/array.h>
-
-#define LARGE_HEADER_FLAG 0x80000000
-
-typedef struct {
-    cstr* name;   // Header name
-    cstr* value;  // Header value
-} header_t;
-
-ARRAY_DEFINE(Headers, header_t)
-
-Headers* headers_new(size_t initial_capacity) {
-    // Create headers with default capacity.
-    Headers* headers = Headers_new();
-    if (!headers) {
-        return NULL;
-    }
-
-    if (headers->capacity < initial_capacity) {
-        Headers_resize(headers, initial_capacity);
-    }
-
-    return headers;
-}
 
 const char* headers_value(const Headers* headers, const char* name) {
-    if (!name) return NULL;
-
     for (size_t i = 0; i < headers->count; ++i) {
-        const char* h_name = cstr_data_const(headers->items[i].name);
+        header_t h         = headers->items[i];
+        const char* h_name = cstr_data_const(h.name);
         if (!h_name) {
             continue;
         }
         if (strcasecmp(name, h_name) == 0) {
-            return cstr_data_const(headers->items[i].value);
+            return cstr_data_const(h.value);
         }
     }
     return NULL;
 }
 
 bool headers_append(Headers* headers, const char* name, const char* value) {
-    header_t hdr = {
-        .name  = cstr_new(name),
-        .value = cstr_new(value),
-    };
-
-    if (hdr.name && hdr.value) {
-        Headers_append(headers, hdr);
-        return true;
-    }
-    return false;
+    header_t hdr = {.name = cstr_new(name), .value = cstr_new(value)};
+    ASSERT(hdr.name);
+    ASSERT(hdr.value);
+    return kv_append(headers, hdr);
 }
 
 bool headers_tostring(const Headers* headers, char* buffer, size_t size) {
@@ -87,5 +55,5 @@ void headers_free(Headers* headers) {
         cstr_free(headers->items[i].name);
         cstr_free(headers->items[i].value);
     }
-    Headers_free(headers);
+    kv_free(headers);
 }
