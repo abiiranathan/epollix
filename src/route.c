@@ -36,25 +36,25 @@ const char* get_route_pattern(Route* route) {
 }
 
 Route* default_route_matcher(HttpMethod method, const char* path) {
-    bool matches = false;
-    for (size_t i = 0; i < numRoutes; i++) {
-        if (method != routeTable[i].method) {
-            continue;
-        }
+    const Route* current   = routeTable;
+    const Route* const end = routeTable + numRoutes;
 
-        if (routeTable[i].type == NormalRoute) {
-            matches = match_path_parameters(routeTable[i].pattern.data, path, routeTable[i].params);
-            if (matches) {
-                return &routeTable[i];
-            }
-        } else {
-            // For static routes, we match only the prefix as an exact match.
-            if (strncmp(routeTable[i].pattern.data, path, routeTable[i].pattern.length) == 0) {
-                return &routeTable[i];
+    while (current < end) {
+        __builtin_prefetch(current + 4, 0, 1);
+        if (method == current->method) {
+            if (current->type == NormalRoute) {
+                if (match_path_parameters(current->pattern.data, path, current->params)) {
+                    return (Route*)current;
+                }
+            } else if (current->pattern.length <= strlen(path)) {
+                if (memcmp(current->pattern.data, path, current->pattern.length) == 0) {
+                    return (Route*)current;
+                }
             }
         }
+        current++;
     }
-    return nullptr;
+    return NULL;
 }
 
 // Helper function to register a new route
@@ -67,7 +67,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     route->method              = method;
     route->handler             = handler;
     route->type                = type;
-    route->mw_data             = nullptr;
+    route->mw_data             = NULL;
     route->middleware_count    = 0;
     route->middleware_capacity = 1;
     route->middleware          = larena_alloc(arena, sizeof(Middleware) * route->middleware_capacity);
@@ -92,6 +92,7 @@ static Route* registerRoute(HttpMethod method, const char* pattern, Handler hand
     return route;
 }
 
+// This is a comment.
 Route* route_options(const char* pattern, Handler handler) {
     return registerRoute(M_OPTIONS, pattern, handler, NormalRoute);
 }
@@ -212,7 +213,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     LOG_ASSERT(MAX_DIRNAME > strlen(dirname) + 1, "dirname is too long");
 
     char* fullpath = larena_alloc_string(arena, dirname);
-    LOG_ASSERT(fullpath != nullptr, "larena_alloc_string failed");
+    LOG_ASSERT(fullpath != NULL, "larena_alloc_string failed");
 
     if (strstr(fullpath, "~")) {
         char buf[PATH_MAX];
@@ -237,7 +238,7 @@ Route* route_group_static(RouteGroup* group, const char* pattern, char* dirname)
     }
 
     Route* route = (Route*)registerGroupRoute(group, M_GET, pattern, (Handler)staticFileHandler, StaticRoute);
-    LOG_ASSERT(route != nullptr, "registerGroupRoute failed");
+    LOG_ASSERT(route != NULL, "registerGroupRoute failed");
     route->type    = StaticRoute;
     route->dirname = (str_view){.data = fullpath, .length = strlen(fullpath)};
     return route;

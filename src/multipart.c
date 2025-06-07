@@ -56,7 +56,7 @@ static bool insert_header(MultipartForm* form, FileHeader header) {
  * @param size: Content-Length(size of data in bytes)
  * @param boundary: Null-terminated string for the form boundary.
  * @param form: Pointer to MultipartForm struct to store the parsed form data. It is assumed
- * to be initialized well and not nullptr.
+ * to be initialized well and not NULL.
  * You can use the function parse_multipart_boundary or parse_multipart_boundary_from_header helpers
  * to get the boundary.
  * 
@@ -70,8 +70,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
     // Temporary variables to store state of the FSM.
     const char* ptr = data;
 
-    const char* key_start            = nullptr;
-    const char* value_start          = nullptr;
+    const char* key_start            = NULL;
+    const char* value_start          = NULL;
     char key[MAX_FIELD_NAME_SIZE]    = {0};
     char value[MAX_VALUE_SIZE]       = {0};
     char filename[MAX_FILENAME_SIZE] = {0};
@@ -136,7 +136,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 }
             } break;
             case STATE_KEY:
-                if (*ptr == '"' && key_start != nullptr) {
+                if (*ptr == '"' && key_start != NULL) {
                     size_t key_length = ptr - key_start;
                     if (key_length >= MAX_FIELD_NAME_SIZE) {
                         code = FIELD_NAME_TOO_LONG;
@@ -176,7 +176,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 break;
             case STATE_VALUE:
                 if ((strncmp(ptr, "\r\n--", 4) == 0 || strncmp(ptr, boundary, boundary_length) == 0) &&
-                    value_start != nullptr) {
+                    value_start != NULL) {
                     size_t value_length = ptr - value_start;
                     if (value_length >= MAX_VALUE_SIZE) {
                         code = VALUE_TOO_LONG;
@@ -215,7 +215,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 }
                 break;
             case STATE_FILENAME: {
-                if (*ptr == '"' && key_start != nullptr) {
+                if (*ptr == '"' && key_start != NULL) {
                     size_t filename_length = ptr - key_start;
                     if (filename_length >= MAX_FILENAME_SIZE) {
                         code = FILENAME_TOO_LONG;
@@ -318,7 +318,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 // Apparently strstr can't be used with binary data!!
                 // I spen't days here trying to figgit with binary files :)
                 char* endptr = (char*)memmem(ptr, haystack_len, boundary, boundary_length);
-                if (endptr == nullptr) {
+                if (endptr == NULL) {
                     code = INVALID_FORM_BOUNDARY;
                     goto cleanup;
                 }
@@ -389,13 +389,13 @@ char* sstrstr(const char* haystack, const char* needle, size_t length) {
     size_t i;
     for (i = 0; i < length; i++) {
         if (i + needle_length > length) {
-            return nullptr;
+            return NULL;
         }
         if (strncmp(&haystack[i], needle, needle_length) == 0) {
             return (char*)&haystack[i];
         }
     }
-    return nullptr;
+    return NULL;
 }
 
 // Parses the form boundary from the request body and copies it into the boundary buffer.
@@ -424,12 +424,12 @@ bool multipart_parse_boundary(const char* body, char* boundary, size_t size) {
     return true;
 }
 
-// Parses the form boundary from the content-type header that is expected to be a nullptr-terminated string.
+// Parses the form boundary from the content-type header that is expected to be a NULL-terminated string.
 // Note that this boundary must always be -- shorter than what's in the body, so it's prefixed for you.
 // Returns true if successful, otherwise false(Invalid Content-Type, no boundary).
 bool multipart_parse_boundary_from_header(const char* content_type, char* boundary, size_t size) {
     if (!content_type || !boundary) {
-        LOG_ERROR("content_type or boundary is nullptr");
+        LOG_ERROR("content_type or boundary is NULL");
         return false;
     }
 
@@ -463,33 +463,33 @@ void multipart_free_form(MultipartForm* form) {
     if (form->files) {
         for (size_t i = 0; i < form->num_files; i++) {
             free(form->files[i]);
-            form->files[i] = nullptr;
+            form->files[i] = NULL;
         }
 
         free(form->files);
-        form->files = nullptr;
+        form->files = NULL;
     }
 
     if (form->fields) {
         free(form->fields);
-        form->fields = nullptr;
+        form->fields = NULL;
     }
 
     form->num_files  = 0;
     form->num_fields = 0;
-    form             = nullptr;
+    form             = NULL;
 }
 
 // =============== Fields API ========================
 // Get the value of a field by name.
-// Returns nullptr if the field is not found.
+// Returns NULL if the field is not found.
 const char* multipart_get_field_value(const MultipartForm* form, const char* name) {
     for (size_t i = 0; i < form->num_fields; i++) {
         if (strcmp(form->fields[i].name, name) == 0) {
             return form->fields[i].value;
         }
     }
-    return nullptr;
+    return NULL;
 }
 
 // =============== File API ==========================
@@ -501,7 +501,7 @@ FileHeader* multipart_get_file(const MultipartForm* form, const char* field_name
             return form->files[i];
         }
     }
-    return nullptr;
+    return NULL;
 }
 
 size_t* multipart_get_files(const MultipartForm* form, const char* field_name, size_t* count) {
@@ -514,13 +514,13 @@ size_t* multipart_get_files(const MultipartForm* form, const char* field_name, s
 
     if (num_files == 0) {
         *count = 0;
-        return nullptr;
+        return NULL;
     }
 
     size_t* indices = (size_t*)malloc(num_files * sizeof(size_t));
     if (!indices) {
         perror("Failed to allocate memory for files");
-        return nullptr;
+        return NULL;
     }
 
     size_t j = 0;
@@ -587,7 +587,7 @@ static FileHeader** realloc_files(MultipartForm* form) {
     FileHeader** new_files = (FileHeader**)realloc(form->files, new_capacity * sizeof(FileHeader*));
     if (!new_files) {
         perror("Failed to reallocate memory for files");
-        return nullptr;
+        return NULL;
     }
     form->files = new_files;
     return form->files;
@@ -598,7 +598,7 @@ static FormField* realloc_fields(MultipartForm* form) {
     FormField* new_fields = (FormField*)realloc(form->fields, new_capacity * sizeof(FormField));
     if (!new_fields) {
         perror("Failed to reallocate memory for fields");
-        return nullptr;
+        return NULL;
     }
     form->fields = new_fields;
     return form->fields;

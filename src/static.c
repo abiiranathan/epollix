@@ -42,7 +42,7 @@ static void format_file_size(off_t size, char* buf, size_t buffer_size) {
 
 static void send_error_page(context_t* ctx, http_status status) {
     const char* status_str = http_status_text(status);
-    char* error_page       = nullptr;
+    char* error_page       = NULL;
     int ret = asprintf(&error_page, "<html><head><title>%d %s</title></head><body><h1>%d %s</h1></body></html>", status,
                        status_str, status, status_str);
     if (ret == -1) {
@@ -50,7 +50,7 @@ static void send_error_page(context_t* ctx, http_status status) {
         return;
     }
 
-    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->response->status = status;
     send_string(ctx, error_page);
     free(error_page);
@@ -130,7 +130,7 @@ static void serve_directory_listing(context_t* ctx, const char* dirname, const c
     }
 
     // Send the response
-    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->response->status = StatusOK;
     send_string(ctx, cstr_data_const(html));
 }
@@ -164,7 +164,7 @@ static bool append_breadcrumbs(context_t* ctx, cstr* html, const char* base_pref
     // Allocate and copy the path for tokenization
     char* path = strdup(base_prefix);
     if (!path) {
-        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Failed to allocate memory for path");
         return false;
@@ -185,7 +185,7 @@ static bool append_breadcrumbs(context_t* ctx, cstr* html, const char* base_pref
             return false;
         }
 
-        token = strtok(nullptr, "/");
+        token = strtok(NULL, "/");
     }
 
     if (!append_or_error(ctx, html, "</div>")) {
@@ -207,14 +207,14 @@ static bool append_breadcrumbs(context_t* ctx, cstr* html, const char* base_pref
 static bool list_directory_contents(context_t* ctx, cstr* html, const char* dirname, const char* base_prefix) {
     DIR* dir = opendir(dirname);
     if (!dir) {
-        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Unable to open directory");
         return false;
     }
 
     struct dirent* ent;
-    while ((ent = readdir(dir)) != nullptr) {
+    while ((ent = readdir(dir)) != NULL) {
         // Skip . and .. entries
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
@@ -294,7 +294,7 @@ void staticFileHandler(context_t* ctx) {
     if (n < 0 || n >= MAX_PATH_LEN) {
         char errmsg[256];
         snprintf(errmsg, 256, "%s %d", "The path exceeds the maximum path size of", MAX_PATH_LEN);
-        set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+        write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
         ctx->response->status = StatusRequestURITooLong;
         send_response(ctx, errmsg, strlen(errmsg));
         return;
@@ -323,7 +323,7 @@ void staticFileHandler(context_t* ctx) {
                 snprintf(prefix, MAX_PATH_LEN, "%s%s", route->pattern.data, static_path);
                 serve_directory_listing(ctx, filepath, prefix);
             } else {
-                set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+                write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
                 ctx->response->status = StatusForbidden;
                 send_string(ctx, "<h1>Directory listing is disabled</h1>");
             }
@@ -336,7 +336,7 @@ void staticFileHandler(context_t* ctx) {
 
     if (path_exists(filepath)) {
         const char* web_ct = get_mimetype(filepath);
-        set_response_header(ctx, CONTENT_TYPE_HEADER, web_ct);
+        write_header(ctx, CONTENT_TYPE_HEADER, web_ct);
         servefile(ctx, filepath);
         return;
     }
@@ -348,7 +348,7 @@ void staticFileHandler(context_t* ctx) {
 
     // Send a 404 response if the file is not found
     const char* response = "File Not Found\n";
-    set_response_header(ctx, CONTENT_TYPE_HEADER, "text/html");
+    write_header(ctx, CONTENT_TYPE_HEADER, "text/html");
     ctx->response->status = StatusNotFound;
     send_response(ctx, response, strlen(response));
 }

@@ -34,7 +34,7 @@
 #endif
 #endif
 
-#define CRYPT_OUTPUT_SIZE (7 + 22 + 31 + 1)
+#define CRYPT_OUTPUT_SIZE         (7 + 22 + 31 + 1)
 #define CRYPT_GENSALT_OUTPUT_SIZE (7 + 22 + 1)
 
 #if defined(__GLIBC__) && defined(_LIBC)
@@ -58,8 +58,7 @@ extern struct crypt_data _ufc_foobar;
 static int _crypt_data_alloc(void** data, int* size, int need) {
     void* updated;
 
-    if (*data && *size >= need)
-        return 0;
+    if (*data && *size >= need) return 0;
 
     updated = realloc(*data, need);
 
@@ -72,8 +71,7 @@ static int _crypt_data_alloc(void** data, int* size, int need) {
     }
 
 #if defined(__GLIBC__) && defined(_LIBC)
-    if (need >= sizeof(struct crypt_data))
-        ((struct crypt_data*)updated)->initialized = 0;
+    if (need >= sizeof(struct crypt_data)) ((struct crypt_data*)updated)->initialized = 0;
 #endif
 
     *data = updated;
@@ -83,11 +81,9 @@ static int _crypt_data_alloc(void** data, int* size, int need) {
 }
 
 static char* _crypt_retval_magic(char* retval, const char* setting, char* output, int size) {
-    if (retval)
-        return retval;
+    if (retval) return retval;
 
-    if (_crypt_output_magic(setting, output, size))
-        return nullptr; /* shouldn't happen */
+    if (_crypt_output_magic(setting, output, size)) return NULL; /* shouldn't happen */
 
     return output;
 }
@@ -106,37 +102,31 @@ static char* _crypt_retval_magic(char* retval, const char* setting, char* output
  */
 
 char* __crypt_rn(__const char* key, __const char* setting, void* data, int size) {
-    if (setting[0] == '$' && setting[1] == '2')
-        return _crypt_blowfish_rn(key, setting, (char*)data, size);
-    if (setting[0] == '$' && setting[1] == '1')
-        return __md5_crypt_r(key, setting, (char*)data, size);
+    if (setting[0] == '$' && setting[1] == '2') return _crypt_blowfish_rn(key, setting, (char*)data, size);
+    if (setting[0] == '$' && setting[1] == '1') return __md5_crypt_r(key, setting, (char*)data, size);
     if (setting[0] == '$' || setting[0] == '_') {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
-    if (size >= sizeof(struct crypt_data))
-        return __des_crypt_r(key, setting, (struct crypt_data*)data);
+    if (size >= sizeof(struct crypt_data)) return __des_crypt_r(key, setting, (struct crypt_data*)data);
     __set_errno(ERANGE);
-    return nullptr;
+    return NULL;
 }
 
 char* __crypt_ra(__const char* key, __const char* setting, void** data, int* size) {
     if (setting[0] == '$' && setting[1] == '2') {
-        if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE))
-            return nullptr;
+        if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE)) return NULL;
         return _crypt_blowfish_rn(key, setting, (char*)*data, *size);
     }
     if (setting[0] == '$' && setting[1] == '1') {
-        if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE))
-            return nullptr;
+        if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE)) return NULL;
         return __md5_crypt_r(key, setting, (char*)*data, *size);
     }
     if (setting[0] == '$' || setting[0] == '_') {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
-    if (_crypt_data_alloc(data, size, sizeof(struct crypt_data)))
-        return nullptr;
+    if (_crypt_data_alloc(data, size, sizeof(struct crypt_data))) return NULL;
     return __des_crypt_r(key, setting, (struct crypt_data*)*data);
 }
 
@@ -154,8 +144,7 @@ char* crypt_rn(const char* key, const char* setting, void* data, int size) {
 }
 
 char* crypt_ra(const char* key, const char* setting, void** data, int* size) {
-    if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE))
-        return nullptr;
+    if (_crypt_data_alloc(data, size, CRYPT_OUTPUT_SIZE)) return NULL;
     return _crypt_blowfish_rn(key, setting, (char*)*data, *size);
 }
 
@@ -172,7 +161,7 @@ char* crypt(const char* key, const char* setting) {
 
 #define __crypt_gensalt_rn crypt_gensalt_rn
 #define __crypt_gensalt_ra crypt_gensalt_ra
-#define __crypt_gensalt crypt_gensalt
+#define __crypt_gensalt    crypt_gensalt
 #endif
 
 char* __crypt_gensalt_rn(const char* prefix, unsigned long count, const char* input, int size, char* output,
@@ -183,21 +172,19 @@ char* __crypt_gensalt_rn(const char* prefix, unsigned long count, const char* in
     /* This may be supported on some platforms in the future */
     if (!input) {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
 
     if (!strncmp(prefix, "$2a$", 4) || !strncmp(prefix, "$2b$", 4) || !strncmp(prefix, "$2y$", 4))
         use = _crypt_gensalt_blowfish_rn;
-    else if (!strncmp(prefix, "$1$", 3))
-        use = _crypt_gensalt_md5_rn;
-    else if (prefix[0] == '_')
-        use = _crypt_gensalt_extended_rn;
+    else if (!strncmp(prefix, "$1$", 3)) use = _crypt_gensalt_md5_rn;
+    else if (prefix[0] == '_') use = _crypt_gensalt_extended_rn;
     else if (!prefix[0] ||
              (prefix[0] && prefix[1] && memchr(_crypt_itoa64, prefix[0], 64) && memchr(_crypt_itoa64, prefix[1], 64)))
         use = _crypt_gensalt_traditional_rn;
     else {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
 
     return use(prefix, count, input, size, output, output_size);
@@ -213,8 +200,7 @@ char* __crypt_gensalt_ra(const char* prefix, unsigned long count, const char* in
         retval = strdup(retval);
 #ifndef __GLIBC__
         /* strdup(3) on glibc sets errno, so we don't need to bother */
-        if (!retval)
-            __set_errno(ENOMEM);
+        if (!retval) __set_errno(ENOMEM);
 #endif
     }
 
@@ -319,7 +305,7 @@ weak_alias(__crypt_rn, crypt_rn) weak_alias(__crypt_ra, crypt_ra) weak_alias(__c
                         {"*0", "", "$2`$05$CCCCCCCCCCCCCCCCCCCCC."},
                         {"*0", "", "$2{$05$CCCCCCCCCCCCCCCCCCCCC."},
                         {"*1", "", "*0"},
-                        {nullptr}};
+                        {NULL}};
 
 #define which tests[0]
 
@@ -332,17 +318,16 @@ static void handle_timer(int signum) {
 
 static void* run(void* arg) {
     unsigned long count = 0;
-    int i = 0;
-    void* data = nullptr;
-    int size = 0x12345678;
+    int i               = 0;
+    void* data          = NULL;
+    int size            = 0x12345678;
 
     do {
-        const char* hash = tests[i][0];
-        const char* key = tests[i][1];
+        const char* hash    = tests[i][0];
+        const char* key     = tests[i][1];
         const char* setting = tests[i][2];
 
-        if (!tests[++i][0])
-            i = 0;
+        if (!tests[++i][0]) i = 0;
 
         if (setting && strlen(hash) < 30) /* not for benchmark */
             continue;
@@ -350,7 +335,7 @@ static void* run(void* arg) {
         if (strcmp(crypt_ra(key, hash, &data, &size), hash)) {
             printf("%d: FAILED (crypt_ra/%d/%lu)\n", (int)((char*)arg - (char*)0), i, count);
             free(data);
-            return nullptr;
+            return NULL;
         }
         count++;
     } while (running);
@@ -373,12 +358,12 @@ int main(void) {
     void* t_retval;
 #endif
 
-    data = nullptr;
+    data = NULL;
     size = 0x12345678;
 
     for (i = 0; tests[i][0]; i++) {
-        const char* hash = tests[i][0];
-        const char* key = tests[i][1];
+        const char* hash    = tests[i][0];
+        const char* key     = tests[i][1];
         const char* setting = tests[i][2];
         const char* p;
         int ok = !setting || strlen(hash) >= 30;
@@ -387,7 +372,7 @@ int main(void) {
         if (!setting) {
             memcpy(s_buf, hash, sizeof(s_buf) - 1);
             s_buf[sizeof(s_buf) - 1] = 0;
-            setting = s_buf;
+            setting                  = s_buf;
         }
 
         __set_errno(0);
@@ -403,13 +388,12 @@ int main(void) {
         }
 
         for (o_size = -1; o_size <= (int)sizeof(o_buf); o_size++) {
-            int ok_n = ok && o_size == (int)sizeof(o_buf);
+            int ok_n      = ok && o_size == (int)sizeof(o_buf);
             const char* x = "abc";
             strcpy(o_buf, x);
             if (o_size >= 3) {
                 x = "*0";
-                if (setting[0] == '*' && setting[1] == '0')
-                    x = "*1";
+                if (setting[0] == '*' && setting[1] == '0') x = "*1";
             }
             __set_errno(0);
             p = crypt_rn(key, setting, o_buf, o_size);
@@ -461,29 +445,28 @@ int main(void) {
 
     memset(&it, 0, sizeof(it));
     it.it_value.tv_sec = 5;
-    setitimer(ITIMER_REAL, &it, nullptr);
+    setitimer(ITIMER_REAL, &it, NULL);
 
-    start_real = times(&buf);
+    start_real    = times(&buf);
     start_virtual = buf.tms_utime + buf.tms_stime;
 
     count = (char*)run((char*)0) - (char*)0;
 
-    end_real = times(&buf);
+    end_real    = times(&buf);
     end_virtual = buf.tms_utime + buf.tms_stime;
-    if (end_virtual == start_virtual)
-        end_virtual++;
+    if (end_virtual == start_virtual) end_virtual++;
 
     printf("%.1f c/s real, %.1f c/s virtual\n", (float)count * clk_tck / (end_real - start_real),
            (float)count * clk_tck / (end_virtual - start_virtual));
 
 #ifdef TEST_THREADS
-    running = 1;
+    running            = 1;
     it.it_value.tv_sec = 60;
-    setitimer(ITIMER_REAL, &it, nullptr);
+    setitimer(ITIMER_REAL, &it, NULL);
     start_real = times(&buf);
 
     for (i = 0; i < TEST_THREADS; i++)
-        if (pthread_create(&t[i], nullptr, run, i + (char*)0)) {
+        if (pthread_create(&t[i], NULL, run, i + (char*)0)) {
             perror("pthread_create");
             return 1;
         }
@@ -493,9 +476,8 @@ int main(void) {
             perror("pthread_join");
             continue;
         }
-        if (!t_retval)
-            continue;
-        count = (char*)t_retval - (char*)0;
+        if (!t_retval) continue;
+        count    = (char*)t_retval - (char*)0;
         end_real = times(&buf);
         printf("%d: %.1f c/s real\n", i, (float)count * clk_tck / (end_real - start_real));
     }

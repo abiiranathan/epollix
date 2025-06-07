@@ -68,7 +68,7 @@ static bool basic_auth_matches(const char* auth_header, BasicAuthUser* auth_data
 
 static void userUnathorized(context_t* ctx) {
     ctx->response->status = StatusUnauthorized;
-    set_response_header(ctx, "WWW-Authenticate", "Basic realm=\"Protected\"");
+    write_header(ctx, "WWW-Authenticate", "Basic realm=\"Protected\"");
     send_string(ctx, "Unauthorized");
 }
 

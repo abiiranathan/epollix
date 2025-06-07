@@ -117,13 +117,13 @@ void* send_time(void* arg) {
         }
     }
 
-    pthread_exit(nullptr);
+    pthread_exit(NULL);
 }
 
 void chunked_response(context_t* ctx) {
     pthread_t thread;
-    pthread_create(&thread, nullptr, send_time, ctx);
-    pthread_join(thread, nullptr);
+    pthread_create(&thread, NULL, send_time, ctx);
+    pthread_join(thread, NULL);
     response_end(ctx);
 }
 
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
     use_global_middleware(1, logging_middleware);
 
     EpollServer* server = epoll_server_create(2, port);
-    if (server == nullptr) {
+    if (server == NULL) {
         LOG_FATAL("Failed to create server\n");
     }
 

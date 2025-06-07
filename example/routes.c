@@ -13,7 +13,7 @@ void index_page(context_t* ctx) {
 }
 
 const char* filename = "~/Downloads/BigBuckBunny.mp4";
-FILE* file           = nullptr;
+FILE* file           = NULL;
 off64_t size         = 0;
 
 void open_movie(void) {
@@ -45,7 +45,7 @@ void handle_greet(context_t* ctx) {
     assert(name);
     printf("Hello %s\n", name);
 
-    set_response_header(ctx, "Content-Type", "text/plain");
+    write_header(ctx, "Content-Type", "text/plain");
     send_response(ctx, name, strlen(name));
 }
 
@@ -93,7 +93,7 @@ void handle_create_user(context_t* ctx) {
 
     // Generate a JWT token
     unsigned long expiry_hours_in_ms = 3600;  // 1 hour
-    unsigned long expiry             = (unsigned long)(time(nullptr) + expiry_hours_in_ms);
+    unsigned long expiry             = (unsigned long)(time(NULL) + expiry_hours_in_ms);
     const char* sub                  = username;
 
     JWTPayload payload = {0};
@@ -107,14 +107,14 @@ void handle_create_user(context_t* ctx) {
     payload.data[sizeof(payload.data) - 1] = '\0';
 
     const char* secret = getenv(JWT_TOKEN_SECRET);
-    if (secret == nullptr) {
+    if (secret == NULL) {
         LOG_ERROR("%s environment variable is not set", JWT_TOKEN_SECRET);
         ctx->response->status = StatusInternalServerError;
         send_string(ctx, "Internal Server Error");
         return;
     }
 
-    char* jwtToken      = nullptr;
+    char* jwtToken      = NULL;
     jwt_error_t jwt_err = jwt_token_create(&payload, secret, &jwtToken);
     if (jwt_err != JWT_SUCCESS) {
         LOG_ERROR("Failed to create JWT token: %s", jwt_error_string(jwt_err));
@@ -179,13 +179,13 @@ static void* send_time(void* arg) {
         }
     }
 
-    pthread_exit(nullptr);
+    pthread_exit(NULL);
 }
 
 void chunked_response(context_t* ctx) {
     pthread_t thread;
-    pthread_create(&thread, nullptr, send_time, ctx);
-    pthread_join(thread, nullptr);
+    pthread_create(&thread, NULL, send_time, ctx);
+    pthread_join(thread, NULL);
     response_end(ctx);
 }
 
@@ -239,11 +239,11 @@ void api_user_by_id(context_t* ctx) {
 
 void gzip_route(context_t* ctx) {
     char* data                     = "<h1>Hello there. This is GZIP compressed data</h1>";
-    unsigned char* compressed_data = nullptr;
+    unsigned char* compressed_data = NULL;
     size_t compressed_data_len     = 0;
     gzip_compress_bytes((uint8_t*)data, strlen(data), &compressed_data, &compressed_data_len);
 
-    set_response_header(ctx, "Content-Encoding", "gzip");
+    write_header(ctx, "Content-Encoding", "gzip");
     send_response(ctx, (void*)compressed_data, compressed_data_len);
 
     free(compressed_data);

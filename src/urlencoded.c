@@ -5,39 +5,39 @@
 Map* parse_urlencoded_form(const char* url) {
     Map* params = map_create(MapConfigStr);
     if (!params) {
-        return nullptr;
+        return NULL;
     }
 
     char* q = strstr(url, "?");
-    if (!q) return nullptr;
+    if (!q) return NULL;
     q++;
 
     char* query = strdup(q);
     if (!query) {
         perror("strdup");
-        return nullptr;
+        return NULL;
     }
 
-    char* key   = nullptr;
-    char* value = nullptr;
+    char* key   = NULL;
+    char* value = NULL;
     char *save_ptr, *save_ptr2;
     bool success = true;
 
     char* token = strtok_r(query, "&", &save_ptr);
-    while (token != nullptr) {
+    while (token != NULL) {
         key   = strtok_r(token, "=", &save_ptr2);
-        value = strtok_r(nullptr, "=", &save_ptr2);
+        value = strtok_r(NULL, "=", &save_ptr2);
 
-        if (key != nullptr && value != nullptr) {
+        if (key != NULL && value != NULL) {
             char* name = strdup(key);
-            if (name == nullptr) {
+            if (name == NULL) {
                 perror("strdup");
                 success = false;
                 break;
             }
 
             char* v = strdup(value);
-            if (v == nullptr) {
+            if (v == NULL) {
                 free(name);
                 perror("strdup");
                 success = false;
@@ -45,14 +45,14 @@ Map* parse_urlencoded_form(const char* url) {
             }
             map_set(params, name, v);
         }
-        token = strtok_r(nullptr, "&", &save_ptr);
+        token = strtok_r(NULL, "&", &save_ptr);
     }
 
     free(query);
 
     if (!success) {
         map_destroy(params);
-        return nullptr;
+        return NULL;
     }
     return params;
 }

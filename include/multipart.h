@@ -97,7 +97,7 @@ typedef enum {
  * @param size: Content-Length(size of data in bytes)
  * @param boundary: Null-terminated string for the form boundary.
  * @param form: Pointer to MultipartForm struct to store the parsed form data. It is assumed
- * to be initialized well and not nullptr.
+ * to be initialized well and not NULL.
  * You can use the function multipart_parse_boundary or multipart_parse_boundary_from_header helpers
  * to get the boundary.
  * 
@@ -125,7 +125,7 @@ bool multipart_parse_boundary_from_header(const char* content_type, char* bounda
 
 // =============== Fields API ========================
 // Get the value of a field by name.
-// Returns nullptr if the field is not found.
+// Returns NULL if the field is not found.
 const char* multipart_get_field_value(const MultipartForm* form, const char* name);
 
 // =============== File API ==========================

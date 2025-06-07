@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 // Returns the mime type of the file based on its extension.
-// If the extension is not recognized or filename is nullptr, it returns "application/octet-stream".
+// If the extension is not recognized or filename is NULL, it returns "application/octet-stream".
 const char* get_mimetype(char* filename);
 
 #ifdef __cplusplus

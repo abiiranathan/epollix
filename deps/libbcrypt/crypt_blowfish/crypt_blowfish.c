@@ -54,13 +54,13 @@
 #include "crypt_blowfish.h"
 
 #ifdef __i386__
-#define BF_ASM 1
+#define BF_ASM   1
 #define BF_SCALE 1
 #elif defined(__x86_64__) || defined(__alpha__) || defined(__hppa__)
-#define BF_ASM 0
+#define BF_ASM   0
 #define BF_SCALE 1
 #else
-#define BF_ASM 0
+#define BF_ASM   0
 #define BF_SCALE 0
 #endif
 
@@ -217,17 +217,15 @@ static unsigned char BF_atoi64[0x60] = {64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 
 #define BF_safe_atoi64(dst, src)                                                                                       \
     {                                                                                                                  \
         tmp = (unsigned char)(src);                                                                                    \
-        if ((unsigned int)(tmp -= 0x20) >= 0x60)                                                                       \
-            return -1;                                                                                                 \
+        if ((unsigned int)(tmp -= 0x20) >= 0x60) return -1;                                                            \
         tmp = BF_atoi64[tmp];                                                                                          \
-        if (tmp > 63)                                                                                                  \
-            return -1;                                                                                                 \
+        if (tmp > 63) return -1;                                                                                       \
         (dst) = tmp;                                                                                                   \
     }
 
 static int BF_decode(BF_word* dst, const char* src, int size) {
-    unsigned char* dptr = (unsigned char*)dst;
-    unsigned char* end = dptr + size;
+    unsigned char* dptr       = (unsigned char*)dst;
+    unsigned char* end        = dptr + size;
     const unsigned char* sptr = (const unsigned char*)src;
     unsigned int tmp, c1, c2, c3, c4;
 
@@ -235,13 +233,11 @@ static int BF_decode(BF_word* dst, const char* src, int size) {
         BF_safe_atoi64(c1, *sptr++);
         BF_safe_atoi64(c2, *sptr++);
         *dptr++ = (c1 << 2) | ((c2 & 0x30) >> 4);
-        if (dptr >= end)
-            break;
+        if (dptr >= end) break;
 
         BF_safe_atoi64(c3, *sptr++);
         *dptr++ = ((c2 & 0x0F) << 4) | ((c3 & 0x3C) >> 2);
-        if (dptr >= end)
-            break;
+        if (dptr >= end) break;
 
         BF_safe_atoi64(c4, *sptr++);
         *dptr++ = ((c3 & 0x03) << 6) | c4;
@@ -252,14 +248,14 @@ static int BF_decode(BF_word* dst, const char* src, int size) {
 
 static void BF_encode(char* dst, const BF_word* src, int size) {
     const unsigned char* sptr = (const unsigned char*)src;
-    const unsigned char* end = sptr + size;
-    unsigned char* dptr = (unsigned char*)dst;
+    const unsigned char* end  = sptr + size;
+    unsigned char* dptr       = (unsigned char*)dst;
     unsigned int c1, c2;
 
     do {
-        c1 = *sptr++;
+        c1      = *sptr++;
         *dptr++ = BF_itoa64[c1 >> 2];
-        c1 = (c1 & 0x03) << 4;
+        c1      = (c1 & 0x03) << 4;
         if (sptr >= end) {
             *dptr++ = BF_itoa64[c1];
             break;
@@ -268,7 +264,7 @@ static void BF_encode(char* dst, const BF_word* src, int size) {
         c2 = *sptr++;
         c1 |= c2 >> 4;
         *dptr++ = BF_itoa64[c1];
-        c1 = (c2 & 0x0f) << 2;
+        c1      = (c2 & 0x0f) << 2;
         if (sptr >= end) {
             *dptr++ = BF_itoa64[c1];
             break;
@@ -283,13 +279,12 @@ static void BF_encode(char* dst, const BF_word* src, int size) {
 
 static void BF_swap(BF_word* x, int count) {
     static int endianness_check = 1;
-    char* is_little_endian = (char*)&endianness_check;
+    char* is_little_endian      = (char*)&endianness_check;
     BF_word tmp;
 
-    if (*is_little_endian)
-        do {
-            tmp = *x;
-            tmp = (tmp << 16) | (tmp >> 16);
+    if (*is_little_endian) do {
+            tmp  = *x;
+            tmp  = (tmp << 16) | (tmp >> 16);
             *x++ = ((tmp & 0x00FF00FF) << 8) | ((tmp >> 8) & 0x00FF00FF);
         } while (--count);
 }
@@ -355,15 +350,15 @@ static void BF_swap(BF_word* x, int count) {
     BF_ROUND(L, R, 14);                                                                                                \
     BF_ROUND(R, L, 15);                                                                                                \
     tmp4 = R;                                                                                                          \
-    R = L;                                                                                                             \
-    L = tmp4 ^ data.ctx.P[BF_N + 1];
+    R    = L;                                                                                                          \
+    L    = tmp4 ^ data.ctx.P[BF_N + 1];
 
 #if BF_ASM
 #define BF_body() _BF_body_r(&data.ctx);
 #else
 #define BF_body()                                                                                                      \
     L = R = 0;                                                                                                         \
-    ptr = data.ctx.P;                                                                                                  \
+    ptr   = data.ctx.P;                                                                                                \
     do {                                                                                                               \
         ptr += 2;                                                                                                      \
         BF_ENCRYPT;                                                                                                    \
@@ -420,7 +415,7 @@ static void BF_set_key(const char* key, BF_key expanded, BF_key initial, unsigne
  * Prefix "$2x$": bug = 1, safety = 0
  * Prefix "$2y$": bug = 0, safety = 0
  */
-    bug = (unsigned int)flags & 1;
+    bug    = (unsigned int)flags & 1;
     safety = ((BF_word)flags & 2) << 15;
 
     sign = diff = 0;
@@ -438,17 +433,14 @@ static void BF_set_key(const char* key, BF_key expanded, BF_key initial, unsigne
  * chars 2, 3, 4 in each four-char block, we set bit 7 of "sign" if sign
  * extension in tmp[1] occurs.  Once this flag is set, it remains set.
  */
-            if (j)
-                sign |= tmp[1] & 0x80;
-            if (!*ptr)
-                ptr = key;
-            else
-                ptr++;
+            if (j) sign |= tmp[1] & 0x80;
+            if (!*ptr) ptr = key;
+            else ptr++;
         }
         diff |= tmp[0] ^ tmp[1]; /* Non-zero on any differences */
 
         expanded[i] = tmp[bug];
-        initial[i] = BF_init_state.P[i] ^ tmp[bug];
+        initial[i]  = BF_init_state.P[i] ^ tmp[bug];
     }
 
     /*
@@ -503,7 +495,7 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
 
     if (size < 7 + 22 + 31 + 1) {
         __set_errno(ERANGE);
-        return nullptr;
+        return NULL;
     }
 
     if (setting[0] != '$' || setting[1] != '2' || setting[2] < 'a' || setting[2] > 'z' ||
@@ -511,13 +503,13 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
         setting[4] > '3' || setting[5] < '0' || setting[5] > '9' || (setting[4] == '3' && setting[5] > '1') ||
         setting[6] != '$') {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
 
     count = (BF_word)1 << ((setting[4] - '0') * 10 + (setting[5] - '0'));
     if (count < min || BF_decode(data.binary.salt, &setting[7], 16)) {
         __set_errno(EINVAL);
-        return nullptr;
+        return NULL;
     }
     BF_swap(data.binary.salt, 4);
 
@@ -530,7 +522,7 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
         L ^= data.binary.salt[i & 2];
         R ^= data.binary.salt[(i & 2) + 1];
         BF_ENCRYPT;
-        data.ctx.P[i] = L;
+        data.ctx.P[i]     = L;
         data.ctx.P[i + 1] = R;
     }
 
@@ -561,8 +553,7 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
         done = 0;
         do {
             BF_body();
-            if (done)
-                break;
+            if (done) break;
             done = 1;
 
             tmp1 = data.binary.salt[0];
@@ -589,7 +580,7 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
             BF_ENCRYPT;
         } while (--count);
 
-        data.binary.output[i] = L;
+        data.binary.output[i]     = L;
         data.binary.output[i + 1] = R;
     }
 
@@ -606,15 +597,13 @@ static char* BF_crypt(const char* key, const char* setting, char* output, int si
 }
 
 int _crypt_output_magic(const char* setting, char* output, int size) {
-    if (size < 3)
-        return -1;
+    if (size < 3) return -1;
 
     output[0] = '*';
     output[1] = '0';
     output[2] = '\0';
 
-    if (setting[0] == '*' && setting[1] == '0')
-        output[1] = '1';
+    if (setting[0] == '*' && setting[1] == '0') output[1] = '1';
 
     return 0;
 }
@@ -640,11 +629,11 @@ int _crypt_output_magic(const char* setting, char* output, int size) {
  * setting.
  */
 char* _crypt_blowfish_rn(const char* key, const char* setting, char* output, int size) {
-    const char* test_key = "8b \xd0\xc1\xd2\xcf\xcc\xd8";
-    const char* test_setting = "$2a$00$abcdefghijklmnopqrstuu";
+    const char* test_key                    = "8b \xd0\xc1\xd2\xcf\xcc\xd8";
+    const char* test_setting                = "$2a$00$abcdefghijklmnopqrstuu";
     static const char* const test_hashes[2] = {"i1D709vfamulimlGcq0qq3UvuUasvEa\0\x55",  /* 'a', 'b', 'y' */
                                                "VUrPmXD6q/nVSSp7pNDhCR9071IfIRe\0\x55"}; /* 'x' */
-    const char* test_hash = test_hashes[0];
+    const char* test_hash                   = test_hashes[0];
     char* retval;
     const char* p;
     int save_errno, ok;
@@ -655,7 +644,7 @@ char* _crypt_blowfish_rn(const char* key, const char* setting, char* output, int
 
     /* Hash the supplied password */
     _crypt_output_magic(setting, output, size);
-    retval = BF_crypt(key, setting, output, size, 16);
+    retval     = BF_crypt(key, setting, output, size, 16);
     save_errno = errno;
 
     /*
@@ -668,12 +657,12 @@ char* _crypt_blowfish_rn(const char* key, const char* setting, char* output, int
     memcpy(buf.s, test_setting, sizeof(buf.s));
     if (retval) {
         unsigned int flags = flags_by_subtype[(unsigned int)(unsigned char)setting[2] - 'a'];
-        test_hash = test_hashes[flags & 1];
-        buf.s[2] = setting[2];
+        test_hash          = test_hashes[flags & 1];
+        buf.s[2]           = setting[2];
     }
     memset(buf.o, 0x55, sizeof(buf.o));
     buf.o[sizeof(buf.o) - 1] = 0;
-    p = BF_crypt(test_key, buf.s, buf.o, sizeof(buf.o) - (1 + 1), 1);
+    p                        = BF_crypt(test_key, buf.s, buf.o, sizeof(buf.o) - (1 + 1), 1);
 
     ok = (p == buf.o && !memcmp(p, buf.s, 7 + 22) && !memcmp(p + (7 + 22), test_hash, 31 + 1 + 1 + 1));
 
@@ -692,27 +681,24 @@ char* _crypt_blowfish_rn(const char* key, const char* setting, char* output, int
     }
 
     __set_errno(save_errno);
-    if (ok)
-        return retval;
+    if (ok) return retval;
 
     /* Should not happen */
     _crypt_output_magic(setting, output, size);
     __set_errno(EINVAL); /* pretend we don't support this hash type */
-    return nullptr;
+    return NULL;
 }
 
 char* _crypt_gensalt_blowfish_rn(const char* prefix, unsigned long count, const char* input, int size, char* output,
                                  int output_size) {
     if (size < 16 || output_size < 7 + 22 + 1 || (count && (count < 4 || count > 31)) || prefix[0] != '$' ||
         prefix[1] != '2' || (prefix[2] != 'a' && prefix[2] != 'b' && prefix[2] != 'y')) {
-        if (output_size > 0)
-            output[0] = '\0';
+        if (output_size > 0) output[0] = '\0';
         __set_errno((output_size < 7 + 22 + 1) ? ERANGE : EINVAL);
-        return nullptr;
+        return NULL;
     }
 
-    if (!count)
-        count = 5;
+    if (!count) count = 5;
 
     output[0] = '$';
     output[1] = '2';

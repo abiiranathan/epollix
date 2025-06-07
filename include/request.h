@@ -52,7 +52,7 @@ const char* get_content_type(Request* req);
 bool parse_http_request(Request* req);
 
 // Set a NotFoundHandler. This is handy for SPAs.
-// It will be called if the RouteMatcher returns nullptr.
+// It will be called if the RouteMatcher returns NULL.
 Route* route_notfound(Handler h);
 
 #ifdef __cplusplus

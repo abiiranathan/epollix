@@ -1,7 +1,6 @@
 #ifndef RESPONSE_H
 #define RESPONSE_H
 
-#include <stddef.h>
 #define _GNU_SOURCE     1
 #define _POSIX_C_SOURCE 200809L
 
@@ -12,24 +11,27 @@ extern "C" {
 #include <stdio.h>
 #include "net.h"
 
+#define MAX_HEADER_SIZE 2048
+
 typedef struct response {
-    int client_fd;          // Client fd.
-    http_status status;     // Status code
-    uint8_t* data;          // Response data as bytes.
-    bool headers_sent;      // Headers already sent
-    bool chunked;           // Is a chunked transfer
-    bool content_type_set;  // Whether content type header is set
-    Headers* headers;       // Response headers
+    int client_fd;       // Client fd.
+    http_status status;  // Status code
+    bool headers_sent;   // Headers already sent
+    bool chunked;        // Is a chunked transfer
+
+    // Response headers.
+    size_t headers_written;         // Size of headers written
+    char headers[MAX_HEADER_SIZE];  // Response headers
 } Response;
 
-// Create a new response object.
-bool response_init(Response* res, int client_fd);
+// Initialize a new response object.
+void response_init(Response* res, int client_fd);
 
 // Process the response.
 void process_response(context_t* ctx);
 
-// Set response header.
-bool set_response_header(context_t* ctx, const char* name, const char* value);
+// Write a response header to response.
+bool write_header(context_t* ctx, const char* name, const char* value);
 
 // Set content type for the response.
 void set_content_type(context_t* ctx, const char* content_type);

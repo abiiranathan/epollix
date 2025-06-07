@@ -77,7 +77,7 @@ bool match_path_parameters(const char* pattern, const char* url_path, PathParams
 
 const char* get_path_param(const PathParams* pathParams, const char* name) {
     if (!pathParams || !name) {
-        return nullptr;
+        return NULL;
     }
 
     for (size_t i = 0; i < pathParams->match_count; i++) {
@@ -85,5 +85,5 @@ const char* get_path_param(const PathParams* pathParams, const char* name) {
             return pathParams->params[i].value;
         }
     }
-    return nullptr;
+    return NULL;
 }

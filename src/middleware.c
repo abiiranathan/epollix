@@ -7,9 +7,9 @@
 #include <stddef.h>
 #include <stdio.h>
 
-static Middleware GLOBAL_MIDDLEWARE[MAX_GLOBAL_MIDDLEWARE] = {};       // Global middleware
-static size_t global_middleware_count                      = 0;        // Number of global middleware
-static Map* global_middleware_context                      = nullptr;  // Global middleware context
+static Middleware GLOBAL_MIDDLEWARE[MAX_GLOBAL_MIDDLEWARE] = {};    // Global middleware
+static size_t global_middleware_count                      = 0;     // Number of global middleware
+static Map* global_middleware_context                      = NULL;  // Global middleware context
 static LArena* arena                                       = NULL;
 
 #define MIDDLEWARE_ARENA_MEM (size_t)((MAX_GLOBAL_MIDDLEWARE + MAX_GROUP_MIDDLEWARE) * sizeof(Middleware) * 1.2)

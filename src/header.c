@@ -22,32 +22,6 @@ bool headers_append(Headers* headers, const char* name, const char* value) {
     return kv_append(headers, hdr);
 }
 
-bool headers_tostring(const Headers* headers, char* buffer, size_t size) {
-    if (!headers || !buffer || size < 3) return false;
-
-    char* ptr        = buffer;
-    size_t remaining = size;
-
-    for (size_t i = 0; i < headers->count; i++) {
-        const header_t* h = &headers->items[i];
-
-        const char* name  = cstr_data_const(h->name);
-        const char* value = cstr_data_const(h->value);
-
-        int written = snprintf(ptr, remaining, "%s: %s\r\n", name, value);
-        if (written < 0 || (size_t)written >= remaining) {
-            return false;
-        }
-
-        ptr += written;
-        remaining -= written;
-    }
-
-    if (remaining < 3) return false;
-    memcpy(ptr, "\r\n", 3);  // Includes null terminator
-    return true;
-}
-
 void headers_free(Headers* headers) {
     if (!headers) return;
 

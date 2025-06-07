@@ -1,6 +1,7 @@
 #include "../include/request.h"
 #include "../include/route.h"
 
+#include <assert.h>
 #include <cpuid.h>
 #include <errno.h>
 #include <stdio.h>
@@ -17,15 +18,10 @@ extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
 void request_init(Request* req, int client_fd, int epoll_fd) {
-    req->client_fd      = client_fd;
-    req->epoll_fd       = epoll_fd;
-    req->path           = NULL;
-    req->method         = M_INVALID;
-    req->route          = NULL;
-    req->content_length = 0;
-    req->body           = NULL;
-    req->query_params   = NULL;
-    req->headers        = NULL;
+    memset(req, 0, sizeof(Request));  // Zero-out request struct
+    req->client_fd = client_fd;       // Attch client file descriptor
+    req->epoll_fd  = epoll_fd;        // Attach epoll fd.
+    req->method    = M_INVALID;       // Initialize http method with Invalid.
 }
 
 // Get the content type of the request.
@@ -132,10 +128,6 @@ bool parse_url_query_params(char* query, QueryParams* query_params) {
         char* key   = strtok_r(pair, "=", &save_ptr2);
         char* value = strtok_r(NULL, "", &save_ptr2);  // Get rest of string after first '='
 
-        // Handle cases:
-        // 1. key=value (normal case)
-        // 2. key= (empty value)
-        // 3. key (no equals)
         if (key != NULL) {
             if (!headers_append(query_params, key, value ? value : "")) {
                 return false;
@@ -157,13 +149,14 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
         return false;
     }
 
-    // copy the initial body read if any
+    // copy the initial body read (with the first recv) if any
     if (initial_read > 0) {
         memcpy(*body, initial_body, initial_read);
     }
 
     size_t total_read = initial_read;
 
+    // read the remaining bytes
     while (total_read < body_size) {
         ssize_t count = recv(client_fd, *body + total_read, body_size - total_read, 0);
         if (count == -1) {
@@ -198,22 +191,15 @@ bool handle_not_found(Request* req, const char* method, const char* http_version
     }
 }
 
-bool registered = false;
+static bool _404_registered = false;
 Route* route_notfound(Handler h) {
-    if (registered) {
+    if (_404_registered) {
         LOG_FATAL("registration of more than one 404 handler\n");
     }
 
-    notFoundRoute = route_get("__notfound__", h);
-    registered    = true;
+    notFoundRoute   = route_get("__notfound__", h);
+    _404_registered = true;
     return notFoundRoute;
-}
-
-// Check if the CPU supports AVX
-int check_avx() {
-    unsigned int eax, ebx, ecx, edx;
-    __cpuid(1, eax, ebx, ecx, edx);
-    return ecx & bit_AVX;
 }
 
 #define SEND_ERR(client_fd, status, msg)                                                                               \
@@ -225,7 +211,7 @@ int check_avx() {
 
 static inline char* find_end_of_headers(const char* headers, size_t bytes_read) {
     // Ensure we have at least 4 bytes to check
-    if (bytes_read < 4) return NULL;
+    assert(bytes_read >= 4);
 
     // Scan for \r\n\r\n
     for (size_t i = 0; i <= bytes_read - 4; i++) {
@@ -234,6 +220,27 @@ static inline char* find_end_of_headers(const char* headers, size_t bytes_read) 
         }
     }
     return NULL;
+}
+
+#include <immintrin.h>
+
+static inline char* find_end_of_headers_simd(const char* headers, size_t bytes_read) {
+    assert(bytes_read >= 4);
+
+    __m128i pattern = _mm_set1_epi32(0x0A0D0A0D);
+    const char* end = headers + bytes_read - 16;
+
+    for (; headers <= end; headers += 16) {
+        __m128i chunk = _mm_loadu_si128((const __m128i*)headers);
+        __m128i cmp   = _mm_cmpeq_epi32(chunk, pattern);
+        int mask      = _mm_movemask_epi8(cmp);
+        if (mask) {
+            return (char*)(headers + __builtin_ctz(mask));
+        }
+    }
+
+    // Handle remaining bytes
+    return find_end_of_headers(headers, bytes_read - (headers - (end + 16)));
 }
 
 bool parse_http_request(Request* req) {
@@ -263,7 +270,7 @@ bool parse_http_request(Request* req) {
 
     // memmem is rather slow.
     // end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
-    end_of_headers = find_end_of_headers(headers, bytes_read);
+    end_of_headers = find_end_of_headers_simd(headers, bytes_read);
     if (!end_of_headers) {
         BAD_REQ(client_fd, "Invalid Http Payload");
     }

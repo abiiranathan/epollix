@@ -6,7 +6,6 @@
 typedef struct {
     int epoll_fd;   // Epoll file descriptor
     int client_fd;  // Client file descriptor
-    LArena* arena;  // task arena
 } Task;
 
 // Initialize the task pool

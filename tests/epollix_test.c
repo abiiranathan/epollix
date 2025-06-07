@@ -72,23 +72,23 @@ void test_encode_uri_simd(void) {
 // bool parse_url_query_params(char* query, Map* query_params)
 void test_parse_url_query_params(void) {
     QueryParams* query_params = kv_new();
-    LOG_ASSERT(query_params != nullptr, "Failed to create map for query_params");
+    LOG_ASSERT(query_params != NULL, "Failed to create map for query_params");
 
     char* query = strdup("name=John&age=30&location=USA");
-    LOG_ASSERT(query != nullptr, "Failed to allocate memory for query");
+    LOG_ASSERT(query != NULL, "Failed to allocate memory for query");
     bool result = parse_url_query_params(query, query_params);
     LOG_ASSERT(result, "Failed to parse query params");
 
     const char* name = headers_value(query_params, "name");
-    LOG_ASSERT(name != nullptr, "Failed to get name");
+    LOG_ASSERT(name != NULL, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John") == 0, "Expected John");
 
     const char* age = headers_value(query_params, "age");
-    LOG_ASSERT(age != nullptr, "Failed to get age");
+    LOG_ASSERT(age != NULL, "Failed to get age");
     LOG_ASSERT(strcmp(age, "30") == 0, "Expected 30");
 
     const char* location = headers_value(query_params, "location");
-    LOG_ASSERT(location != nullptr, "Failed to get location");
+    LOG_ASSERT(location != NULL, "Failed to get location");
     LOG_ASSERT(strcmp(location, "USA") == 0, "Expected USA");
 
     headers_free(query_params);
@@ -111,10 +111,10 @@ void test_match_params(void) {
     const char* name = get_path_param(&pathParams, "name");
     const char* id   = get_path_param(&pathParams, "id");
 
-    LOG_ASSERT(name != nullptr, "Failed to get name");
+    LOG_ASSERT(name != NULL, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John Doe") == 0, "Expected John Doe");
 
-    LOG_ASSERT(id != nullptr, "Failed to get id");
+    LOG_ASSERT(id != NULL, "Failed to get id");
     LOG_ASSERT(strcmp(id, "123") == 0, "Expected 123");
 }
 

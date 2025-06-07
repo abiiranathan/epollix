@@ -25,11 +25,11 @@ typedef struct EpollServer {
 } EpollServer;
 
 // global server object
-EpollServer* epollServer = nullptr;
+EpollServer* epollServer = NULL;
 
 // Delete client socket from epoll tracking and close the client socket.
 static inline void close_connection(int client_fd, int epoll_fd) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
 }
 
@@ -40,29 +40,21 @@ static void handle_client(void* arg) {
     Response res;
 
     request_init(&req, task->client_fd, task->epoll_fd);
-
-    if (!response_init(&res, task->client_fd)) {
-        LOG_ERROR("Failed to initialize response");
-        http_error(task->client_fd, StatusInternalServerError, "Internal server error");
-        close_connection(task->client_fd, task->epoll_fd);
-        taskpool_put(task);
-        return;
-    };
+    response_init(&res, task->client_fd);
 
     if (!parse_http_request(&req)) {
         goto cleanup;
     };
 
-    if (req.route != nullptr) {
-        context_t ctx = {.request = &req, .response = &res, .arena = task->arena, .abort = false};
+    if (req.route != NULL) {
+        context_t ctx = {.request = &req, .response = &res, .abort = false};
         process_response(&ctx);
         close_connection(task->client_fd, task->epoll_fd);
         free_locals(&ctx);
     }
 cleanup:
     request_destroy(&req);
-    if (res.headers) headers_free(res.headers);  // free response hedaers
-    taskpool_put(task);                          // Return task to pool
+    taskpool_put(task);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -217,8 +209,8 @@ uint16_t parse_port(const char* _port, bool* success) {
 // Create a new EpollServer.
 EpollServer* epoll_server_create(size_t num_workers, const uint16_t port) {
     EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
-    if (server == nullptr) {
-        return nullptr;
+    if (server == NULL) {
+        return NULL;
     }
 
     // Get the number of threads to use for the server.
@@ -231,9 +223,9 @@ EpollServer* epoll_server_create(size_t num_workers, const uint16_t port) {
     server->port        = port;
     server->timeout_sec = 0;
     server->pool        = threadpool_create((int)num_workers);
-    if (server->pool == nullptr) {
+    if (server->pool == NULL) {
         free(server);
-        return nullptr;
+        return NULL;
     }
 
     // Create an epoll instance
@@ -287,7 +279,7 @@ static void install_signal_handler(void) {
     sa.sa_flags = 0;
 
     // See man 2 sigaction for more information.
-    if (sigaction(SIGINT, &sa, nullptr) == -1) {
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
         LOG_FATAL("unable to call sigaction\n");
     };
 

@@ -10,7 +10,7 @@ static const char* method_mapping[7] = {
 
 const char* method_tostring(HttpMethod method) {
     if (method < M_OPTIONS || method > M_DELETE) {
-        return nullptr;
+        return NULL;
     }
     return method_mapping[method];
 }

@@ -43,7 +43,7 @@ typedef struct {
 // Global varibles
 LogFlag log_flags         = LOG_DEFAULT;
 static LogBatch log_batch = {0};
-static FILE* log_file     = nullptr;
+static FILE* log_file     = NULL;
 static pthread_t logger_thread;
 static volatile int logger_running = 1;
 
