@@ -18,11 +18,11 @@ typedef struct {
     HNode node;
     const char* ext;
     const char* mimetype;
-} Entry;
+} MimeEntry;
 
 // Define an array of file extension:content_type mapping.
 // https://mimetype.io/all-types
-static Entry entries[] = {
+static MimeEntry entries[] = {
     // Text mime types
     {.ext = "html", .mimetype = "text/html"},
     {.ext = "htm", .mimetype = "text/html"},
@@ -270,7 +270,7 @@ __attribute__((constructor())) void init_mime_types() {
     hm_reserve(&m_dict, NEXT_POWER_OF_TWO(MIME_MAPPING_SIZE));
 
     for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
-        Entry* entry      = &entries[i];
+        MimeEntry* entry  = &entries[i];
         entry->node.hcode = hm_strhash(entry->ext);
         hm_insert(&m_dict, &entry->node);
     }
@@ -281,8 +281,8 @@ __attribute__((destructor())) void cleanup_mimetypes() {
 }
 
 static bool mime_eq(HNode* lhs, HNode* rhs) {
-    Entry* a = container_of(lhs, Entry, node);
-    Entry* b = container_of(rhs, Entry, node);
+    MimeEntry* a = container_of(lhs, MimeEntry, node);
+    MimeEntry* b = container_of(rhs, MimeEntry, node);
     return strcmp(a->ext, b->ext) == 0;
 }
 
@@ -312,10 +312,10 @@ const char* get_mimetype(char* filename) {
         *p = tolower((unsigned char)*p);
     }
 
-    Entry entry  = {.ext = ext, .node.hcode = hm_strhash(ext)};
-    HNode* found = hm_lookup(&m_dict, &entry.node, mime_eq);
+    MimeEntry entry = {.ext = ext, .node.hcode = hm_strhash(ext)};
+    HNode* found    = hm_lookup(&m_dict, &entry.node, mime_eq);
     if (found) {
-        return container_of(found, Entry, node)->mimetype;
+        return container_of(found, MimeEntry, node)->mimetype;
     }
     return DEFAULT_CONTENT_TYPE;
 }
