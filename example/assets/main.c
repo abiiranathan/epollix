@@ -153,5 +153,5 @@ int main(int argc, char** argv) {
         LOG_FATAL("Failed to create server\n");
     }
 
-    epoll_server_listen(server);
+    epoll_server_run(server);
 }

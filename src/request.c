@@ -251,12 +251,21 @@ bool parse_http_request(Request* req) {
     size_t header_capacity = 0;          // Size of the headers in the buffer (including the initial read)
     size_t body_size       = 0;          // Size of the request body (from the Content-Length header)
 
-    char headers[4096];
-    ssize_t bytes_read = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
+    static __thread char headers[4096] = {0};
+    ssize_t bytes_read                 = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
     if (bytes_read <= 0) {
         BAD_REQ(client_fd, "Error receiving data from client socket");
     }
     headers[bytes_read] = '\0';
+
+    // Check for keep-alive.
+    if (strcasestr(headers, "Connection: Keep-Alive")) {
+        req->flags |= KEEPALIVE_REQUESTED;
+    }
+
+    if (strcasestr(headers, "Connection: Close")) {
+        req->flags |= CONNECTION_CLOSE_REQUESTED;
+    }
 
     char *method, *uri, *http_version, *header_start, *end_of_headers;
     if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
@@ -279,7 +288,7 @@ bool parse_http_request(Request* req) {
     body_size       = parse_content_length(header_start, end_of_headers);
 
     // Decode the URL with percent_decoding if needed
-    char decoded[1024];
+    static __thread char decoded[1024];
     char* decoded_uri   = uri;  // Default to original URI
     bool needs_decoding = strstr(uri, "%") != NULL;
 

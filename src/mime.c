@@ -1,4 +1,5 @@
 #include "../include/mime.h"
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -6,255 +7,284 @@
 #include <string.h>
 #include <strings.h>
 
+// Includes provided by hmap dependency.
+// Dependent on cmake finding it.
+#include "hmap.h"
+
 #define DEFAULT_CONTENT_TYPE "application/octet-stream"
 
+// The hashmap entry for each mime type.
 typedef struct {
-    const char* extension;
-    const char* contentType;
-} MimeEntry;
+    HNode node;
+    const char* ext;
+    const char* mimetype;
+} Entry;
 
 // Define an array of file extension:content_type mapping.
 // https://mimetype.io/all-types
-static const MimeEntry mime_mapping[] = {
+static Entry entries[] = {
     // Text mime types
-    {"html", "text/html"},
-    {"htm", "text/html"},
-    {"xhtml", "application/xhtml+xml"},
-    {"php", "application/x-httpd-php"},
-    {"asp", "application/x-asp"},
-    {"jsp", "application/x-jsp"},
-    {"xml", "application/xml"},
+    {.ext = "html", .mimetype = "text/html"},
+    {.ext = "htm", .mimetype = "text/html"},
+    {.ext = "xhtml", .mimetype = "application/xhtml+xml"},
+    {.ext = "php", .mimetype = "application/x-httpd-php"},
+    {.ext = "asp", .mimetype = "application/x-asp"},
+    {.ext = "jsp", .mimetype = "application/x-jsp"},
+    {.ext = "xml", .mimetype = "application/xml"},
 
-    {"css", "text/css"},
-    {"js", "application/javascript"},
-    {"txt", "text/plain"},
-    {"json", "application/json"},
-    {"csv", "text/csv"},
-    {"md", "text/markdown"},
-    {"webmanifest", "application/manifest+json"},
+    {.ext = "css", .mimetype = "text/css"},
+    {.ext = "js", .mimetype = "application/javascript"},
+    {.ext = "txt", .mimetype = "text/plain"},
+    {.ext = "json", .mimetype = "application/json"},
+    {.ext = "csv", .mimetype = "text/csv"},
+    {.ext = "md", .mimetype = "text/markdown"},
+    {.ext = "webmanifest", .mimetype = "application/manifest+json"},
 
     // Images
-    {"jpg", "image/jpeg"},
-    {"jpeg", "image/jpeg"},
-    {"png", "image/png"},
-    {"gif", "image/gif"},
-    {"ico", "image/x-icon"},
-    {"svg", "image/svg+xml"},
-    {"bmp", "image/bmp"},
-    {"tiff", "image/tiff"},
-    {"webp", "image/webp"},
+    {.ext = "jpg", .mimetype = "image/jpeg"},
+    {.ext = "jpeg", .mimetype = "image/jpeg"},
+    {.ext = "png", .mimetype = "image/png"},
+    {.ext = "gif", .mimetype = "image/gif"},
+    {.ext = "ico", .mimetype = "image/x-icon"},
+    {.ext = "svg", .mimetype = "image/svg+xml"},
+    {.ext = "bmp", .mimetype = "image/bmp"},
+    {.ext = "tiff", .mimetype = "image/tiff"},
+    {.ext = "webp", .mimetype = "image/webp"},
 
     // Documents
-    {"pdf", "application/pdf"},
-    {"doc", "application/msword"},
-    {"docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
-    {"pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
-    {"xls", "application/vnd.ms-excel"},
-    {"xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
-    {"odt", "application/vnd.oasis.opendocument.text"},
-    {"ods", "application/vnd.oasis.opendocument.spreadsheet"},
-    {"odp", "application/vnd.oasis.opendocument.presentation"},
-    {"latex", "application/x-latex"},
+    {.ext = "pdf", .mimetype = "application/pdf"},
+    {.ext = "doc", .mimetype = "application/msword"},
+    {.ext = "docx", .mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    {.ext = "pptx", .mimetype = "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+    {.ext = "xls", .mimetype = "application/vnd.ms-excel"},
+    {.ext = "xlsx", .mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    {.ext = "odt", .mimetype = "application/vnd.oasis.opendocument.text"},
+    {.ext = "ods", .mimetype = "application/vnd.oasis.opendocument.spreadsheet"},
+    {.ext = "odp", .mimetype = "application/vnd.oasis.opendocument.presentation"},
+    {.ext = "latex", .mimetype = "application/x-latex"},
 
     // Programming language source files
-    {"c", "text/x-c"},
-    {"cc", "text/x-c++"},
-    {"cpp", "text/x-c++"},
-    {"c++", "text/x-c++"},
-    {"rs", "text/x-rust"},
-    {"h", "text/x-c"},
-    {"hh", "text/x-c++"},
-    {"hpp", "text/x-c++"},
-    {"h++", "text/x-c++"},
-    {"cs", "text/x-csharp"},
-    {"java", "text/x-java-source"},
-    {"py", "text/x-python"},
-    {"sh", "application/x-shellscript"},
-    {"bat", "application/x-bat"},
-    {"pl", "application/x-perl"},
-    {"rb", "application/x-ruby"},
-    {"php", "application/x-php"},
-    {"go", "text/x-go"},
-    {"swift", "text/x-swift"},
-    {"lua", "text/x-lua"},
-    {"r", "text/x-r"},
-    {"sql", "application/sql"},
-    {"asm", "text/x-asm"},
-    {"s", "text/x-asm"},
-    {"clj", "text/x-clojure"},
-    {"lisp", "text/x-lisp"},
-    {"scm", "text/x-scheme"},
-    {"ss", "text/x-scheme"},
-    {"rkt", "text/x-scheme"},
-    {"jl", "text/x-julia"},
-    {"kt", "text/x-kotlin"},
-    {"dart", "text/x-dart"},
-    {"scala", "text/x-scala"},
-    {"groovy", "text/x-groovy"},
-    {"ts", "text/typescript"},
-    {"tsx", "text/typescript"},
-    {"jsx", "text/jsx"},
-    {"elm", "text/x-elm"},
-    {"erl", "text/x-erlang"},
-    {"hrl", "text/x-erlang"},
-    {"ex", "text/x-elixir"},
-    {"exs", "text/x-elixir"},
-    {"cl", "text/x-common-lisp"},
-    {"lsp", "text/x-common-lisp"},
-    {"f", "text/x-fortran"},
-    {"f77", "text/x-fortran"},
-    {"f90", "text/x-fortran"},
-    {"for", "text/x-fortran"},
-    {"nim", "text/x-nim"},
-    {"v", "text/x-verilog"},
-    {"sv", "text/x-systemverilog"},
-    {"vhd", "text/x-vhdl"},
-    {"dic", "text/x-c"},
-    {"h", "text/x-c"},
-    {"hh", "text/x-c"},
-    {"f", "text/x-fortran"},
-    {"f77", "text/x-fortran"},
-    {"f90", "text/x-fortran"},
-    {"for", "text/x-fortran"},
-    {"java", "text/x-java-source"},
-    {"p", "text/x-pascal"},
-    {"pas", "text/x-pascal"},
-    {"pp", "text/x-pascal"},
-    {"inc", "text/x-pascal"},
-    {"py", "text/x-python"},
+    {.ext = "c", .mimetype = "text/x-c"},
+    {.ext = "cc", .mimetype = "text/x-c++"},
+    {.ext = "cpp", .mimetype = "text/x-c++"},
+    {.ext = "c++", .mimetype = "text/x-c++"},
+    {.ext = "rs", .mimetype = "text/x-rust"},
+    {.ext = "h", .mimetype = "text/x-c"},
+    {.ext = "hh", .mimetype = "text/x-c++"},
+    {.ext = "hpp", .mimetype = "text/x-c++"},
+    {.ext = "h++", .mimetype = "text/x-c++"},
+    {.ext = "cs", .mimetype = "text/x-csharp"},
+    {.ext = "java", .mimetype = "text/x-java-source"},
+    {.ext = "py", .mimetype = "text/x-python"},
+    {.ext = "sh", .mimetype = "application/x-shellscript"},
+    {.ext = "bat", .mimetype = "application/x-bat"},
+    {.ext = "pl", .mimetype = "application/x-perl"},
+    {.ext = "rb", .mimetype = "application/x-ruby"},
+    {.ext = "php", .mimetype = "application/x-php"},
+    {.ext = "go", .mimetype = "text/x-go"},
+    {.ext = "swift", .mimetype = "text/x-swift"},
+    {.ext = "lua", .mimetype = "text/x-lua"},
+    {.ext = "r", .mimetype = "text/x-r"},
+    {.ext = "sql", .mimetype = "application/sql"},
+    {.ext = "asm", .mimetype = "text/x-asm"},
+    {.ext = "s", .mimetype = "text/x-asm"},
+    {.ext = "clj", .mimetype = "text/x-clojure"},
+    {.ext = "lisp", .mimetype = "text/x-lisp"},
+    {.ext = "scm", .mimetype = "text/x-scheme"},
+    {.ext = "ss", .mimetype = "text/x-scheme"},
+    {.ext = "rkt", .mimetype = "text/x-scheme"},
+    {.ext = "jl", .mimetype = "text/x-julia"},
+    {.ext = "kt", .mimetype = "text/x-kotlin"},
+    {.ext = "dart", .mimetype = "text/x-dart"},
+    {.ext = "scala", .mimetype = "text/x-scala"},
+    {.ext = "groovy", .mimetype = "text/x-groovy"},
+    {.ext = "ts", .mimetype = "text/typescript"},
+    {.ext = "tsx", .mimetype = "text/typescript"},
+    {.ext = "jsx", .mimetype = "text/jsx"},
+    {.ext = "elm", .mimetype = "text/x-elm"},
+    {.ext = "erl", .mimetype = "text/x-erlang"},
+    {.ext = "hrl", .mimetype = "text/x-erlang"},
+    {.ext = "ex", .mimetype = "text/x-elixir"},
+    {.ext = "exs", .mimetype = "text/x-elixir"},
+    {.ext = "cl", .mimetype = "text/x-common-lisp"},
+    {.ext = "lsp", .mimetype = "text/x-common-lisp"},
+    {.ext = "f", .mimetype = "text/x-fortran"},
+    {.ext = "f77", .mimetype = "text/x-fortran"},
+    {.ext = "f90", .mimetype = "text/x-fortran"},
+    {.ext = "for", .mimetype = "text/x-fortran"},
+    {.ext = "nim", .mimetype = "text/x-nim"},
+    {.ext = "v", .mimetype = "text/x-verilog"},
+    {.ext = "sv", .mimetype = "text/x-systemverilog"},
+    {.ext = "vhd", .mimetype = "text/x-vhdl"},
+    {.ext = "dic", .mimetype = "text/x-c"},
+    {.ext = "h", .mimetype = "text/x-c"},
+    {.ext = "hh", .mimetype = "text/x-c"},
+    {.ext = "f", .mimetype = "text/x-fortran"},
+    {.ext = "f77", .mimetype = "text/x-fortran"},
+    {.ext = "f90", .mimetype = "text/x-fortran"},
+    {.ext = "for", .mimetype = "text/x-fortran"},
+    {.ext = "java", .mimetype = "text/x-java-source"},
+    {.ext = "p", .mimetype = "text/x-pascal"},
+    {.ext = "pas", .mimetype = "text/x-pascal"},
+    {.ext = "pp", .mimetype = "text/x-pascal"},
+    {.ext = "inc", .mimetype = "text/x-pascal"},
+    {.ext = "py", .mimetype = "text/x-python"},
 
     // Other
-    {"etx", "text/x-setext"},
-    {"uu", "text/x-uuencode"},
-    {"vcs", "text/x-vcalendar"},
-    {"vcf", "text/x-vcard"},
+    {.ext = "etx", .mimetype = "text/x-setext"},
+    {.ext = "uu", .mimetype = "text/x-uuencode"},
+    {.ext = "vcs", .mimetype = "text/x-vcalendar"},
+    {.ext = "vcf", .mimetype = "text/x-vcard"},
 
     // Video
-    {"mp4", "video/mp4"},
-    {"avi", "video/avi"},
-    {"mkv", "video/x-matroska"},
-    {"mov", "video/quicktime"},
-    {"wmv", "video/x-ms-wmv"},
-    {"flv", "video/x-flv"},
-    {"mpeg", "video/mpeg"},
-    {"webm", "video/webm"},
+    {.ext = "mp4", .mimetype = "video/mp4"},
+    {.ext = "avi", .mimetype = "video/avi"},
+    {.ext = "mkv", .mimetype = "video/x-matroska"},
+    {.ext = "mov", .mimetype = "video/quicktime"},
+    {.ext = "wmv", .mimetype = "video/x-ms-wmv"},
+    {.ext = "flv", .mimetype = "video/x-flv"},
+    {.ext = "mpeg", .mimetype = "video/mpeg"},
+    {.ext = "webm", .mimetype = "video/webm"},
 
     // Audio
-    {"mp3", "audio/mpeg"},
-    {"wav", "audio/wav"},
-    {"flac", "audio/flac"},
-    {"aac", "audio/aac"},
-    {"ogg", "audio/ogg"},
-    {"wma", "audio/x-ms-wma"},
-    {"m4a", "audio/m4a"},
-    {"mid", "audio/midi"},
+    {.ext = "mp3", .mimetype = "audio/mpeg"},
+    {.ext = "wav", .mimetype = "audio/wav"},
+    {.ext = "flac", .mimetype = "audio/flac"},
+    {.ext = "aac", .mimetype = "audio/aac"},
+    {.ext = "ogg", .mimetype = "audio/ogg"},
+    {.ext = "wma", .mimetype = "audio/x-ms-wma"},
+    {.ext = "m4a", .mimetype = "audio/m4a"},
+    {.ext = "mid", .mimetype = "audio/midi"},
 
     // Archives
-    {"zip", "application/zip"},
-    {"rar", "application/x-rar-compressed"},
-    {"tar", "application/x-tar"},
-    {"7z", "application/x-7z-compressed"},
-    {"gz", "application/gzip"},
-    {"bz2", "application/x-bzip2"},
-    {"xz", "application/x-xz"},
+    {.ext = "zip", .mimetype = "application/zip"},
+    {.ext = "rar", .mimetype = "application/x-rar-compressed"},
+    {.ext = "tar", .mimetype = "application/x-tar"},
+    {.ext = "7z", .mimetype = "application/x-7z-compressed"},
+    {.ext = "gz", .mimetype = "application/gzip"},
+    {.ext = "bz2", .mimetype = "application/x-bzip2"},
+    {.ext = "xz", .mimetype = "application/x-xz"},
 
     // Spreadsheets
-    {"ods", "application/vnd.oasis.opendocument.spreadsheet"},
-    {"csv", "text/csv"},
-    {"tsv", "text/tab-separated-values"},
+    {.ext = "ods", .mimetype = "application/vnd.oasis.opendocument.spreadsheet"},
+    {.ext = "csv", .mimetype = "text/csv"},
+    {.ext = "tsv", .mimetype = "text/tab-separated-values"},
 
     // Applications
-    {"exe", "application/x-msdownload"},
-    {"apk", "application/vnd.android.package-archive"},
-    {"dmg", "application/x-apple-diskimage"},
+    {.ext = "exe", .mimetype = "application/x-msdownload"},
+    {.ext = "apk", .mimetype = "application/vnd.android.package-archive"},
+    {.ext = "dmg", .mimetype = "application/x-apple-diskimage"},
 
     // Fonts
-    {"ttf", "font/ttf"},
-    {"otf", "font/otf"},
-    {"woff", "font/woff"},
-    {"woff2", "font/woff2"},
+    {.ext = "ttf", .mimetype = "font/ttf"},
+    {.ext = "otf", .mimetype = "font/otf"},
+    {.ext = "woff", .mimetype = "font/woff"},
+    {.ext = "woff2", .mimetype = "font/woff2"},
 
     // 3D Models
-    {"obj", "model/obj"},
-    {"stl", "model/stl"},
-    {"gltf", "model/gltf+json"},
+    {.ext = "obj", .mimetype = "model/obj"},
+    {.ext = "stl", .mimetype = "model/stl"},
+    {.ext = "gltf", .mimetype = "model/gltf+json"},
 
     // GIS
-    {"kml", "application/vnd.google-earth.kml+xml"},
-    {"kmz", "application/vnd.google-earth.kmz"},
+    {.ext = "kml", .mimetype = "application/vnd.google-earth.kml+xml"},
+    {.ext = "kmz", .mimetype = "application/vnd.google-earth.kmz"},
 
     // Other
-    {"rss", "application/rss+xml"},
-    {"yaml", "application/x-yaml"},
-    {"ini", "text/plain"},
-    {"cfg", "text/plain"},
-    {"log", "text/plain"},
+    {.ext = "rss", .mimetype = "application/rss+xml"},
+    {.ext = "yaml", .mimetype = "application/x-yaml"},
+    {.ext = "ini", .mimetype = "text/plain"},
+    {.ext = "cfg", .mimetype = "text/plain"},
+    {.ext = "log", .mimetype = "text/plain"},
 
     // Database Formats
-    {"sqlite", "application/x-sqlite3"},
-    {"sql", "application/sql"},
+    {.ext = "sqlite", .mimetype = "application/x-sqlite3"},
+    {.ext = "sql", .mimetype = "application/sql"},
 
     // Ebooks
-    {"epub", "application/epub+zip"},
-    {"mobi", "application/x-mobipocket-ebook"},
-    {"azw", "application/vnd.amazon.ebook"},
-    {"prc", "application/x-mobipocket-ebook"},
+    {.ext = "epub", .mimetype = "application/epub+zip"},
+    {.ext = "mobi", .mimetype = "application/x-mobipocket-ebook"},
+    {.ext = "azw", .mimetype = "application/vnd.amazon.ebook"},
+    {.ext = "prc", .mimetype = "application/x-mobipocket-ebook"},
 
     // Microsoft Windows Applications
-    {"wmd", "application/x-ms-wmd"},
-    {"wmz", "application/x-ms-wmz"},
-    {"xbap", "application/x-ms-xbap"},
-    {"mdb", "application/x-msaccess"},
-    {"obd", "application/x-msbinder"},
-    {"crd", "application/x-mscardfile"},
-    {"clp", "application/x-msclip"},
-    {"bat", "application/x-msdownload"},
-    {"com", "application/x-msdownload"},
-    {"dll", "application/x-msdownload"},
-    {"exe", "application/x-msdownload"},
-    {"msi", "application/x-msdownload"},
-    {"m13", "application/x-msmediaview"},
-    {"m14", "application/x-msmediaview"},
-    {"mvb", "application/x-msmediaview"},
+    {.ext = "wmd", .mimetype = "application/x-ms-wmd"},
+    {.ext = "wmz", .mimetype = "application/x-ms-wmz"},
+    {.ext = "xbap", .mimetype = "application/x-ms-xbap"},
+    {.ext = "mdb", .mimetype = "application/x-msaccess"},
+    {.ext = "obd", .mimetype = "application/x-msbinder"},
+    {.ext = "crd", .mimetype = "application/x-mscardfile"},
+    {.ext = "clp", .mimetype = "application/x-msclip"},
+    {.ext = "bat", .mimetype = "application/x-msdownload"},
+    {.ext = "com", .mimetype = "application/x-msdownload"},
+    {.ext = "dll", .mimetype = "application/x-msdownload"},
+    {.ext = "exe", .mimetype = "application/x-msdownload"},
+    {.ext = "msi", .mimetype = "application/x-msdownload"},
+    {.ext = "m13", .mimetype = "application/x-msmediaview"},
+    {.ext = "m14", .mimetype = "application/x-msmediaview"},
+    {.ext = "mvb", .mimetype = "application/x-msmediaview"},
 
     // Virtual Reality (VR) and Augmented Reality (AR)
-    {"vrml", "model/vrml"},
-    {"glb", "model/gltf-binary"},
-    {"usdz", "model/vnd.usdz+zip"},
+    {.ext = "vrml", .mimetype = "model/vrml"},
+    {.ext = "glb", .mimetype = "model/gltf-binary"},
+    {.ext = "usdz", .mimetype = "model/vnd.usdz+zip"},
 
     // CAD Files
-    {"dwg", "application/dwg"},
-    {"dxf", "application/dxf"},
+    {.ext = "dwg", .mimetype = "application/dwg"},
+    {.ext = "dxf", .mimetype = "application/dxf"},
 
     // Geospatial Data
-    {"shp", "application/x-qgis"},
-    {"geojson", "application/geo+json"},
+    {.ext = "shp", .mimetype = "application/x-qgis"},
+    {.ext = "geojson", .mimetype = "application/geo+json"},
 
     // configuration
-    {"jsonld", "application/ld+json"},
+    {.ext = "jsonld", .mimetype = "application/ld+json"},
 
     // Mathematical Data
-    {"m", "text/x-matlab"},
-    {"r", "application/R"},
-    {"csv", "text/csv"},
+    {.ext = "m", .mimetype = "text/x-matlab"},
+    {.ext = "r", .mimetype = "application/R"},
+    {.ext = "csv", .mimetype = "text/csv"},
 
     // Chemical Data
-    {"mol", "chemical/x-mdl-molfile"},
+    {.ext = "mol", .mimetype = "chemical/x-mdl-molfile"},
 
     // Medical Imaging
-    {"dicom", "application/dicom"},
+    {.ext = "dicom", .mimetype = "application/dicom"},
 
     // Configuration Files
-    {"yml", "application/x-yaml"},
-    {"yaml", "application/x-yaml"},
-    {"jsonld", "application/ld+json"},
+    {.ext = "yml", .mimetype = "application/x-yaml"},
+    {.ext = "yaml", .mimetype = "application/x-yaml"},
+    {.ext = "jsonld", .mimetype = "application/ld+json"},
 
     // Scientific Data
-    {"netcdf", "application/x-netcdf"},
-    {"fits", "application/fits"},
+    {.ext = "netcdf", .mimetype = "application/x-netcdf"},
+    {.ext = "fits", .mimetype = "application/fits"},
 };
 
-#define MIME_MAPPING_SIZE (sizeof(mime_mapping) / sizeof(mime_mapping[0]))
+#define MIME_MAPPING_SIZE (sizeof(entries) / sizeof(entries[0]))
+
+// Global map for the mime types.
+static HMap m_dict = {};
+
+__attribute__((constructor())) void init_mime_types() {
+    hm_reserve(&m_dict, NEXT_POWER_OF_TWO(MIME_MAPPING_SIZE));
+
+    for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
+        Entry* entry      = &entries[i];
+        entry->node.hcode = hm_strhash(entry->ext);
+        hm_insert(&m_dict, &entry->node);
+    }
+}
+
+__attribute__((destructor())) void cleanup_mimetypes() {
+    hm_clear(&m_dict);
+}
+
+static bool mime_eq(HNode* lhs, HNode* rhs) {
+    Entry* a = container_of(lhs, Entry, node);
+    Entry* b = container_of(rhs, Entry, node);
+    return strcmp(a->ext, b->ext) == 0;
+}
 
 const char* get_mimetype(char* filename) {
     if (!filename) {
@@ -274,11 +304,18 @@ const char* get_mimetype(char* filename) {
     }
 
     char* extension = last + 1;  // skip "."
+    char ext[32];
+    strlcpy(ext, extension, sizeof(ext));  // always null-terminates
 
-    for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
-        if (strcasecmp(extension, mime_mapping[i].extension) == 0) {
-            return mime_mapping[i].contentType;
-        }
+    // Convert to lowercase
+    for (char* p = ext; *p; ++p) {
+        *p = tolower((unsigned char)*p);
+    }
+
+    Entry entry  = {.ext = ext, .node.hcode = hm_strhash(ext)};
+    HNode* found = hm_lookup(&m_dict, &entry.node, mime_eq);
+    if (found) {
+        return container_of(found, Entry, node)->mimetype;
     }
     return DEFAULT_CONTENT_TYPE;
 }

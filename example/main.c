@@ -1,3 +1,4 @@
+#include <errno.h>
 #include "../include/epollix.h"
 
 #define NUM_THREADS  4
@@ -77,6 +78,36 @@ static void defineRoutes() {
     use_group_middleware(group, 1, global_basic_auth);
 }
 
+uint16_t parse_port(const char* _port, bool* success) {
+    errno = 0;  // Reset errno before conversion
+    char* endptr;
+    long port = strtol(_port, &endptr, 10);
+
+    // Check if the entire string was consumed and is non-empty
+    if (endptr == _port || *endptr != '\0') {
+        LOG_ERROR("Invalid port: '%s' is not a number", _port);
+        *success = false;
+        return 0;
+    }
+
+    // Check for out-of-range or negative values
+    if (port < 0 || port > UINT16_MAX) {
+        LOG_ERROR("Port out of range: %ld (must be 0-65535)", port);
+        *success = false;
+        return 0;
+    }
+
+    // Check for conversion errors (e.g., overflow)
+    if (errno == ERANGE) {
+        LOG_ERROR("Port conversion error: %s", strerror(errno));
+        *success = false;
+        return 0;
+    }
+
+    *success = true;
+    return (uint16_t)port;
+}
+
 int main(int argc, char** argv) {
     uint16_t port = DEFAULT_PORT;
     if (argc == 2) {
@@ -94,10 +125,5 @@ int main(int argc, char** argv) {
 
     defineRoutes();
 
-    EpollServer* server = epoll_server_create(4, port);
-    LOG_ASSERT(server, "Unable to create server");
-
-    epoll_server_enable_keepalive(server, true);
-    epoll_server_enable_tcp_nodelay(server, false);
-    return epoll_server_listen(server);
+    return epoll_server_run(port);
 }

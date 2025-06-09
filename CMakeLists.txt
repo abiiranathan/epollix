@@ -68,6 +68,7 @@ endif()
 # Add External Libraries (deps)
 # -----------------------------------------------------------------------------
 add_subdirectory(deps/libbcrypt)
+add_subdirectory(deps/hmap)
 
 # -----------------------------------------------------------------------------
 # Define Source and Header Files
@@ -158,7 +159,7 @@ target_link_libraries(epollix PUBLIC
 
 
 if(CIPHERKIT_FOUND)
-  target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit)
+  target_link_libraries(epollix PUBLIC ${CIPHERKIT_LIBRARIES} cipherkit hmap)
 
   # variable for the .pc file
   set(CIPHERKIT_LIBRARIES_PC "-lcipherkit -lssl -lcrypto -lsodium -lcjson")

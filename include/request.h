@@ -9,6 +9,9 @@ extern "C" {
 
 #include "route.h"
 
+#define KEEPALIVE_REQUESTED        (1 << 1)
+#define CONNECTION_CLOSE_REQUESTED (1 << 2)
+
 typedef struct request {
     int client_fd;              // Peer connection file descriptor
     int epoll_fd;               // epoll file descriptor
@@ -20,6 +23,9 @@ typedef struct request {
     char http_version[12];      // Http version (e.g., "HTTP/1.1")
     cstr* path;                 // Request path and query string (dynamically allocated)
     uint8_t* body;              // Body of the request (dynamically allocated)
+
+    // Flags
+    int flags;  // Keep-alive / connection close flags
 } Request;
 
 // Initialize a new request object and allocate headers array.

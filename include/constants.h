@@ -78,4 +78,21 @@
 #define ERR_METHOD_NOT_ALLOWED    "Method not allowed\n"
 #define CONTENT_TYPE_HEADER       "Content-Type"
 
+#ifndef TCP_NODELAY_ON
+#define TCP_NODELAY_ON 1
+#endif
+
+#ifndef TCP_KEEPALIVE
+#define TCP_KEEPALIVE 1
+#endif
+
+#ifndef TCP_TIMEOUT_SEC
+#define TCP_TIMEOUT_SEC 10
+#endif
+
+// Number of main workers
+#ifndef NUM_WORKERS
+#define NUM_WORKERS 8
+#endif
+
 #endif /* EA56F184_3413_409F_A9D5_E26BBDFC9535 */

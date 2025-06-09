@@ -1,0 +1,3 @@
+[submodule "deps/hmap"]
+	path = deps/hmap
+	url = https://github.com/abiiranathan/hmap.git

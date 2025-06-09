@@ -10,51 +10,36 @@
 
 #include "../include/server.h"
 #include "../include/response.h"
-#include "../include/taskpool.h"
 
-// An epoll(2) powered TCP server.
-typedef struct EpollServer {
-    size_t num_workers;       // Number of worker threads
-    uint16_t port;            // Port the server is listening on
-    int server_fd;            // Server file descriptor
-    int epoll_fd;             // Epoll file descriptor
-    int timeout_sec;          // client timeout in seconds
-    bool enable_keepalive;    // Enable client keepalive
-    bool enable_tcp_nodelay;  // Turn off Nagle's algorithm
-    ThreadPool* pool;         // Threadpool
-} EpollServer;
+// Struct holding data passed to each thread worker.
+typedef struct {
+    int id;         // Worker ID
+    int epoll_fd;   // Epoll instance
+    int server_fd;  // Server file descriptor
+} WorkerData;
 
-// global server object
-EpollServer* epollServer = NULL;
-
-// Delete client socket from epoll tracking and close the client socket.
-static inline void close_connection(int client_fd, int epoll_fd) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-    close(client_fd);
+void handle_sigint(int sig) {
+    if (sig == SIGINT || sig == SIGTERM) {
+        LOG_INFO("Received signal %s\n", strsignal(sig));
+        exit(EXIT_FAILURE);
+    }
 }
 
-// Connection handler thread worker.
-static void handle_client(void* arg) {
-    Task* task = (Task*)arg;
-    Request req;
-    Response res;
+static void install_signal_handler(void) {
+    struct sigaction sa;
+    sa.sa_handler = handle_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
 
-    request_init(&req, task->client_fd, task->epoll_fd);
-    response_init(&res, task->client_fd);
-
-    if (!parse_http_request(&req)) {
-        goto cleanup;
+    // See man 2 sigaction for more information.
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        LOG_FATAL("unable to call sigaction\n");
     };
 
-    if (req.route != NULL) {
-        context_t ctx = {.request = &req, .response = &res, .abort = false};
-        process_response(&ctx);
-        close_connection(task->client_fd, task->epoll_fd);
-        free_locals(&ctx);
-    }
-cleanup:
-    request_destroy(&req);
-    taskpool_put(task);
+    // Ignore SIGPIPE signal when writing to a closed socket or pipe.
+    // Potential causes:
+    // https://stackoverflow.com/questions/108183/how-to-prevent-sigpipes-or-handle-them-properly
+    signal(SIGPIPE, SIG_IGN);
 }
 
 ssize_t sendall(int fd, const void* buf, size_t n) {
@@ -127,6 +112,53 @@ void http_error(int client_fd, http_status status, const char* message) {
     sendall(client_fd, reply, strlen(reply));
 }
 
+// Delete client socket from epoll tracking and close the client socket.
+static inline void close_connection(int client_fd, int epoll_fd) {
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+}
+
+// Connection handler thread worker.
+static void handle_client(int client_fd, int epoll_fd) {
+    Request req;
+    Response res;
+
+    request_init(&req, client_fd, epoll_fd);
+    response_init(&res, client_fd);
+
+    if (!parse_http_request(&req)) {
+        goto cleanup;
+    };
+
+    if (req.route != NULL) {
+        context_t ctx = {.request = &req, .response = &res, .abort = false};
+
+        // If keep-alive is requested
+        if (req.flags & KEEPALIVE_REQUESTED) {
+            write_header(&ctx, "Connection", "Keep-Alive");
+            write_header(&ctx, "Keep-Alive", "timeout=300, max=200");
+        } else {
+            write_header(&ctx, "Connection", "Close");
+        }
+
+        process_response(&ctx);
+        free_locals(&ctx);
+
+        // Only-close connection if keep-alive is not requested.
+        if (req.flags & KEEPALIVE_REQUESTED) {
+            // re-arm epoll instance because we are using EPOLLONESHOT
+            struct epoll_event ev;
+            ev.events  = EPOLLIN | EPOLLET | EPOLLONESHOT;
+            ev.data.fd = client_fd;
+            epoll_ctl(epoll_fd, client_fd, EPOLL_CTL_MOD, &ev);
+        } else {
+            close_connection(client_fd, epoll_fd);
+        }
+    }
+cleanup:
+    request_destroy(&req);
+}
+
 static int setup_server_socket(uint16_t port) {
     struct addrinfo hints;
     struct addrinfo* result;
@@ -176,246 +208,124 @@ static int setup_server_socket(uint16_t port) {
     return sfd;
 }
 
-uint16_t parse_port(const char* _port, bool* success) {
-    errno = 0;  // Reset errno before conversion
-    char* endptr;
-    long port = strtol(_port, &endptr, 10);
-
-    // Check if the entire string was consumed and is non-empty
-    if (endptr == _port || *endptr != '\0') {
-        LOG_ERROR("Invalid port: '%s' is not a number", _port);
-        *success = false;
-        return 0;
-    }
-
-    // Check for out-of-range or negative values
-    if (port < 0 || port > UINT16_MAX) {
-        LOG_ERROR("Port out of range: %ld (must be 0-65535)", port);
-        *success = false;
-        return 0;
-    }
-
-    // Check for conversion errors (e.g., overflow)
-    if (errno == ERANGE) {
-        LOG_ERROR("Port conversion error: %s", strerror(errno));
-        *success = false;
-        return 0;
-    }
-
-    *success = true;
-    return (uint16_t)port;
-}
-
 // Create a new EpollServer.
-EpollServer* epoll_server_create(size_t num_workers, const uint16_t port) {
-    EpollServer* server = (EpollServer*)malloc(sizeof(EpollServer));
-    if (server == NULL) {
-        return NULL;
+static int epoll_server_new(const uint16_t port) {
+    int server_fd = setup_server_socket(port);
+    if (server_fd == -1) {
+        return -1;
     }
 
-    // Get the number of threads to use for the server.
-    if (num_workers <= 0) {
-        num_workers = get_ncpus();
-        LOG_ASSERT(num_workers > 0, "Failed to get number of CPUs\n");
-    }
-
-    server->num_workers = num_workers;
-    server->port        = port;
-    server->timeout_sec = 0;
-    server->pool        = threadpool_create((int)num_workers);
-    if (server->pool == NULL) {
-        free(server);
-        return NULL;
-    }
-
-    // Create an epoll instance
-    server->server_fd = setup_server_socket(port);
-    if (server->server_fd == -1) {
-        LOG_FATAL("Failed to create server socket\n");
-    }
-
-    enable_keepalive(server->server_fd);
-
-    int ret = set_nonblocking(server->server_fd);
+    enable_keepalive(server_fd);
+    int ret = set_nonblocking(server_fd);
     if (ret == -1) {
-        LOG_FATAL("Failed to set non-blocking on server socket\n");
+        return -1;
     }
 
-    ret = listen(server->server_fd, MAXEVENTS);
+    ret = listen(server_fd, MAXEVENTS);
     if (ret == -1) {
         perror("listen");
-        LOG_FATAL("Failed to listen on server socket\n");
+        return -1;
+    }
+    return server_fd;
+}
+
+static void configure_client(int client_fd) {
+    // Disable Nagle's algorithm for the client socket
+    if (TCP_NODELAY_ON) {
+        int flag = 1;
+        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
     }
 
-    server->epoll_fd = epoll_create1(0);
-    if (server->epoll_fd == -1) {
-        perror("epoll_create");
-        LOG_FATAL("Failed to create epoll instance\n");
+    // Enable keepalive for the client socket
+    if (TCP_KEEPALIVE) {
+        enable_keepalive(client_fd);
     }
-    return server;
-}
 
-// Enable client keep alive.
-void epoll_server_enable_keepalive(EpollServer* server, bool flag) {
-    server->enable_keepalive = flag;
-}
-
-// Enable client keep alive.
-void epoll_server_enable_tcp_nodelay(EpollServer* server, bool flag) {
-    server->enable_tcp_nodelay = flag;
-}
-
-void handle_sigint(int sig) {
-    if (sig == SIGINT || sig == SIGTERM) {
-        LOG_INFO("Received signal %s\n", strsignal(sig));
-        exit(EXIT_FAILURE);
+    if (TCP_TIMEOUT_SEC > 0) {
+        struct timeval timeout;
+        timeout.tv_sec  = TCP_TIMEOUT_SEC;
+        timeout.tv_usec = 0;
+        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
     }
 }
 
-static void install_signal_handler(void) {
-    struct sigaction sa;
-    sa.sa_handler = handle_sigint;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+static void* worker_thread(void* arg) {
+    WorkerData* data = (WorkerData*)arg;
+    struct epoll_event events[MAXEVENTS];
 
-    // See man 2 sigaction for more information.
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        LOG_FATAL("unable to call sigaction\n");
-    };
+    printf("Starting worker %d\n", data->id);
 
-    // Ignore SIGPIPE signal when writing to a closed socket or pipe.
-    // Potential causes:
-    // https://stackoverflow.com/questions/108183/how-to-prevent-sigpipes-or-handle-them-properly
-    signal(SIGPIPE, SIG_IGN);
-}
+    while (1) {
+        int nfds = epoll_wait(data->epoll_fd, events, MAXEVENTS, -1);
 
-// Listen and serve on the given port.
-int epoll_server_listen(EpollServer* server) {
-    epollServer = server;
-
-    // Add the server socket to the epoll instance
-    struct epoll_event event = {0}, events[MAXEVENTS] = {0};
-    event.data.fd = server->server_fd;
-    event.events  = EPOLLIN | EPOLLET;
-    int ret       = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->server_fd, &event);
-    if (ret == -1) {
-        perror("epoll_ctl");
-        LOG_FATAL("Failed to add server socket to epoll\n");
-    }
-
-    printf("[PID: %d]\n", get_gid());
-    printf("[Server listening on port http://0.0.0.0:%d with %zu threads]\n", server->port, server->num_workers);
-
-    // log max allowed file descriptors for the process
-    long maxfd = sysconf(_SC_OPEN_MAX);
-    if (maxfd == -1) {
-        perror("sysconf");
-    } else {
-        printf("[Max open file descriptors allowed: %ld]\n", maxfd);
-    }
-
-    // Install signal handler for SIGINT and SIGTERM
-    install_signal_handler();
-    taskpool_init();
-
-    /* The event loop */
-    while (true) {
-        int nfds = epoll_wait(server->epoll_fd, events, MAXEVENTS, -1);
         for (int i = 0; i < nfds; i++) {
-            if (server->server_fd == events[i].data.fd) {
-                while (1) {
-                    struct sockaddr client_addr;
-                    socklen_t client_len = sizeof client_addr;
-                    int client_fd        = accept(server->server_fd, &client_addr, &client_len);
-                    if (client_fd == -1) {
-                        if (errno == EINTR) {
-                            return -1;  // Interrupted by signal
-                        }
-
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            break;  // No more incoming connections
-                        }
-
-                        perror("accept");
-                        break;
-                    }
-
-                    ret = set_nonblocking(client_fd);
-                    if (ret == -1) {
-                        LOG_ERROR("Failed to set non-blocking on client socket\n");
-                        break;
-                    }
-
-                    // Add client socket to epoll
-                    event.data.fd = client_fd;
-                    event.events  = EPOLLIN | EPOLLET | EPOLLHUP | EPOLLERR | EPOLLONESHOT;
-                    ret           = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, client_fd, &event);
-                    if (ret == -1) {
-                        perror("epoll_ctl");
-                        LOG_ERROR("epoll_ctl failed");
-                        continue;
-                    }
-
-                    // Disable Nagle's algorithm for the client socket
-                    if (server->enable_tcp_nodelay) {
-                        int flag = 1;
-                        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
-                    }
-
-                    // Enable keepalive for the client socket
-                    if (server->enable_keepalive) {
-                        enable_keepalive(client_fd);
-                    }
-
-                    if (server->timeout_sec > 0) {
-                        struct timeval timeout;
-                        timeout.tv_sec  = server->timeout_sec;
-                        timeout.tv_usec = 0;
-                        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof timeout);
-                    }
+            if (events[i].data.fd == data->server_fd) {
+                // Accept new connections
+                struct sockaddr_in client_addr;
+                socklen_t client_len = sizeof(client_addr);
+                int client_fd        = accept(data->server_fd, (struct sockaddr*)&client_addr, &client_len);
+                if (client_fd == -1) {
+                    continue;
                 }
+
+                if (set_nonblocking(client_fd) == 0) {
+                    struct epoll_event ev;
+                    ev.events  = EPOLLIN | EPOLLET | EPOLLONESHOT;
+                    ev.data.fd = client_fd;
+                    epoll_ctl(data->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
+                    configure_client(client_fd);
+                };
             } else {
                 // client socket is ready for reading
                 if (events[i].events & EPOLLIN) {
-                    Task* task = taskpool_get();
-                    if (!task) {
-                        http_error(events[i].data.fd, StatusServiceUnavailable, "Service Unavailable");
-                        close_connection(events[i].data.fd, server->epoll_fd);
-                        continue;
-                    }
-
-                    task->client_fd = events[i].data.fd;
-                    task->epoll_fd  = server->epoll_fd;
-                    threadpool_submit(server->pool, handle_client, task);
-                } else if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP)) {
-                    close_connection(events[i].data.fd, server->epoll_fd);
+                    handle_client(events[i].data.fd, data->epoll_fd);
+                } else {
+                    close_connection(events[i].data.fd, data->epoll_fd);
                 }
             }
         }
     }
-
-    return 0;
+    return NULL;
 }
 
-// Destructor extension for gcc and clang.
-// This is automatically called atexit.
-__attribute__((destructor)) void server_destructor(void) {
-    if (!epollServer) {
-        return;
+// Start the event loop.
+int epoll_server_run(const uint16_t port) {
+    int server_fd = epoll_server_new(port);
+    if (server_fd == -1) {
+        return -1;
     }
 
-    if (epollServer->pool) {
-        threadpool_destroy(epollServer->pool);
+    // Install signal handler for SIGINT and SIGTERM
+    install_signal_handler();
+
+    /* The event loop */
+    pthread_t workers[NUM_WORKERS];
+    WorkerData worker_data[NUM_WORKERS];
+
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        worker_data[i].id = i;
+
+        // Each worker gets its own epoll instance
+        worker_data[i].epoll_fd = epoll_create1(0);
+        LOG_ASSERT(worker_data[i].epoll_fd != -1, "error creating epoll instance");
+
+        worker_data[i].server_fd = server_fd;
+
+        // Add server socket to each epoll instance
+        struct epoll_event ev;
+        ev.events  = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
+        ev.data.fd = server_fd;
+        epoll_ctl(worker_data[i].epoll_fd, EPOLL_CTL_ADD, server_fd, &ev);
+
+        pthread_create(&workers[i], NULL, worker_thread, &worker_data[i]);
     }
 
-    if (epollServer->epoll_fd != -1) {
-        close(epollServer->epoll_fd);
+    // Wait for all worker threads (in practice, you might want a shutdown mechanism)
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        pthread_join(workers[i], NULL);
     }
 
-    if (epollServer->server_fd != -1) {
-        close(epollServer->server_fd);
-    }
-
-    taskpool_destroy();
-    free(epollServer);
+    // Destroy the thread pool associated with this thread.
+    close(server_fd);
+    return 0;
 }
