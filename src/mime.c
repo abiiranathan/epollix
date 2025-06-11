@@ -267,7 +267,7 @@ static MimeEntry entries[] = {
 static HMap m_dict = {};
 
 __attribute__((constructor())) void init_mime_types() {
-    hm_reserve(&m_dict, NEXT_POWER_OF_TWO(MIME_MAPPING_SIZE));
+    hm_init(&m_dict, MIME_MAPPING_SIZE);
 
     for (size_t i = 0; i < MIME_MAPPING_SIZE; i++) {
         MimeEntry* entry  = &entries[i];

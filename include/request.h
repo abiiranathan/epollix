@@ -29,13 +29,13 @@ typedef struct request {
 } Request;
 
 // Initialize a new request object and allocate headers array.
-void request_init(Request* req, int client_fd, int epoll_fd);
+void request_init(Request* req, int client_fd, int epoll_fd, Headers* headers, QueryParams* query_params);
 
 static inline void request_destroy(Request* req) {
     if (req->path) cstr_free(req->path);
-    if (req->body) free(req->body);                          // free allocated req body
-    if (req->query_params) headers_free(req->query_params);  // free query params map
-    if (req->headers) headers_free(req->headers);            // free request headers
+    if (req->body) free(req->body);   // free allocated req body
+    headers_free(req->headers);       // free request headers map resources
+    headers_free(req->query_params);  // free query params map resources
 }
 
 // Parse request headers from text.
@@ -43,7 +43,7 @@ bool parse_request_headers(const char* header_text, size_t length, Headers* head
 
 // Parse URL query parameters from a query string.
 // Populates the map.
-bool parse_url_query_params(char* query, QueryParams* query_params);
+void parse_url_query_params(char* query, QueryParams* query_params);
 
 // Get the value of a query parameter by name.
 const char* get_query_param(Request* req, const char* name);

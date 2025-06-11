@@ -17,11 +17,16 @@ typedef enum { STATE_HEADER_NAME, STATE_HEADER_VALUE, STATE_HEADER_END } HeaderS
 extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
-void request_init(Request* req, int client_fd, int epoll_fd) {
-    memset(req, 0, sizeof(Request));  // Zero-out request struct
-    req->client_fd = client_fd;       // Attch client file descriptor
-    req->epoll_fd  = epoll_fd;        // Attach epoll fd.
-    req->method    = M_INVALID;       // Initialize http method with Invalid.
+void request_init(Request* req, int client_fd, int epoll_fd, Headers* headers, QueryParams* query_params) {
+    req->client_fd    = client_fd;  // Attch client file descriptor
+    req->epoll_fd     = epoll_fd;   // Attach epoll fd.
+    req->method       = M_INVALID;  // Initialize http method with Invalid.
+    req->query_params = query_params;
+    req->headers      = headers;
+    req->body         = NULL;
+    req->flags        = 0;
+    req->path         = NULL;
+    req->route        = NULL;
 }
 
 // Get the content type of the request.
@@ -41,7 +46,9 @@ const char* get_query_param(Request* req, const char* name) {
     if (!req->query_params) {
         return NULL;
     }
-    return headers_value(req->query_params, (void*)name);
+
+    // match query parameters by exact key name.
+    return headers_value_exact(req->query_params, (void*)name);
 }
 
 bool parse_request_headers(const char* header_text, size_t length, Headers* headers) {
@@ -111,14 +118,14 @@ static bool parse_request_line(char* headers, char** method, char** uri, char** 
 
 // Parse the Content-Length header
 static size_t parse_content_length(const char* header_start, const char* end_of_headers) {
-    const char* content_length_header = strcasestr(header_start, "content-length:");
+    const char* content_length_header = strstr(header_start, "Content-Length:");
     if (!content_length_header || content_length_header >= end_of_headers) {
         return 0;
     }
     return strtoul(content_length_header + 15, NULL, 10);
 }
 
-bool parse_url_query_params(char* query, QueryParams* query_params) {
+void parse_url_query_params(char* query, QueryParams* query_params) {
     char* save_ptr1 = NULL;
     char* save_ptr2 = NULL;
     char* pair      = strtok_r(query, "&", &save_ptr1);
@@ -129,14 +136,10 @@ bool parse_url_query_params(char* query, QueryParams* query_params) {
         char* value = strtok_r(NULL, "", &save_ptr2);  // Get rest of string after first '='
 
         if (key != NULL) {
-            if (!headers_append(query_params, key, value ? value : "")) {
-                return false;
-            }
+            headers_append(query_params, key, value ? value : "");
         }
         pair = strtok_r(NULL, "&", &save_ptr1);
     }
-
-    return true;
 }
 
 // Allocate memory for the body and read it from the socket
@@ -222,27 +225,6 @@ static inline char* find_end_of_headers(const char* headers, size_t bytes_read) 
     return NULL;
 }
 
-#include <immintrin.h>
-
-static inline char* find_end_of_headers_simd(const char* headers, size_t bytes_read) {
-    assert(bytes_read >= 4);
-
-    __m128i pattern = _mm_set1_epi32(0x0A0D0A0D);
-    const char* end = headers + bytes_read - 16;
-
-    for (; headers <= end; headers += 16) {
-        __m128i chunk = _mm_loadu_si128((const __m128i*)headers);
-        __m128i cmp   = _mm_cmpeq_epi32(chunk, pattern);
-        int mask      = _mm_movemask_epi8(cmp);
-        if (mask) {
-            return (char*)(headers + __builtin_ctz(mask));
-        }
-    }
-
-    // Handle remaining bytes
-    return find_end_of_headers(headers, bytes_read - (headers - (end + 16)));
-}
-
 bool parse_http_request(Request* req) {
     int client_fd          = req->client_fd;
     uint8_t* body          = NULL;       // Request body (dynamically allocated)
@@ -259,11 +241,11 @@ bool parse_http_request(Request* req) {
     headers[bytes_read] = '\0';
 
     // Check for keep-alive.
-    if (strcasestr(headers, "Connection: Keep-Alive")) {
+    if (strstr(headers, "Connection: keep-alive")) {
         req->flags |= KEEPALIVE_REQUESTED;
     }
 
-    if (strcasestr(headers, "Connection: Close")) {
+    if (strstr(headers, "Connection: close")) {
         req->flags |= CONNECTION_CLOSE_REQUESTED;
     }
 
@@ -279,9 +261,9 @@ bool parse_http_request(Request* req) {
 
     // memmem is rather slow.
     // end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
-    end_of_headers = find_end_of_headers_simd(headers, bytes_read);
+    end_of_headers = find_end_of_headers(headers, bytes_read);
     if (!end_of_headers) {
-        BAD_REQ(client_fd, "Invalid Http Payload");
+        BAD_REQ(client_fd, "Invalid Http Payload: failed to read header delimiter");
     }
 
     header_capacity = end_of_headers - headers + 4;
@@ -305,15 +287,8 @@ bool parse_http_request(Request* req) {
 
         // Only parse query params if there's actually content after the ?
         if (*query_string != '\0' && strstr(query_string, "=")) {
-            req->query_params = kv_new();
-            if (!req->query_params) {
-                return false;
-            }
-
             // Parse ONLY the query string portion
-            if (!parse_url_query_params(query_string, req->query_params)) {
-                return false;
-            }
+            parse_url_query_params(query_string, req->query_params);
         }
     }
 
@@ -321,11 +296,6 @@ bool parse_http_request(Request* req) {
     req->path = cstr_new(decoded_uri);
     if (!req->path) {
         return false;
-    }
-
-    req->headers = kv_new();
-    if (!req->headers) {
-        SERVER_ERR(client_fd, "Failed to parse request headers");
     }
 
     if (!parse_request_headers(header_start, header_capacity - 4, req->headers)) {

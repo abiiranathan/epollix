@@ -120,10 +120,16 @@ static inline void close_connection(int client_fd, int epoll_fd) {
 
 // Connection handler thread worker.
 static void handle_client(int client_fd, int epoll_fd) {
-    Request req;
-    Response res;
+    Request req             = {};
+    Response res            = {};
+    header_arena h1         = {};
+    header_arena h2         = {};
+    Headers headers         = {};
+    QueryParams queryParams = {};
 
-    request_init(&req, client_fd, epoll_fd);
+    headers_init(&headers, &h1);
+    headers_init(&queryParams, &h2);
+    request_init(&req, client_fd, epoll_fd, &headers, &queryParams);
     response_init(&res, client_fd);
 
     if (!parse_http_request(&req)) {
@@ -132,28 +138,9 @@ static void handle_client(int client_fd, int epoll_fd) {
 
     if (req.route != NULL) {
         context_t ctx = {.request = &req, .response = &res, .abort = false};
-
-        // If keep-alive is requested
-        if (req.flags & KEEPALIVE_REQUESTED) {
-            write_header(&ctx, "Connection", "Keep-Alive");
-            write_header(&ctx, "Keep-Alive", "timeout=300, max=200");
-        } else {
-            write_header(&ctx, "Connection", "Close");
-        }
-
         process_response(&ctx);
         free_locals(&ctx);
-
-        // Only-close connection if keep-alive is not requested.
-        if (req.flags & KEEPALIVE_REQUESTED) {
-            // re-arm epoll instance because we are using EPOLLONESHOT
-            struct epoll_event ev;
-            ev.events  = EPOLLIN | EPOLLET | EPOLLONESHOT;
-            ev.data.fd = client_fd;
-            epoll_ctl(epoll_fd, client_fd, EPOLL_CTL_MOD, &ev);
-        } else {
-            close_connection(client_fd, epoll_fd);
-        }
+        close_connection(client_fd, epoll_fd);
     }
 cleanup:
     request_destroy(&req);

@@ -1,6 +1,3 @@
-#include <solidc/map.h>
-#include <solidc/defer.h>
-
 #include "../include/net.h"
 #include "../include/url.h"
 
@@ -9,23 +6,25 @@ void test_parse_request_headers(void) {
     const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     size_t length           = strlen(header_text);
 
-    Headers* headers = kv_new();
-    parse_request_headers(header_text, length, headers);
-    LOG_ASSERT(headers, "Failed to parse request headers");
+    Headers headers = {};
+    header_arena h1 = {};
 
-    const char* host_header = headers_value(headers, "Host");
+    headers_init(&headers, &h1);
+    parse_request_headers(header_text, length, &headers);
+
+    const char* host_header = headers_value(&headers, "Host");
     LOG_ASSERT(host_header != NULL, "Failed to get Host header");
     LOG_ASSERT(strcmp(host_header, "localhost:8080") == 0, "Expected localhost:8080");
 
-    const char* user_agent_header = headers_value(headers, "User-Agent");
+    const char* user_agent_header = headers_value(&headers, "User-Agent");
     LOG_ASSERT(user_agent_header != NULL, "Failed to get User-Agent header");
     LOG_ASSERT(strcmp(user_agent_header, "curl/7.68.0") == 0, "Expected curl/7.68.0");
 
-    const char* accept_header = headers_value(headers, "Accept");
+    const char* accept_header = headers_value(&headers, "Accept");
     LOG_ASSERT(accept_header != NULL, "Failed to get Accept header");
     LOG_ASSERT(strcmp(accept_header, "*/*") == 0, "Expected */*");
 
-    headers_free(headers);
+    headers_free(&headers);
 }
 
 // decode_uri
@@ -58,9 +57,6 @@ void test_encode_uri_scalar(void) {
 
 void test_encode_uri_simd(void) {
 #ifdef __AVX2__
-    LOG_INFO("AVX2 not supported, skipping SIMD test");
-    return;
-
     char* decoded = "This is a test:/?#[]@!$&'()*+,;=%";
     char encoded[100];
     url_percent_encode_simd(decoded, encoded, sizeof(encoded));
@@ -71,27 +67,27 @@ void test_encode_uri_simd(void) {
 
 // bool parse_url_query_params(char* query, Map* query_params)
 void test_parse_url_query_params(void) {
-    QueryParams* query_params = kv_new();
-    LOG_ASSERT(query_params != NULL, "Failed to create map for query_params");
+    QueryParams query_params = {};
+    header_arena h1          = {};
+    headers_init(&query_params, &h1);
 
     char* query = strdup("name=John&age=30&location=USA");
     LOG_ASSERT(query != NULL, "Failed to allocate memory for query");
-    bool result = parse_url_query_params(query, query_params);
-    LOG_ASSERT(result, "Failed to parse query params");
+    parse_url_query_params(query, &query_params);
 
-    const char* name = headers_value(query_params, "name");
+    const char* name = headers_value(&query_params, "name");
     LOG_ASSERT(name != NULL, "Failed to get name");
     LOG_ASSERT(strcmp(name, "John") == 0, "Expected John");
 
-    const char* age = headers_value(query_params, "age");
+    const char* age = headers_value(&query_params, "age");
     LOG_ASSERT(age != NULL, "Failed to get age");
     LOG_ASSERT(strcmp(age, "30") == 0, "Expected 30");
 
-    const char* location = headers_value(query_params, "location");
+    const char* location = headers_value(&query_params, "location");
     LOG_ASSERT(location != NULL, "Failed to get location");
     LOG_ASSERT(strcmp(location, "USA") == 0, "Expected USA");
 
-    headers_free(query_params);
+    headers_free(&query_params);
     free(query);
 
     puts("Query Params tests passed\n");

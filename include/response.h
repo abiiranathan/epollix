@@ -4,12 +4,12 @@
 #define _GNU_SOURCE     1
 #define _POSIX_C_SOURCE 200809L
 
+#include <stdio.h>
+#include "net.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdio.h>
-#include "net.h"
 
 #define MAX_HEADER_SIZE 2048
 

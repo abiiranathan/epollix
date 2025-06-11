@@ -1,33 +1,71 @@
 #include "../include/header.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "../include/constants.h"
 
-const char* headers_value(const Headers* headers, const char* name) {
+#define ENTRY_ARRAY_SIZE (NUM_HEADERS * sizeof(headert_t))
+
+void headers_init(Headers* headers, header_arena* arena) {
+    headers->count   = 0;
+    headers->arena   = arena;
+    headers->entries = h_arena_alloc(arena, ENTRY_ARRAY_SIZE);
+    assert(headers->entries);
+    memset(headers->entries, 0, ENTRY_ARRAY_SIZE);
+}
+
+const char* headers_value(Headers* headers, const char* name) {
     for (size_t i = 0; i < headers->count; ++i) {
-        header_t h         = headers->items[i];
-        const char* h_name = cstr_data_const(h.name);
-        if (!h_name) {
-            continue;
-        }
-        if (strcasecmp(name, h_name) == 0) {
-            return cstr_data_const(h.value);
+        if (strcasecmp(name, headers->entries[i].key) == 0) {
+            return headers->entries[i].value;
         }
     }
     return NULL;
 }
 
-bool headers_append(Headers* headers, const char* name, const char* value) {
-    header_t hdr = {.name = cstr_new(name), .value = cstr_new(value)};
-    ASSERT(hdr.name);
-    ASSERT(hdr.value);
-    return kv_append(headers, hdr);
+const char* headers_value_exact(Headers* headers, const char* name) {
+    for (size_t i = 0; i < headers->count; ++i) {
+        if (strcmp(name, headers->entries[i].key) == 0) {
+            return headers->entries[i].value;
+        }
+    }
+    return NULL;
+}
+
+void headers_append(Headers* headers, const char* name, const char* value) {
+    if (headers->count < NUM_HEADERS) {
+        headert_t* entry = &headers->entries[headers->count];
+        entry->key       = h_arena_alloc_string(headers->arena, name);
+        entry->value     = h_arena_alloc_string(headers->arena, value);
+        if (entry->key && entry->value) {
+            headers->count++;
+        }
+    }
 }
 
 void headers_free(Headers* headers) {
-    if (!headers) return;
+    h_arena_reset(headers->arena);
+}
 
-    for (size_t i = 0; i < headers->count; i++) {
-        cstr_free(headers->items[i].name);
-        cstr_free(headers->items[i].value);
+void* h_arena_alloc(header_arena* arena, size_t size) {
+    if (arena->allocated + size >= HEADER_ARENA_CAP) {
+        return NULL;
     }
-    kv_free(headers);
+
+    void* ptr = &arena->memory[arena->allocated];
+    arena->allocated += size;
+    return ptr;
+}
+
+void h_arena_reset(header_arena* arena) {
+    arena->allocated = 0;
+    memset(arena->memory, 0, HEADER_ARENA_CAP);
+}
+
+char* h_arena_alloc_string(header_arena* arena, const char* s) {
+    size_t len = strlen(s);
+    char* ptr  = (char*)h_arena_alloc(arena, len + 1);
+    if (!ptr) return NULL;
+    strcpy(ptr, s);
+    return ptr;
 }
