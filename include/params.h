@@ -33,7 +33,7 @@ typedef struct PathParams {
     size_t match_count;            // Number of matched parameters
 } PathParams;
 
-/*
+/**
 * match_path_parameters compares the pattern with the URL and extracts the parameters.
 * The pattern can contain parameters in the form of {name}. The function extracts the
 * parameter name and value from the URL and stores them in the PathParams struct.
@@ -56,6 +56,10 @@ typedef struct PathParams {
 */
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams);
 
+/**
+* Returns the value of the parameter that matches name.
+* If no such a parameter exists, this function returns NULL.
+*/
 const char* get_path_param(const PathParams* pathParams, const char* name);
 
 #ifdef __cplusplus

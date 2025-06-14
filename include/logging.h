@@ -15,7 +15,11 @@ extern "C" {
 
 #define LOG_ERROR(fmt, ...)                                                                                            \
     fprintf(stderr, "[ERROR]: %s:%d:%s(): " fmt "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__)
+
 #define LOG_INFO(fmt, ...) fprintf(stdout, "[INFO]: %s:%d:%s(): " fmt "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__)
+
+#define LOG_DEBUG(fmt, ...)                                                                                            \
+    fprintf(stderr, "[DEBUG]: %s:%d:%s(): " fmt "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__)
 
 // Log fatal errors and exit the program.
 #define LOG_FATAL(fmt, ...)                                                                                            \

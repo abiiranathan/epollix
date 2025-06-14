@@ -36,8 +36,8 @@ const char* get_route_pattern(Route* route) {
 }
 
 Route* default_route_matcher(HttpMethod method, const char* path) {
-    const Route* current   = routeTable;
-    const Route* const end = routeTable + numRoutes;
+    const Route* current = routeTable;
+    const Route* end     = routeTable + numRoutes;
 
     while (current < end) {
         __builtin_prefetch(current + 4, 0, 1);

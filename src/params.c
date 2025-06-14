@@ -13,66 +13,66 @@
  * @return true if the pattern and URL match, false otherwise
  */
 bool match_path_parameters(const char* pattern, const char* url_path, PathParams* pathParams) {
-    const char* p           = pattern;
-    const char* u           = url_path;
-    size_t idx              = 0;
+    const char* pat         = pattern;
+    const char* url         = url_path;
+    size_t nparams          = 0;
     pathParams->match_count = 0;
 
     // Fast path: exact match when no parameters
-    if (!strchr(p, '{')) {
-        while (*p && *u && *p == *u) {
-            p++;
-            u++;
+    if (!strchr(pat, '{')) {
+        while (*pat && *url && *pat == *url) {
+            pat++;
+            url++;
         }
         // Skip trailing slashes
-        while (*p == '/')
-            p++;
-        while (*u == '/')
-            u++;
-        return (*p == '\0' && *u == '\0');
+        while (*pat == '/')
+            pat++;
+        while (*url == '/')
+            url++;
+        return (*pat == '\0' && *url == '\0');
     }
 
-    while (*p && *u) {
-        if (*p == '{') {
+    while (*pat && *url) {
+        if (*pat == '{') {
             // Bounds check
-            if (idx >= MAX_PARAMS) return false;
-            PathParam* param = &pathParams->params[idx++];
+            if (nparams >= MAX_PARAMS) return false;
+            PathParam* param = &pathParams->params[nparams++];
 
             // Extract parameter name
-            p++;  // Skip '{'
-            const char* name_start = p;
-            while (*p && *p != '}')
-                p++;
-            if (*p != '}') return false;
-            size_t name_len = p - name_start;
+            pat++;  // Skip '{'
+            const char* name_start = pat;
+            while (*pat && *pat != '}')
+                pat++;
+            if (*pat != '}') return false;
+            size_t name_len = pat - name_start;
             if (name_len >= MAX_PARAM_NAME) return false;
             memcpy(param->name, name_start, name_len);
             param->name[name_len] = '\0';
-            p++;  // Skip '}'
+            pat++;  // Skip '}'
 
             // Extract parameter value
-            const char* val_start = u;
-            while (*u && *u != '/' && *u != *p)
-                u++;
-            size_t val_len = u - val_start;
+            const char* val_start = url;
+            while (*url && *url != '/' && *url != *pat)
+                url++;
+            size_t val_len = url - val_start;
             if (val_len >= MAX_PARAM_VALUE) return false;
             memcpy(param->value, val_start, val_len);
             param->value[val_len] = '\0';
         } else {
-            if (*p != *u) return false;
-            p++;
-            u++;
+            if (*pat != *url) return false;
+            pat++;
+            url++;
         }
     }
 
     // Skip trailing slashes
-    while (*p == '/')
-        p++;
-    while (*u == '/')
-        u++;
+    while (*pat == '/')
+        pat++;
+    while (*url == '/')
+        url++;
 
-    pathParams->match_count = idx;
-    return (*p == '\0' && *u == '\0');
+    pathParams->match_count = nparams;
+    return (*pat == '\0' && *url == '\0');
 }
 
 const char* get_path_param(const PathParams* pathParams, const char* name) {

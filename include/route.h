@@ -12,6 +12,7 @@ extern "C" {
 
 // context_t formward declaration
 struct epollix_context;
+
 typedef void (*Middleware)(struct epollix_context* ctx, void (*next)(struct epollix_context* ctx));
 typedef void (*Handler)(struct epollix_context* ctx);
 

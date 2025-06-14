@@ -3,14 +3,20 @@
 
 // test parse request headers
 void test_parse_request_headers(void) {
-    const char* header_text = "Host: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    size_t length           = strlen(header_text);
+    const char* header_text =
+        "Host: localhost:8080\r\nConnection: keep-alive\r\nContent-Length: 100\r\nUser-Agent: curl/7.68.0\r\nAccept: "
+        "*/*\r\n\r\n";
+    size_t length = strlen(header_text);
 
     Headers headers = {};
     header_arena h1 = {};
+    int flags       = 0;
+    size_t cl       = 0;
 
     headers_init(&headers, &h1);
-    parse_request_headers(header_text, length, &headers);
+    parse_request_headers(header_text, length, &headers, &flags, &cl);
+    LOG_ASSERT((flags & KEEPALIVE_REQUESTED) != 0, "Keep-Alive Flag not set");
+    LOG_ASSERT(cl == 100, "Invalid content-length");
 
     const char* host_header = headers_value(&headers, "Host");
     LOG_ASSERT(host_header != NULL, "Failed to get Host header");
@@ -25,6 +31,7 @@ void test_parse_request_headers(void) {
     LOG_ASSERT(strcmp(accept_header, "*/*") == 0, "Expected */*");
 
     headers_free(&headers);
+    printf("parse_request_headers passes!\n");
 }
 
 // decode_uri

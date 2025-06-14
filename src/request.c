@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <immintrin.h>  // AVX intrinsics
 
 Route* notFoundRoute = NULL;  // 404 Route.
 
@@ -18,15 +19,14 @@ extern void http_error(int client_fd, http_status status, const char* message);
 
 // Create a new request object.
 void request_init(Request* req, int client_fd, int epoll_fd, Headers* headers, QueryParams* query_params) {
-    req->client_fd    = client_fd;  // Attch client file descriptor
-    req->epoll_fd     = epoll_fd;   // Attach epoll fd.
-    req->method       = M_INVALID;  // Initialize http method with Invalid.
-    req->query_params = query_params;
-    req->headers      = headers;
-    req->body         = NULL;
-    req->flags        = 0;
-    req->path         = NULL;
-    req->route        = NULL;
+    memset(req, 0, sizeof(Request));  // zero req struct
+
+    // Set defaults
+    req->client_fd    = client_fd;     // Attch client file descriptor
+    req->epoll_fd     = epoll_fd;      // Attach epoll fd.
+    req->method       = M_INVALID;     // Initialize http method with Invalid.
+    req->query_params = query_params;  // Set query parameters
+    req->headers      = headers;       // Set headers
 }
 
 // Get the content type of the request.
@@ -51,22 +51,28 @@ const char* get_query_param(Request* req, const char* name) {
     return headers_value_exact(req->query_params, (void*)name);
 }
 
-bool parse_request_headers(const char* header_text, size_t length, Headers* headers) {
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
+header_error_t parse_request_headers(const char* header_text, size_t length, Headers* headers, int* flags,
+                                     size_t* content_length) {
+    assert(content_length);
+    assert(flags);
+
     const char* ptr = header_text;
     const char* end = ptr + length;
 
-    char name[MAX_HEADER_NAME_LENGTH];    // Buffer to hold header name
-    char value[MAX_HEADER_VALUE_LENGTH];  // Buffer to hold header value
+    char name[MAX_HEADER_NAME_LENGTH];
+    char value[MAX_HEADER_VALUE_LENGTH];
 
     while (ptr < end) {
         // Parse header name
         const char* colon = (const char*)memchr(ptr, ':', end - ptr);
-        if (!colon) break;
+        if (!colon) break;  // we are done.
 
         size_t name_len = colon - ptr;
-        if (name_len + 1 > MAX_HEADER_NAME_LENGTH) {
-            LOG_ERROR("Header name is too long\n");
-            return false;
+        if (unlikely(name_len + 1 > MAX_HEADER_NAME_LENGTH)) {
+            return header_name_toolong;
         }
 
         memcpy(name, ptr, name_len);
@@ -79,20 +85,34 @@ bool parse_request_headers(const char* header_text, size_t length, Headers* head
 
         // Parse header value
         const char* eol = (const char*)memchr(ptr, '\r', end - ptr);
-        if (!eol || eol + 1 >= end || eol[1] != '\n') break;
+        if (unlikely(!eol || eol + 1 >= end || eol[1] != '\n')) break;
 
         size_t value_len = eol - ptr;
-        if (value_len + 1 > MAX_HEADER_VALUE_LENGTH) {
-            LOG_ERROR("Header value is too long");
-            return NULL;
+        if (unlikely(value_len + 1 > MAX_HEADER_VALUE_LENGTH)) {
+            return header_value_toolong;
         }
 
         memcpy(value, ptr, value_len);
         value[value_len] = '\0';  // null-terminate value
         headers_append(headers, name, value);
         ptr = eol + 2;  // Skip CRLF
+
+        // Check for special headers
+        if (strcasecmp(name, "connection") == 0) {
+            if (strcasestr(value, "keep-alive")) {
+                *flags |= KEEPALIVE_REQUESTED;
+            } else if (strcasestr(value, "close")) {
+                *flags &= ~KEEPALIVE_REQUESTED;
+            }
+        } else if (strcasecmp(name, "content-length") == 0) {
+            *content_length = strtoul(value, NULL, 10);
+        } else if (strcasecmp(name, "transfer-encoding") == 0) {
+            if (strcasestr(value, "chunked")) {
+                *flags |= CHUNKED_ENCODING;
+            }
+        }
     }
-    return true;
+    return header_success;
 }
 
 // Parse the request line (first line of the HTTP request)
@@ -114,15 +134,6 @@ static bool parse_request_line(char* headers, char** method, char** uri, char** 
     *header_start += 2;
 
     return true;
-}
-
-// Parse the Content-Length header
-static size_t parse_content_length(const char* header_start, const char* end_of_headers) {
-    const char* content_length_header = strstr(header_start, "Content-Length:");
-    if (!content_length_header || content_length_header >= end_of_headers) {
-        return 0;
-    }
-    return strtoul(content_length_header + 15, NULL, 10);
 }
 
 void parse_url_query_params(char* query, QueryParams* query_params) {
@@ -182,18 +193,6 @@ bool allocate_and_read_body(int client_fd, uint8_t** body, size_t body_size, siz
     return true;
 }
 
-// Handle the case when a route is not found
-bool handle_not_found(Request* req, const char* method, const char* http_version, const char* path) {
-    if (notFoundRoute) {
-        req->route = notFoundRoute;
-        return true;
-    } else {
-        fprintf(stderr, "%s - %s %s 404 Not Found\n", method, http_version, path);
-        http_error(req->client_fd, StatusNotFound, "Not Found\n");
-        return false;
-    }
-}
-
 static bool _404_registered = false;
 Route* route_notfound(Handler h) {
     if (_404_registered) {
@@ -205,69 +204,86 @@ Route* route_notfound(Handler h) {
     return notFoundRoute;
 }
 
-#define SEND_ERR(client_fd, status, msg)                                                                               \
-    http_error((client_fd), (status), (msg));                                                                          \
-    return false
-
-#define BAD_REQ(client_fd, msg)    SEND_ERR(client_fd, StatusBadRequest, msg);
-#define SERVER_ERR(client_fd, msg) SEND_ERR(client_fd, StatusInternalServerError, msg);
-
 static inline char* find_end_of_headers(const char* headers, size_t bytes_read) {
     // Ensure we have at least 4 bytes to check
-    assert(bytes_read >= 4);
-
-    // Scan for \r\n\r\n
-    for (size_t i = 0; i <= bytes_read - 4; i++) {
-        if (headers[i] == '\r' && headers[i + 1] == '\n' && headers[i + 2] == '\r' && headers[i + 3] == '\n') {
-            return (char*)&headers[i];
-        }
+    if (bytes_read < 4) {
+        return NULL;
     }
+
+    const char* ptr = headers;
+    const char* end = headers + bytes_read - 3;  // -3 because we need 4 bytes for \r\n\r\n
+
+    // AVX2 vectors for pattern matching
+    const __m256i cr_vec = _mm256_set1_epi8('\r');
+
+    // Process 32-byte chunks with AVX2
+    while (ptr + 32 <= end) {
+        __m256i chunk = _mm256_loadu_si256((const __m256i*)ptr);
+
+        // Find all CR positions
+        __m256i cr_cmp   = _mm256_cmpeq_epi8(chunk, cr_vec);
+        unsigned cr_mask = _mm256_movemask_epi8(cr_cmp);
+
+        // Check each CR position for potential \r\n\r\n pattern
+        while (cr_mask != 0) {
+            unsigned cr_idx    = __builtin_ctz(cr_mask);
+            const char* cr_pos = ptr + cr_idx;
+
+            // Check if we have enough bytes remaining for \r\n\r\n
+            if (cr_pos + 3 < headers + bytes_read) {
+                // Check for exact pattern \r\n\r\n
+                if (cr_pos[0] == '\r' && cr_pos[1] == '\n' && cr_pos[2] == '\r' && cr_pos[3] == '\n') {
+                    return (char*)cr_pos;
+                }
+            }
+
+            // Clear this bit and continue
+            cr_mask &= ~(1u << cr_idx);
+        }
+
+        ptr += 32;
+    }
+
+    // Handle remaining bytes with scalar search
+    while (ptr <= end) {
+        if (ptr[0] == '\r' && ptr[1] == '\n' && ptr[2] == '\r' && ptr[3] == '\n') {
+            return (char*)ptr;
+        }
+        ptr++;
+    }
+
     return NULL;
 }
 
-bool parse_http_request(Request* req) {
-    int client_fd          = req->client_fd;
-    uint8_t* body          = NULL;       // Request body (dynamically allocated)
-    size_t total_read      = 0;          // Total bytes read
-    HttpMethod httpMethod  = M_INVALID;  // Http method
-    size_t header_capacity = 0;          // Size of the headers in the buffer (including the initial read)
-    size_t body_size       = 0;          // Size of the request body (from the Content-Length header)
+parse_result parse_http_request(Request* req) {
+    int client_fd                          = req->client_fd;
+    uint8_t* body                          = NULL;  // Request body (dynamically allocated)
+    size_t total_read                      = 0;     // Total bytes read
+    size_t header_capacity                 = 0;     // Size of the headers in the buffer (including the initial read)
+    static __thread char fist_buffer[4096] = {0};   // Headers + (possibly body)
 
-    static __thread char headers[4096] = {0};
-    ssize_t bytes_read                 = recv(client_fd, headers, sizeof(headers) - 1, MSG_WAITALL);
+    ssize_t bytes_read = recv(client_fd, fist_buffer, sizeof(fist_buffer) - 1, MSG_WAITALL);
     if (bytes_read <= 0) {
-        BAD_REQ(client_fd, "Error receiving data from client socket");
-    }
-    headers[bytes_read] = '\0';
-
-    // Check for keep-alive.
-    if (strstr(headers, "Connection: keep-alive")) {
-        req->flags |= KEEPALIVE_REQUESTED;
+        return (parse_result){StatusBadRequest, "Unexpected closure of client socket"};
     }
 
-    if (strstr(headers, "Connection: close")) {
-        req->flags |= CONNECTION_CLOSE_REQUESTED;
-    }
+    // null-terminate header data.
+    fist_buffer[bytes_read] = '\0';
 
-    char *method, *uri, *http_version, *header_start, *end_of_headers;
-    if (!parse_request_line(headers, &method, &uri, &http_version, &header_start)) {
-        BAD_REQ(client_fd, ERR_INVALID_STATUS_LINE);
-    }
-
-    httpMethod = method_fromstring(method);
-    if (httpMethod == M_INVALID) {
-        BAD_REQ(client_fd, ERR_INVALID_STATUS_LINE);
-    }
-
-    // memmem is rather slow.
-    // end_of_headers = (char*)memmem(headers, bytes_read, "\r\n\r\n", 4);
-    end_of_headers = find_end_of_headers(headers, bytes_read);
+    char* end_of_headers = find_end_of_headers(fist_buffer, bytes_read);
     if (!end_of_headers) {
-        BAD_REQ(client_fd, "Invalid Http Payload: failed to read header delimiter");
+        return (parse_result){StatusBadRequest, "Invalid header termination"};
     }
 
-    header_capacity = end_of_headers - headers + 4;
-    body_size       = parse_content_length(header_start, end_of_headers);
+    char *method = NULL, *uri = NULL, *http_version = NULL, *header_start = NULL;
+    if (!parse_request_line(fist_buffer, &method, &uri, &http_version, &header_start)) {
+        return (parse_result){StatusBadRequest, "Invalid http status line"};
+    }
+
+    req->method = method_fromstring(method);
+    if (req->method == M_INVALID) {
+        return (parse_result){StatusBadRequest, "Unsupported http method"};
+    }
 
     // Decode the URL with percent_decoding if needed
     static __thread char decoded[1024];
@@ -283,11 +299,8 @@ bool parse_http_request(Request* req) {
     char* query_string = strchr(decoded_uri, '?');
     if (query_string) {
         *query_string = '\0';  // Terminate path at question mark
-        query_string++;        // Now points to query string
-
-        // Only parse query params if there's actually content after the ?
+        query_string++;        // Now points to query string portion
         if (*query_string != '\0' && strstr(query_string, "=")) {
-            // Parse ONLY the query string portion
             parse_url_query_params(query_string, req->query_params);
         }
     }
@@ -295,31 +308,34 @@ bool parse_http_request(Request* req) {
     // Store the path (already terminated at '?' if there was one)
     req->path = cstr_new(decoded_uri);
     if (!req->path) {
-        return false;
+        return (parse_result){StatusInternalServerError, "Error allocating memory for path"};
     }
 
-    if (!parse_request_headers(header_start, header_capacity - 4, req->headers)) {
-        SERVER_ERR(client_fd, "Failed to parse request headers");
+    header_error_t code;
+    code = parse_request_headers(header_start, header_capacity - 4, req->headers, &req->flags, &req->content_length);
+    if (code != header_success) {
+        return (parse_result){StatusInternalServerError, header_error_string(code)};
     }
 
-    req->route = default_route_matcher(httpMethod, cstr_data(req->path));
-    if (req->route == NULL && !handle_not_found(req, method, http_version, cstr_data(req->path))) {
-        return false;
+    req->route = default_route_matcher(req->method, cstr_data(req->path));
+    if (req->route == NULL && notFoundRoute != NULL) req->route = notFoundRoute;
+    if (req->route == NULL) {
+        return (parse_result){StatusNotFound, "Not Found"};
     }
 
-    total_read = bytes_read - header_capacity;
-    if (!is_safe_method(httpMethod) && body_size > 0) {
-        if (!allocate_and_read_body(client_fd, &body, body_size, total_read, headers + header_capacity)) {
-            SERVER_ERR(client_fd, "Failed to read request body");
+    // Compute header capacity including \r\n\r\n
+    header_capacity = end_of_headers - fist_buffer + 4;
+    total_read      = bytes_read - header_capacity;
+
+    bool has_body = !is_safe_method(req->method) && req->content_length > 0;
+    if (has_body) {
+        if (!allocate_and_read_body(client_fd, &body, req->content_length, total_read, fist_buffer + header_capacity)) {
+            return (parse_result){StatusInternalServerError, "Error allocating memory for body"};
         }
     }
 
-    req->body           = body;        // set request body
-    req->content_length = body_size;   // set content length
-    req->method         = httpMethod;  // set request method
-    // copy http_version
-    strncpy(req->http_version, http_version, sizeof(req->http_version) - 1);
-    req->http_version[sizeof(req->http_version) - 1] = '\0';
+    req->body = body;  // set request body
+    strlcpy(req->http_version, http_version, sizeof(req->http_version));
 
-    return true;
+    return (parse_result){StatusOK, NULL};
 }

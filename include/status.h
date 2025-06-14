@@ -76,7 +76,17 @@ typedef enum : uint16_t {
     StatusNetworkAuthenticationRequired = 511
 } http_status;
 
-const char* http_status_text(http_status code);
+// http_status_text returns a text for the HTTP status code. It returns the empty
+// string if the code is unknown.
+// https://go.dev/src/net/http/status.go
+
+extern const char* status_texts[];  // Array of status texts to codes
+static inline const char* http_status_text(http_status code) {
+    if (code >= StatusContinue && code <= StatusNetworkAuthenticationRequired) {
+        return status_texts[code];
+    }
+    return "";  // Return empty string for unknown codes
+}
 
 #ifdef __cplusplus
 }

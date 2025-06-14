@@ -2,7 +2,7 @@
 #include <stddef.h>
 
 // Array of status text strings
-static const char* status_texts[] = {
+const char* status_texts[] = {
     [StatusContinue]                      = "Continue",
     [StatusSwitchingProtocols]            = "Switching Protocols",
     [StatusProcessing]                    = "Processing",
@@ -66,13 +66,3 @@ static const char* status_texts[] = {
     [StatusNotExtended]                   = "Not Extended",
     [StatusNetworkAuthenticationRequired] = "Network Authentication Required",
 };
-
-// http_status_text returns a text for the HTTP status code. It returns the empty
-// string if the code is unknown.
-// https://go.dev/src/net/http/status.go
-const char* http_status_text(http_status code) {
-    if (code >= StatusContinue && code <= StatusNetworkAuthenticationRequired) {
-        return status_texts[code];
-    }
-    return "";  // Return empty string for unknown codes
-}

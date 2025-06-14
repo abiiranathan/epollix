@@ -143,12 +143,11 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                         goto cleanup;
                     }
 
-                    memset(key, 0, MAX_FIELD_NAME_SIZE);
-                    strncpy(key, key_start, key_length);
-                    key[key_length] = '\0';
+                    strlcpy(key, key_start, key_length);
 
                     if (strncmp(ptr, "\"; filename=\"", 13) == 0) {
-                        strncpy(header.field_name, key, MAX_FIELD_NAME_SIZE);
+                        strlcpy(header.field_name, key, MAX_FIELD_NAME_SIZE);
+
                         ptr = sstrstr(ptr, "\"; filename=\"", size - (ptr - data));
                         if (!ptr) {
                             code = INVALID_FORM_BOUNDARY;
@@ -183,9 +182,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                         goto cleanup;
                     }
 
-                    memset(value, 0, MAX_VALUE_SIZE);
-                    strncpy(value, value_start, value_length);
-                    value[value_length] = '\0';
+                    strlcpy(value, value_start, value_length);
 
                     // Check if we have enough capacity for fields
                     if (form->num_fields >= INITIAL_FIELD_CAPACITY) {
@@ -197,13 +194,10 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                     }
 
                     FormField field = {0};
-                    strncpy(field.name, key, MAX_FIELD_NAME_SIZE);
-                    strncpy(field.value, value, MAX_VALUE_SIZE);
-                    form->fields[form->num_fields++] = field;
+                    strlcpy(field.name, key, MAX_FIELD_NAME_SIZE);
+                    strlcpy(field.value, value, MAX_VALUE_SIZE);
 
-                    // reset the key and value
-                    memset(key, 0, MAX_FIELD_NAME_SIZE);
-                    memset(value, 0, MAX_VALUE_SIZE);
+                    form->fields[form->num_fields++] = field;
 
                     while (*ptr == '\r' || *ptr == '\n')
                         ptr++;  // Skip CRLF characters
@@ -222,12 +216,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                         goto cleanup;
                     }
 
-                    memset(filename, 0, MAX_FILENAME_SIZE);
-                    strncpy(filename, key_start, filename_length);
-                    filename[filename_length] = '\0';
-
-                    // copy into current header
-                    strncpy(header.filename, filename, MAX_FILENAME_SIZE);
+                    strlcpy(filename, key_start, filename_length);
+                    strlcpy(header.filename, filename, MAX_FILENAME_SIZE);
 
                     // Move to the end of the line
                     while (*ptr != '\n')
@@ -274,12 +264,8 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 }
 
                 // Copy the mimetype into the allocated memory
-                memset(mimetype, 0, MAX_MIMETYPE_SIZE);
-                strncpy(mimetype, value_start, mimetype_len);
-                mimetype[mimetype_len] = '\0';
-
-                // Copy the mimetype into the current header
-                strncpy(header.mimetype, mimetype, MAX_MIMETYPE_SIZE);
+                strlcpy(mimetype, value_start, mimetype_len);
+                strlcpy(header.mimetype, mimetype, MAX_MIMETYPE_SIZE);
 
                 // Move to the end of the line
                 while (*ptr != '\n')
@@ -339,7 +325,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
                 header.size = file_size;
 
                 // set the header field name
-                strncpy(header.field_name, key, MAX_FIELD_NAME_SIZE);
+                strlcpy(header.field_name, key, MAX_FIELD_NAME_SIZE);
 
                 // Check if we have enough capacity for files
                 if (form->num_files >= INITIAL_FILE_CAPACITY) {
@@ -368,9 +354,7 @@ MultipartCode multipart_parse_form(const char* data, size_t size, char* boundary
 
             } break;
             default:
-                // This is unreachable but just in case, we don't want an infinite-loop
-                // Crash and burn!!
-                LOG_FATAL("default: unreachable state\n");
+                unreachable();
         }
     }
 

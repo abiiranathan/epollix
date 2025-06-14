@@ -8,12 +8,6 @@
 #define MAXEVENTS 1024
 #endif
 
-// Determines the buffer size to read from the socket initially.
-// to extract the request headers.
-#ifndef READ_BUFFER_SIZE
-#define READ_BUFFER_SIZE 1024
-#endif
-
 // Idle timeout for a connection.
 #ifndef IDLE_TIMEOUT
 #define IDLE_TIMEOUT 5
@@ -55,28 +49,18 @@
 #define ROUTE_ARENA_MEM (1 << 20)
 #endif
 
-// Per-request arena memory size.
-#ifndef PER_REQUEST_ARENA_MEM
-#define PER_REQUEST_ARENA_MEM ((size_t)8192 * 2)
-#endif
-
 #ifndef MAX_HEADER_NAME_LENGTH
 #define MAX_HEADER_NAME_LENGTH (size_t)64
 #endif
 
 #ifndef MAX_HEADER_VALUE_LENGTH
-#define MAX_HEADER_VALUE_LENGTH (size_t)1024
+#define MAX_HEADER_VALUE_LENGTH (size_t)2048
 #endif
 
 // Macro to silence unused variable errors.
 #define UNUSED(var) ((void)(var))
 
-#define ERR_MEMORY_ALLOC_FAILED   "Memory allocation failed\n"
-#define ERR_TOO_MANY_HEADERS      "Too many headers\n"
-#define ERR_REQUEST_BODY_TOO_LONG "Request body too long\n"
-#define ERR_INVALID_STATUS_LINE   "Invalid http status line\n"
-#define ERR_METHOD_NOT_ALLOWED    "Method not allowed\n"
-#define CONTENT_TYPE_HEADER       "Content-Type"
+#define CONTENT_TYPE_HEADER "Content-Type"
 
 #ifndef TCP_NODELAY_ON
 #define TCP_NODELAY_ON 1

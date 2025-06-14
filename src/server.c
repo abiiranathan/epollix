@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <sys/poll.h>
 #include <netdb.h>
-#include <netinet/tcp.h>  // TCP_NODELAY, TCP_CORK
+#include <netinet/tcp.h>
 #include <solidc/thread.h>
 #include <solidc/threadpool.h>
 #include <sys/epoll.h>
@@ -42,6 +42,7 @@ static void install_signal_handler(void) {
     signal(SIGPIPE, SIG_IGN);
 }
 
+// Helper function to make sure that all data is sent.
 ssize_t sendall(int fd, const void* buf, size_t n) {
     size_t sent      = 0;
     size_t remaining = n;
@@ -79,71 +80,35 @@ ssize_t sendall(int fd, const void* buf, size_t n) {
     return (ssize_t)sent;
 }
 
+#define MAX_ERROR_BUF 512
+
 // Sends an error message to the client before the request is parsed.
 void http_error(int client_fd, http_status status, const char* message) {
-    char reply[1024];
-    const char* status_str = http_status_text(status);
-    const char* fmt        = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
+    const char* status_text = http_status_text(status);
+    const char* status_line = "HTTP/1.1 %u %s\r\nContent-Type: text/html\r\nContent-Length: %zu\r\n\r\n%s\r\n";
 
     // 20 is a safe margin for status and other formatting
-    size_t max_message_length = sizeof(reply) - strlen(fmt) - 20;
-    size_t message_length     = strlen(message);
+    size_t maxlen = MAX_ERROR_BUF - strlen(status_line) - 20;
+    size_t len    = strlen(message);
 
-    if (message_length >= max_message_length) {
-        // use asprintf to allocate memory for the message if it's too long
+    // use asprintf to allocate memory for the message if it's too long
+    if (len >= maxlen) {
         char* msg = NULL;
-        int ret   = asprintf(&msg, fmt, status, status_str, message_length, message);
-        if (ret < 0) {
-            LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
-            return;
-        }
-
+        int ret   = asprintf(&msg, status_line, status, status_text, len, message);
+        LOG_ASSERT(ret != -1 && msg, "asprintf memory allocation failed");
         sendall(client_fd, msg, strlen(msg));
         free(msg);
-        return;
+    } else {
+        static __thread char reply[MAX_ERROR_BUF] = {};
+        snprintf(reply, sizeof(reply), status_line, status, status_text, len, message);
+        sendall(client_fd, reply, strlen(reply));
     }
-
-    int ret = snprintf(reply, sizeof(reply), fmt, status, status_str, message_length, message);
-    if (ret < 0 || (size_t)ret >= sizeof(reply)) {
-        LOG_ERROR(ERR_MEMORY_ALLOC_FAILED);
-        return;
-    }
-
-    sendall(client_fd, reply, strlen(reply));
 }
 
 // Delete client socket from epoll tracking and close the client socket.
 static inline void close_connection(int client_fd, int epoll_fd) {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
-}
-
-// Connection handler thread worker.
-static void handle_client(int client_fd, int epoll_fd) {
-    Request req             = {};
-    Response res            = {};
-    header_arena h1         = {};
-    header_arena h2         = {};
-    Headers headers         = {};
-    QueryParams queryParams = {};
-
-    headers_init(&headers, &h1);
-    headers_init(&queryParams, &h2);
-    request_init(&req, client_fd, epoll_fd, &headers, &queryParams);
-    response_init(&res, client_fd);
-
-    if (!parse_http_request(&req)) {
-        goto cleanup;
-    };
-
-    if (req.route != NULL) {
-        context_t ctx = {.request = &req, .response = &res, .abort = false};
-        process_response(&ctx);
-        free_locals(&ctx);
-        close_connection(client_fd, epoll_fd);
-    }
-cleanup:
-    request_destroy(&req);
 }
 
 static int setup_server_socket(uint16_t port) {
@@ -216,7 +181,7 @@ static int epoll_server_new(const uint16_t port) {
     return server_fd;
 }
 
-static void configure_client(int client_fd) {
+static inline void configure_client(int client_fd) {
     // Disable Nagle's algorithm for the client socket
     if (TCP_NODELAY_ON) {
         int flag = 1;
@@ -236,11 +201,41 @@ static void configure_client(int client_fd) {
     }
 }
 
+typedef struct {
+    Request request;
+    Response response;
+    header_arena headers_arena, query_arena;
+    Headers headers;
+    QueryParams query_params;
+} Connection;
+
+// Connection handler thread worker.
+static void handle_client(int client_fd, int epoll_fd) {
+    static thread_local Connection conn = {};
+
+    headers_init(&conn.headers, &conn.headers_arena);
+    headers_init(&conn.query_params, &conn.query_arena);
+
+    request_init(&conn.request, client_fd, epoll_fd, &conn.headers, &conn.query_params);
+    response_init(&conn.response, client_fd);
+
+    parse_result result = parse_http_request(&conn.request);
+    if (likely(result.status == StatusOK && conn.request.route != NULL)) {
+        context_t ctx = {.request = &conn.request, .response = &conn.response, .abort = false};
+        write_header(&ctx, "Connection", "close");
+        process_response(&ctx);
+        free_locals(&ctx);
+    } else {
+        http_error(client_fd, result.status, result.error_msg);
+    }
+
+    close_connection(client_fd, epoll_fd);
+    request_destroy(&conn.request);
+}
+
 static void* worker_thread(void* arg) {
     WorkerData* data = (WorkerData*)arg;
     struct epoll_event events[MAXEVENTS];
-
-    printf("Starting worker %d\n", data->id);
 
     while (1) {
         int nfds = epoll_wait(data->epoll_fd, events, MAXEVENTS, -1);

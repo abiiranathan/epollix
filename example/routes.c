@@ -96,15 +96,9 @@ void handle_create_user(context_t* ctx) {
     unsigned long expiry             = (unsigned long)(time(NULL) + expiry_hours_in_ms);
     const char* sub                  = username;
 
-    JWTPayload payload = {0};
-
-    // segfaults if the string is null.
-    strncpy(payload.sub, sub, sizeof(payload.sub) - 1);
-    payload.sub[sizeof(payload.sub) - 1] = '\0';
-
-    payload.exp = expiry;
-    strncpy(payload.data, email, sizeof(payload.data) - 1);
-    payload.data[sizeof(payload.data) - 1] = '\0';
+    JWTPayload payload = {.exp = expiry};
+    strlcpy(payload.sub, sub, sizeof(payload.sub));
+    strlcpy(payload.data, email, sizeof(payload.data));
 
     const char* secret = getenv(JWT_TOKEN_SECRET);
     if (secret == NULL) {
